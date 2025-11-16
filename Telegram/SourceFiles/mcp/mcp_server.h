@@ -15,8 +15,19 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QTextStream>
 #include <QtNetwork/QTcpServer>
+#include <QtSql/QSqlDatabase>
 
 namespace MCP {
+
+// Forward declarations
+class ChatArchiver;
+class EphemeralArchiver;
+class Analytics;
+class SemanticSearch;
+class BatchOperations;
+class MessageScheduler;
+class AuditLogger;
+class RBAC;
 
 // MCP Protocol types
 enum class TransportType {
@@ -90,13 +101,66 @@ private:
 	QJsonObject handleListPrompts(const QJsonObject &params);
 	QJsonObject handleGetPrompt(const QJsonObject &params);
 
-	// Tool implementations
+	// Core tool implementations (original 6)
 	QJsonObject toolListChats(const QJsonObject &args);
 	QJsonObject toolGetChatInfo(const QJsonObject &args);
 	QJsonObject toolReadMessages(const QJsonObject &args);
 	QJsonObject toolSendMessage(const QJsonObject &args);
 	QJsonObject toolSearchMessages(const QJsonObject &args);
 	QJsonObject toolGetUserInfo(const QJsonObject &args);
+
+	// Archive tools (7 tools)
+	QJsonObject toolArchiveChat(const QJsonObject &args);
+	QJsonObject toolExportChat(const QJsonObject &args);
+	QJsonObject toolListArchivedChats(const QJsonObject &args);
+	QJsonObject toolGetArchiveStats(const QJsonObject &args);
+	QJsonObject toolGetEphemeralMessages(const QJsonObject &args);
+	QJsonObject toolSearchArchive(const QJsonObject &args);
+	QJsonObject toolPurgeArchive(const QJsonObject &args);
+
+	// Analytics tools (8 tools)
+	QJsonObject toolGetMessageStats(const QJsonObject &args);
+	QJsonObject toolGetUserActivity(const QJsonObject &args);
+	QJsonObject toolGetChatActivity(const QJsonObject &args);
+	QJsonObject toolGetTimeSeries(const QJsonObject &args);
+	QJsonObject toolGetTopUsers(const QJsonObject &args);
+	QJsonObject toolGetTopWords(const QJsonObject &args);
+	QJsonObject toolExportAnalytics(const QJsonObject &args);
+	QJsonObject toolGetTrends(const QJsonObject &args);
+
+	// Semantic search tools (5 tools)
+	QJsonObject toolSemanticSearch(const QJsonObject &args);
+	QJsonObject toolIndexMessages(const QJsonObject &args);
+	QJsonObject toolDetectTopics(const QJsonObject &args);
+	QJsonObject toolClassifyIntent(const QJsonObject &args);
+	QJsonObject toolExtractEntities(const QJsonObject &args);
+
+	// Message operations (6 tools)
+	QJsonObject toolEditMessage(const QJsonObject &args);
+	QJsonObject toolDeleteMessage(const QJsonObject &args);
+	QJsonObject toolForwardMessage(const QJsonObject &args);
+	QJsonObject toolPinMessage(const QJsonObject &args);
+	QJsonObject toolUnpinMessage(const QJsonObject &args);
+	QJsonObject toolAddReaction(const QJsonObject &args);
+
+	// Batch operations (5 tools)
+	QJsonObject toolBatchSend(const QJsonObject &args);
+	QJsonObject toolBatchDelete(const QJsonObject &args);
+	QJsonObject toolBatchForward(const QJsonObject &args);
+	QJsonObject toolBatchPin(const QJsonObject &args);
+	QJsonObject toolBatchReaction(const QJsonObject &args);
+
+	// Scheduler tools (4 tools)
+	QJsonObject toolScheduleMessage(const QJsonObject &args);
+	QJsonObject toolCancelScheduled(const QJsonObject &args);
+	QJsonObject toolListScheduled(const QJsonObject &args);
+	QJsonObject toolUpdateScheduled(const QJsonObject &args);
+
+	// System tools (4 tools)
+	QJsonObject toolGetCacheStats(const QJsonObject &args);
+	QJsonObject toolGetServerInfo(const QJsonObject &args);
+	QJsonObject toolGetAuditLog(const QJsonObject &args);
+	QJsonObject toolHealthCheck(const QJsonObject &args);
 
 	// Stdio transport
 	void startStdioTransport();
@@ -132,8 +196,20 @@ private:
 	QTextStream *_stdout = nullptr;
 	QTcpServer *_httpServer = nullptr;
 
+	// Feature components
+	QSqlDatabase _db;
+	ChatArchiver *_archiver = nullptr;
+	EphemeralArchiver *_ephemeralArchiver = nullptr;
+	Analytics *_analytics = nullptr;
+	SemanticSearch *_semanticSearch = nullptr;
+	BatchOperations *_batchOps = nullptr;
+	MessageScheduler *_scheduler = nullptr;
+	AuditLogger *_auditLogger = nullptr;
+	RBAC *_rbac = nullptr;
+
 	// State
 	bool _initialized = false;
+	QString _databasePath;
 };
 
 } // namespace MCP
