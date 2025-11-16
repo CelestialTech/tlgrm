@@ -1,0 +1,43 @@
+# Development Environment Configuration
+
+[telegram]
+token_env_var = "TELEGRAM_BOT_TOKEN"
+allowed_chats = []
+allowed_users = []
+
+[mcp]
+server_name = "Telegram MCP Server (DEV)"
+server_version = "0.1.0-dev"
+transport = "stdio"
+port = 8000
+log_level = "DEBUG"  # Verbose logging in dev
+
+[cache]
+max_messages = 10  # Smaller cache for development
+ttl_seconds = 60   # Shorter TTL for testing
+use_sqlite = false
+db_path = "telegram_cache_dev.db"
+
+[limits]
+default_message_limit = 10
+max_message_limit = 50  # Lower limits for dev
+
+[features]
+# Feature flags for development
+enable_ai_features = true
+enable_translation = true
+enable_sentiment = true
+enable_webhooks = true
+enable_voice_info = true
+
+[monitoring]
+enable_metrics = true
+metrics_port = 9090
+enable_prometheus = true
+enable_health_check = true
+
+[retry]
+max_retries = 3
+initial_backoff = 1.0
+max_backoff = 30.0
+backoff_multiplier = 2.0

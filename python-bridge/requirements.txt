@@ -1,0 +1,41 @@
+# MCP SDK
+mcp>=1.0.0
+
+# Telegram integration (MTProto - full client access, not just Bot API)
+pyrogram>=2.0.0
+tgcrypto>=1.2.5  # Speeds up Pyrogram encryption (optional but recommended)
+
+# Configuration
+python-dotenv>=1.0.0
+toml>=0.10.2
+
+# Logging
+structlog>=23.0.0
+rich>=13.0.0
+
+# Async utilities
+aiofiles>=23.0.0
+
+# Caching & Data Storage
+redis>=5.0.0  # Redis async client for distributed caching
+
+# Database
+asyncpg>=0.29.0  # PostgreSQL async driver
+
+# Web Framework (for debug dashboard)
+fastapi>=0.104.0  # Web framework for debug dashboard
+uvicorn[standard]>=0.24.0  # ASGI server
+websockets>=12.0  # WebSocket support for real-time updates
+
+# Development Tools
+watchdog>=3.0.0  # File system monitoring for hot reload
+
+# Development dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+ruff>=0.1.0
+mypy>=1.7.0
+pre-commit>=3.5.0
+safety>=2.3.0
+bandit>=1.7.0

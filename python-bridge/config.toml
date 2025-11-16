@@ -1,0 +1,77 @@
+# Telegram MCP Server Configuration
+
+[telegram]
+# Environment variable names for API credentials (from https://my.telegram.org)
+api_id_env_var = "TELEGRAM_API_ID"
+api_hash_env_var = "TELEGRAM_API_HASH"
+
+# Optional: bot token for bot mode (leave empty for user mode)
+bot_token_env_var = "TELEGRAM_BOT_TOKEN"
+
+# Session name for Pyrogram (creates {session_name}.session file)
+session_name = "telegram_mcp"
+
+# Whitelist of allowed chat IDs (empty = all chats allowed)
+# Format: ["-1001234567890", "987654321"]
+allowed_chats = []
+
+# Whitelist of allowed user IDs (empty = all users allowed)
+allowed_users = []
+
+[mcp]
+# Server name shown to AI clients
+server_name = "Telegram MCP Server"
+
+# Server version
+server_version = "0.1.0"
+
+# Transport type: "stdio" or "sse"
+transport = "stdio"
+
+# Port for HTTP/SSE transport (ignored for stdio)
+port = 8000
+
+# Log level: "DEBUG", "INFO", "WARNING", "ERROR"
+log_level = "INFO"
+
+[cache]
+# Maximum number of messages to cache per chat
+max_messages = 50
+
+# Cache TTL in seconds (0 = no expiration)
+ttl_seconds = 300
+
+# Use SQLite for persistent cache (false = in-memory only)
+use_sqlite = false
+
+# SQLite database path (if use_sqlite = true)
+db_path = "telegram_cache.db"
+
+[limits]
+# Default message limit for read_messages tool
+default_message_limit = 20
+
+# Maximum message limit allowed
+max_message_limit = 100
+
+[features]
+# Feature flags for enabling/disabling functionality
+enable_ai_features = true
+enable_translation = true
+enable_sentiment = true
+enable_webhooks = false
+enable_voice_info = true
+
+[monitoring]
+# Performance monitoring and health checks
+enable_metrics = true
+metrics_port = 9090
+enable_prometheus = true
+enable_health_check = true
+
+[retry]
+# Retry configuration for Telegram API calls
+max_retries = 3
+initial_backoff = 1.0
+max_backoff = 30.0
+backoff_multiplier = 2.0
