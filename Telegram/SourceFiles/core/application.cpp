@@ -82,6 +82,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
+#include "mcp/mcp_server.h"
 #include "boxes/abstract_box.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
@@ -213,6 +214,9 @@ void Application::closeAdditionalWindows() {
 }
 
 Application::~Application() {
+	// Stop MCP server before other cleanup
+	_mcpServer = nullptr;
+
 	if (_saveSettingsTimer && _saveSettingsTimer->isActive()) {
 		Local::writeSettings();
 	}
@@ -414,6 +418,18 @@ void Application::run() {
 		countries->lifetime().add([=] {
 			[[maybe_unused]] const auto countriesCopy = countries;
 		});
+	}
+
+	// Start MCP server if --mcp flag is present
+	const auto args = QCoreApplication::arguments();
+	if (args.contains(u"--mcp"_q)) {
+		_mcpServer = std::make_unique<MCP::Server>();
+		if (_mcpServer->start(MCP::TransportType::Stdio)) {
+			DEBUG_LOG(("MCP: Server started successfully"));
+		} else {
+			LOG(("MCP Error: Failed to start server"));
+			_mcpServer = nullptr;
+		}
 	}
 
 	processCreatedWindow(_lastActivePrimaryWindow);
