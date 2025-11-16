@@ -1,0 +1,182 @@
+# ===================================
+# Telegram Desktop (tdesktop) Build Artifacts
+# ===================================
+
+# Build output directories
+tdesktop/out/
+tdesktop/cmake/
+build/
+out/
+
+# Xcode generated files
+*.xcodeproj
+*.xcworkspace
+*.pbxproj
+xcuserdata/
+DerivedData/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.cmake
+!tdesktop/cmake/*.cmake
+!CMakeLists.txt
+
+# Build logs
+*.log
+*.o
+*.d
+*.dia
+*.a
+*.dylib
+*.so
+
+# Libraries (built dependencies - should be rebuilt)
+Libraries/*/
+!Libraries/README.md
+
+# Qt MOC/UIC/RCC generated files
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+
+# macOS specific
+.DS_Store
+*.swp
+*.swo
+*~
+
+# ===================================
+# Python Bridge
+# ===================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+virtualenv/
+
+# Python testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ===================================
+# Environment and Secrets
+# ===================================
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Telegram API credentials
+telegram_credentials.txt
+api_keys.txt
+
+# ===================================
+# IDE and Editor Files
+# ===================================
+
+# VSCode
+.vscode/
+!.vscode/settings.json.example
+!.vscode/launch.json.example
+
+# Claude Code
+.claude/
+.cursor/
+
+# PyCharm
+.idea/
+
+# Vim
+*.swp
+*.swo
+*.swn
+
+# Emacs
+*~
+\#*\#
+
+# ===================================
+# Temporary and Cache Files
+# ===================================
+
+# General temp files
+*.tmp
+*.temp
+*.cache
+
+# Thumbnail cache
+Thumbs.db
+
+# ===================================
+# Nested Git Repos (Important!)
+# ===================================
+
+# Ignore the nested tdesktop git repo
+tdesktop/.git/
+
+# Keep patches directory for updates
+!tdesktop/patches/
+
+# ===================================
+# MCP Specific
+# ===================================
+
+# MCP server logs
+mcp_server.log
+telegram_mcp.log
+
+# SQLite databases (cache)
+*.db
+*.sqlite
+*.sqlite3
+
+# Test files
+test_output/
+test_results/
+
+# ===================================
+# Documentation Build
+# ===================================
+
+# Sphinx
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# ===================================
+# Third Party
+# ===================================
+
+ThirdParty/*/
+!ThirdParty/README.md
