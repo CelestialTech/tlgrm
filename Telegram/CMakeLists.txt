@@ -1213,12 +1213,20 @@ PRIVATE
     mcp/mcp_server.h
     mcp/chat_archiver.cpp
     mcp/chat_archiver.h
+    mcp/analytics.cpp
     mcp/analytics.h
+    mcp/semantic_search.cpp
     mcp/semantic_search.h
+    mcp/batch_operations.cpp
     mcp/batch_operations.h
+    mcp/message_scheduler.cpp
     mcp/message_scheduler.h
+    mcp/audit_logger.cpp
     mcp/audit_logger.h
+    mcp/rbac.cpp
     mcp/rbac.h
+    mcp/voice_transcription.cpp
+    mcp/voice_transcription.h
     media/audio/media_audio.cpp
     media/audio/media_audio.h
     media/audio/media_audio_capture.cpp
