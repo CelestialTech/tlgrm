@@ -1,0 +1,6 @@
+# Add these lines to CMakeLists.txt after the main/ section (around line 1210)
+
+    mcp/mcp_bridge.cpp
+    mcp/mcp_bridge.h
+    mcp/mcp_server.cpp
+    mcp/mcp_server.h

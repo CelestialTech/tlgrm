@@ -1207,6 +1207,10 @@ PRIVATE
     main/session/send_as_peers.h
     main/session/session_show.cpp
     main/session/session_show.h
+    mcp/mcp_bridge.cpp
+    mcp/mcp_bridge.h
+    mcp/mcp_server.cpp
+    mcp/mcp_server.h
     media/audio/media_audio.cpp
     media/audio/media_audio.h
     media/audio/media_audio_capture.cpp
