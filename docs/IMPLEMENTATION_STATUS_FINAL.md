@@ -143,14 +143,13 @@
 **Implemented Functions**:
 - `transcribe()` - Main transcription function
 - `transcribeWithOpenAI()` - OpenAI Whisper API
-- `transcribeWithWhisperCpp()` - Local whisper.cpp
-- `transcribeWithPython()` - Python subprocess (faster-whisper)
+- `transcribeWithWhisperCpp()` - Local whisper.cpp (C++ native)
 - `storeTranscription()` - Database storage
 - `getStoredTranscription()` / `hasTranscription()`
 - `getStats()` - Transcription statistics
 
 **Features**:
-- 3 provider options (OpenAI API, whisper.cpp, Python)
+- 2 provider options (OpenAI API, whisper.cpp native C++)
 - 5 model sizes (tiny to large)
 - Language auto-detection
 - Confidence scoring
@@ -322,23 +321,23 @@ mcp/voice_transcription.cpp / .h
 **Effort**: 2-3 days
 **Impact**: Enable semantic search
 
-1. Integrate sentence-transformers (Python subprocess or ONNX)
-2. Implement embedding generation
-3. Build vector similarity search
+1. Integrate ONNX runtime for C++ model inference
+2. Implement embedding generation with sentence-transformers (ONNX)
+3. Build vector similarity search (native C++)
 4. Test topic clustering
 
-**Estimated**: 300 lines of integration code
+**Estimated**: 300 lines of C++ integration code
 
 ### Phase 4: Voice Provider Configuration (Low Priority)
 **Effort**: 1 day
 **Impact**: Enable voice transcription
 
-1. Configure OpenAI API key
-2. Test whisper.cpp integration
-3. Optimize Python subprocess
+1. Configure OpenAI API key (optional cloud provider)
+2. Integrate whisper.cpp (native C++ implementation)
+3. Optimize model loading and inference
 4. Benchmark performance
 
-**Estimated**: Configuration only
+**Estimated**: Configuration only (all C++ native)
 
 ### Phase 5: Testing & Deployment (Essential)
 **Effort**: 3-5 days
