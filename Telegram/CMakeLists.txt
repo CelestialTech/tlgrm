@@ -1209,7 +1209,7 @@ PRIVATE
     main/session/session_show.h
     mcp/mcp_bridge.cpp
     mcp/mcp_bridge.h
-    mcp/mcp_server.cpp
+    mcp/mcp_server_complete.cpp
     mcp/mcp_server.h
     mcp/chat_archiver.cpp
     mcp/chat_archiver.h
