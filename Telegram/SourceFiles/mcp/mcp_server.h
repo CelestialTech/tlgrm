@@ -28,6 +28,7 @@ class BatchOperations;
 class MessageScheduler;
 class AuditLogger;
 class RBAC;
+class VoiceTranscription;
 
 // MCP Protocol types
 enum class TransportType {
@@ -162,6 +163,10 @@ private:
 	QJsonObject toolGetAuditLog(const QJsonObject &args);
 	QJsonObject toolHealthCheck(const QJsonObject &args);
 
+	// Voice tools (2 tools)
+	QJsonObject toolTranscribeVoice(const QJsonObject &args);
+	QJsonObject toolGetTranscription(const QJsonObject &args);
+
 	// Stdio transport
 	void startStdioTransport();
 	void handleStdioInput();
@@ -206,6 +211,7 @@ private:
 	MessageScheduler *_scheduler = nullptr;
 	AuditLogger *_auditLogger = nullptr;
 	RBAC *_rbac = nullptr;
+	VoiceTranscription *_voiceTranscription = nullptr;
 
 	// State
 	bool _initialized = false;
