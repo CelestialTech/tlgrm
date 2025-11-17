@@ -1225,6 +1225,12 @@ PRIVATE
     mcp/audit_logger.h
     mcp/rbac.cpp
     mcp/rbac.h
+    mcp/bot_base.cpp
+    mcp/bot_base.h
+    mcp/bot_manager.cpp
+    mcp/bot_manager.h
+    mcp/context_assistant_bot.cpp
+    mcp/context_assistant_bot.h
     mcp/voice_transcription.cpp
     mcp/voice_transcription.h
     media/audio/media_audio.cpp
