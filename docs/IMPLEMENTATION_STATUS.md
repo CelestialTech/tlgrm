@@ -23,7 +23,7 @@
    - Error handling
 
 3. **`mcp_bridge.h`** (89 lines)
-   - Unix socket IPC server (for Python fallback)
+   - Unix socket IPC server (for Python MCP Server communication)
    - QLocalServer-based
    - JSON-RPC over Unix domain socket
 
@@ -65,13 +65,15 @@ class Server;
 std::unique_ptr<MCP::Server> _mcpServer;
 ```
 
-### Phase 4: Python MCP Server (Fallback) ✅
+### Phase 4: Python MCP Server (Primary AI/ML Stack) ✅
 **Location**: `~/PycharmProjects/telegramMCP/`
+
+**Purpose**: Provides rich AI/ML functionality using Python ecosystem (transformers, LangChain, etc.)
 
 #### Files Created:
 1. **`src/tdesktop_bridge.py`** (330 lines)
-   - Python client for IPC bridge
-   - Async communication
+   - Python client for IPC bridge to tdesktop
+   - Async communication with modified Telegram client
    - Error handling
    - Methods: ping, get_messages_local, search_local, etc.
 
@@ -89,8 +91,8 @@ std::unique_ptr<MCP::Server> _mcpServer;
 
 ### ✅ Completed
 - [x] Architecture design
-- [x] C++ MCP server implementation
-- [x] Python MCP client (fallback)
+- [x] C++ tdesktop modifications (native client changes)
+- [x] Python MCP Server (primary AI/ML functionality)
 - [x] CMakeLists.txt integration
 - [x] Application class modifications
 - [x] IPC bridge implementation
