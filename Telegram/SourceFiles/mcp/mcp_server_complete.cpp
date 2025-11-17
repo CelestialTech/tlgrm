@@ -15,6 +15,8 @@
 #include "audit_logger.h"
 #include "rbac.h"
 #include "voice_transcription.h"
+#include "bot_manager.h"
+#include "context_assistant_bot.h"
 
 #include <QtCore/QTimer>
 #include <QtCore/QDebug>
@@ -875,6 +877,136 @@ void Server::registerTools() {
 				{"required", QJsonArray{"message_id"}},
 			}
 		},
+
+		// ===== BOT FRAMEWORK TOOLS (8) =====
+		Tool{
+			"list_bots",
+			"List all registered bots",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"include_disabled", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Include disabled bots"},
+						{"default", false}
+					}}
+				}}
+			}
+		},
+		Tool{
+			"get_bot_info",
+			"Get detailed information about a bot",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"bot_id", QJsonObject{
+						{"type", "string"},
+						{"description", "Bot identifier"}
+					}}
+				}},
+				{"required", QJsonArray{"bot_id"}}
+			}
+		},
+		Tool{
+			"start_bot",
+			"Start a registered bot",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"bot_id", QJsonObject{
+						{"type", "string"},
+						{"description", "Bot identifier"}
+					}}
+				}},
+				{"required", QJsonArray{"bot_id"}}
+			}
+		},
+		Tool{
+			"stop_bot",
+			"Stop a running bot",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"bot_id", QJsonObject{
+						{"type", "string"},
+						{"description", "Bot identifier"}
+					}}
+				}},
+				{"required", QJsonArray{"bot_id"}}
+			}
+		},
+		Tool{
+			"configure_bot",
+			"Update bot configuration",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"bot_id", QJsonObject{
+						{"type", "string"},
+						{"description", "Bot identifier"}
+					}},
+					{"config", QJsonObject{
+						{"type", "object"},
+						{"description", "Bot configuration (JSON object)"}
+					}}
+				}},
+				{"required", QJsonArray{"bot_id", "config"}}
+			}
+		},
+		Tool{
+			"get_bot_stats",
+			"Get performance statistics for a bot",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"bot_id", QJsonObject{
+						{"type", "string"},
+						{"description", "Bot identifier"}
+					}}
+				}},
+				{"required", QJsonArray{"bot_id"}}
+			}
+		},
+		Tool{
+			"send_bot_command",
+			"Send a command to a specific bot",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"bot_id", QJsonObject{
+						{"type", "string"},
+						{"description", "Bot identifier"}
+					}},
+					{"command", QJsonObject{
+						{"type", "string"},
+						{"description", "Command name"}
+					}},
+					{"args", QJsonObject{
+						{"type", "object"},
+						{"description", "Command arguments (JSON object)"}
+					}}
+				}},
+				{"required", QJsonArray{"bot_id", "command"}}
+			}
+		},
+		Tool{
+			"get_bot_suggestions",
+			"Get suggestions offered by bots",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (optional)"}
+					}},
+					{"limit", QJsonObject{
+						{"type", "integer"},
+						{"description", "Maximum number of suggestions"},
+						{"default", 10}
+					}}
+				}}
+			}
+		},
 	};
 }
 
@@ -975,6 +1107,25 @@ bool Server::start(TransportType transport) {
 
 	_rbac = new RBAC(this);
 	_rbac->start(&_db);
+
+	// Initialize bot framework
+	_botManager = new BotManager(this);
+	_botManager->initialize(
+		_archiver,
+		_analytics,
+		_semanticSearch,
+		_scheduler,
+		_auditLogger,
+		_rbac
+	);
+
+	// Load and register built-in bots
+	_botManager->discoverBots();
+
+	// Register and start the Context Assistant Bot (example)
+	auto *contextBot = new ContextAssistantBot(_botManager);
+	_botManager->registerBot(contextBot);
+	_botManager->startBot("context_assistant");
 
 	// Start transport
 	switch (_transport) {
@@ -1274,6 +1425,24 @@ QJsonObject Server::handleCallTool(const QJsonObject &params) {
 		result = toolTranscribeVoice(arguments);
 	} else if (toolName == "get_transcription") {
 		result = toolGetTranscription(arguments);
+
+	// BOT FRAMEWORK TOOLS
+	} else if (toolName == "list_bots") {
+		result = toolListBots(arguments);
+	} else if (toolName == "get_bot_info") {
+		result = toolGetBotInfo(arguments);
+	} else if (toolName == "start_bot") {
+		result = toolStartBot(arguments);
+	} else if (toolName == "stop_bot") {
+		result = toolStopBot(arguments);
+	} else if (toolName == "configure_bot") {
+		result = toolConfigureBot(arguments);
+	} else if (toolName == "get_bot_stats") {
+		result = toolGetBotStats(arguments);
+	} else if (toolName == "send_bot_command") {
+		result = toolSendBotCommand(arguments);
+	} else if (toolName == "get_bot_suggestions") {
+		result = toolGetBotSuggestions(arguments);
 
 	} else {
 		result["error"] = "Unknown tool: " + toolName;
@@ -2373,6 +2542,328 @@ QJsonObject Server::errorResponse(const QJsonValue &id, int code, const QString 
 	response["error"] = error;
 
 	return response;
+}
+
+// ============================================================================
+// Bot Framework Tools
+// ============================================================================
+
+QJsonObject Server::toolListBots(const QJsonObject &args) {
+	QJsonObject result;
+
+	if (!_botManager) {
+		result["error"] = "Bot framework not initialized";
+		return result;
+	}
+
+	bool includeDisabled = args.value("include_disabled").toBool(false);
+
+	QVector<BotBase*> bots = includeDisabled
+		? _botManager->getAllBots()
+		: _botManager->getEnabledBots();
+
+	QJsonArray botsArray;
+	for (BotBase *bot : bots) {
+		auto botInfo = bot->info();
+		QJsonObject botObj;
+		botObj["id"] = botInfo.id;
+		botObj["name"] = botInfo.name;
+		botObj["version"] = botInfo.version;
+		botObj["description"] = botInfo.description;
+		botObj["author"] = botInfo.author;
+
+		QJsonArray tagsArray;
+		for (const QString &tag : botInfo.tags) {
+			tagsArray.append(tag);
+		}
+		botObj["tags"] = tagsArray;
+
+		botObj["is_premium"] = botInfo.isPremium;
+		botObj["is_enabled"] = bot->isEnabled();
+		botObj["is_running"] = bot->isRunning();
+
+		botsArray.append(botObj);
+	}
+
+	result["bots"] = botsArray;
+	result["total_count"] = botsArray.size();
+	result["success"] = true;
+
+	return result;
+}
+
+QJsonObject Server::toolGetBotInfo(const QJsonObject &args) {
+	QJsonObject result;
+
+	if (!_botManager) {
+		result["error"] = "Bot framework not initialized";
+		return result;
+	}
+
+	QString botId = args.value("bot_id").toString();
+	if (botId.isEmpty()) {
+		result["error"] = "Missing bot_id parameter";
+		return result;
+	}
+
+	BotBase *bot = _botManager->getBot(botId);
+	if (!bot) {
+		result["error"] = "Bot not found: " + botId;
+		return result;
+	}
+
+	auto botInfo = bot->info();
+	result["id"] = botInfo.id;
+	result["name"] = botInfo.name;
+	result["version"] = botInfo.version;
+	result["description"] = botInfo.description;
+	result["author"] = botInfo.author;
+
+	QJsonArray tagsArray;
+	for (const QString &tag : botInfo.tags) {
+		tagsArray.append(tag);
+	}
+	result["tags"] = tagsArray;
+
+	result["is_premium"] = botInfo.isPremium;
+	result["is_enabled"] = bot->isEnabled();
+	result["is_running"] = bot->isRunning();
+
+	// Get config
+	result["config"] = bot->config();
+
+	// Get required permissions
+	QJsonArray permsArray;
+	for (const QString &perm : bot->requiredPermissions()) {
+		permsArray.append(perm);
+	}
+	result["required_permissions"] = permsArray;
+
+	// Get statistics
+	BotStats stats = _botManager->getBotStats(botId);
+	QJsonObject statsObj;
+	statsObj["messages_processed"] = static_cast<qint64>(stats.messagesProcessed);
+	statsObj["commands_executed"] = static_cast<qint64>(stats.commandsExecuted);
+	statsObj["errors_occurred"] = static_cast<qint64>(stats.errorsOccurred);
+	statsObj["avg_execution_ms"] = stats.avgExecutionTimeMs();
+	statsObj["registered_at"] = stats.registeredAt.toString(Qt::ISODate);
+	if (stats.lastActive.isValid()) {
+		statsObj["last_active"] = stats.lastActive.toString(Qt::ISODate);
+	}
+	result["statistics"] = statsObj;
+
+	result["success"] = true;
+
+	return result;
+}
+
+QJsonObject Server::toolStartBot(const QJsonObject &args) {
+	QJsonObject result;
+
+	if (!_botManager) {
+		result["error"] = "Bot framework not initialized";
+		return result;
+	}
+
+	QString botId = args.value("bot_id").toString();
+	if (botId.isEmpty()) {
+		result["error"] = "Missing bot_id parameter";
+		return result;
+	}
+
+	bool success = _botManager->startBot(botId);
+
+	if (success) {
+		result["success"] = true;
+		result["message"] = "Bot started: " + botId;
+		_auditLogger->logSystemEvent("bot_started", botId);
+	} else {
+		result["success"] = false;
+		result["error"] = "Failed to start bot: " + botId;
+	}
+
+	return result;
+}
+
+QJsonObject Server::toolStopBot(const QJsonObject &args) {
+	QJsonObject result;
+
+	if (!_botManager) {
+		result["error"] = "Bot framework not initialized";
+		return result;
+	}
+
+	QString botId = args.value("bot_id").toString();
+	if (botId.isEmpty()) {
+		result["error"] = "Missing bot_id parameter";
+		return result;
+	}
+
+	bool success = _botManager->stopBot(botId);
+
+	if (success) {
+		result["success"] = true;
+		result["message"] = "Bot stopped: " + botId;
+		_auditLogger->logSystemEvent("bot_stopped", botId);
+	} else {
+		result["success"] = false;
+		result["error"] = "Failed to stop bot: " + botId;
+	}
+
+	return result;
+}
+
+QJsonObject Server::toolConfigureBot(const QJsonObject &args) {
+	QJsonObject result;
+
+	if (!_botManager) {
+		result["error"] = "Bot framework not initialized";
+		return result;
+	}
+
+	QString botId = args.value("bot_id").toString();
+	if (botId.isEmpty()) {
+		result["error"] = "Missing bot_id parameter";
+		return result;
+	}
+
+	QJsonObject config = args.value("config").toObject();
+	if (config.isEmpty()) {
+		result["error"] = "Missing or invalid config parameter";
+		return result;
+	}
+
+	bool success = _botManager->saveBotConfig(botId, config);
+
+	if (success) {
+		result["success"] = true;
+		result["message"] = "Bot configuration updated: " + botId;
+		_auditLogger->logSystemEvent("bot_configured", botId);
+	} else {
+		result["success"] = false;
+		result["error"] = "Failed to update bot configuration: " + botId;
+	}
+
+	return result;
+}
+
+QJsonObject Server::toolGetBotStats(const QJsonObject &args) {
+	QJsonObject result;
+
+	if (!_botManager) {
+		result["error"] = "Bot framework not initialized";
+		return result;
+	}
+
+	QString botId = args.value("bot_id").toString();
+	if (botId.isEmpty()) {
+		result["error"] = "Missing bot_id parameter";
+		return result;
+	}
+
+	if (!_botManager->isBotRegistered(botId)) {
+		result["error"] = "Bot not found: " + botId;
+		return result;
+	}
+
+	BotStats stats = _botManager->getBotStats(botId);
+
+	result["bot_id"] = botId;
+	result["messages_processed"] = static_cast<qint64>(stats.messagesProcessed);
+	result["commands_executed"] = static_cast<qint64>(stats.commandsExecuted);
+	result["errors_occurred"] = static_cast<qint64>(stats.errorsOccurred);
+	result["total_execution_time_ms"] = static_cast<qint64>(stats.totalExecutionTimeMs);
+	result["last_execution_time_ms"] = static_cast<qint64>(stats.lastExecutionTimeMs);
+	result["avg_execution_time_ms"] = stats.avgExecutionTimeMs();
+	result["registered_at"] = stats.registeredAt.toString(Qt::ISODate);
+
+	if (stats.lastActive.isValid()) {
+		result["last_active"] = stats.lastActive.toString(Qt::ISODate);
+	}
+
+	// Calculate error rate
+	if (stats.messagesProcessed > 0) {
+		double errorRate = static_cast<double>(stats.errorsOccurred) / stats.messagesProcessed;
+		result["error_rate"] = errorRate;
+		result["error_rate_percent"] = errorRate * 100.0;
+	} else {
+		result["error_rate"] = 0.0;
+		result["error_rate_percent"] = 0.0;
+	}
+
+	result["success"] = true;
+
+	return result;
+}
+
+QJsonObject Server::toolSendBotCommand(const QJsonObject &args) {
+	QJsonObject result;
+
+	if (!_botManager) {
+		result["error"] = "Bot framework not initialized";
+		return result;
+	}
+
+	QString botId = args.value("bot_id").toString();
+	if (botId.isEmpty()) {
+		result["error"] = "Missing bot_id parameter";
+		return result;
+	}
+
+	QString command = args.value("command").toString();
+	if (command.isEmpty()) {
+		result["error"] = "Missing command parameter";
+		return result;
+	}
+
+	QJsonObject commandArgs = args.value("args").toObject();
+
+	// Dispatch command to bot
+	_botManager->dispatchCommand(botId, command, commandArgs);
+
+	result["success"] = true;
+	result["message"] = QString("Command '%1' sent to bot '%2'").arg(command, botId);
+	result["bot_id"] = botId;
+	result["command"] = command;
+
+	_auditLogger->logSystemEvent(
+		"bot_command_sent",
+		QString("Bot: %1, Command: %2").arg(botId, command)
+	);
+
+	return result;
+}
+
+QJsonObject Server::toolGetBotSuggestions(const QJsonObject &args) {
+	QJsonObject result;
+
+	if (!_botManager) {
+		result["error"] = "Bot framework not initialized";
+		return result;
+	}
+
+	// Note: This would require querying the bot_suggestions table
+	// For now, return a placeholder implementation
+	// TODO: Implement database query for bot suggestions
+
+	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
+	int limit = args.value("limit").toInt(10);
+
+	QJsonArray suggestionsArray;
+
+	// Placeholder - in real implementation, query bot_suggestions table
+	result["suggestions"] = suggestionsArray;
+	result["total_count"] = 0;
+	result["limit"] = limit;
+
+	if (chatId > 0) {
+		result["chat_id"] = chatId;
+	}
+
+	result["success"] = true;
+	result["note"] = "Suggestions feature requires database integration";
+
+	return result;
 }
 
 } // namespace MCP

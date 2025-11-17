@@ -29,6 +29,7 @@ class MessageScheduler;
 class AuditLogger;
 class RBAC;
 class VoiceTranscription;
+class BotManager;
 
 // MCP Protocol types
 enum class TransportType {
@@ -167,6 +168,16 @@ private:
 	QJsonObject toolTranscribeVoice(const QJsonObject &args);
 	QJsonObject toolGetTranscription(const QJsonObject &args);
 
+	// Bot framework tools (8 tools)
+	QJsonObject toolListBots(const QJsonObject &args);
+	QJsonObject toolGetBotInfo(const QJsonObject &args);
+	QJsonObject toolStartBot(const QJsonObject &args);
+	QJsonObject toolStopBot(const QJsonObject &args);
+	QJsonObject toolConfigureBot(const QJsonObject &args);
+	QJsonObject toolGetBotStats(const QJsonObject &args);
+	QJsonObject toolSendBotCommand(const QJsonObject &args);
+	QJsonObject toolGetBotSuggestions(const QJsonObject &args);
+
 	// Stdio transport
 	void startStdioTransport();
 	void handleStdioInput();
@@ -212,6 +223,7 @@ private:
 	AuditLogger *_auditLogger = nullptr;
 	RBAC *_rbac = nullptr;
 	VoiceTranscription *_voiceTranscription = nullptr;
+	BotManager *_botManager = nullptr;
 
 	// State
 	bool _initialized = false;
