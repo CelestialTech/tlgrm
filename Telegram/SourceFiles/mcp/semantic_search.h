@@ -38,8 +38,8 @@ struct MessageCluster {
 	float cohesion;  // How tightly grouped the cluster is
 };
 
-// Intent classification
-enum class MessageIntent {
+// Intent classification for search/filtering
+enum class SearchIntent {
 	Question,      // "How do I...?", "What is...?"
 	Answer,        // Direct responses
 	Command,       // Bot commands, instructions
@@ -121,7 +121,7 @@ public:
 	);
 
 	// Intent classification
-	MessageIntent classifyIntent(const QString &text);
+	SearchIntent classifyIntent(const QString &text);
 	QJsonObject getIntentDistribution(qint64 chatId);
 
 	// Entity extraction
@@ -169,7 +169,6 @@ private:
 	QVector<Entity> extractBotCommands(const QString &text) const;
 
 	ChatArchiver *_archiver;
-	QSqlDatabase *_db;
 	bool _isInitialized = false;
 
 	// Model configuration

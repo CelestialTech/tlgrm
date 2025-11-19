@@ -86,6 +86,7 @@ PRIVATE
     desktop-app::external_kcoreaddons
     desktop-app::external_qt_static_plugins
     desktop-app::external_qt
+    Qt${QT_VERSION_MAJOR}::Sql
     desktop-app::external_qr_code_generator
     desktop-app::external_crash_reports
     desktop-app::external_auto_updates
@@ -267,6 +268,8 @@ PRIVATE
     boxes/auto_lock_box.h
     boxes/auto_download_box.cpp
     boxes/auto_download_box.h
+    boxes/bot_config_box.cpp
+    boxes/bot_config_box.h
     boxes/background_box.cpp
     boxes/background_box.h
     boxes/background_preview_box.cpp
@@ -1027,6 +1030,8 @@ PRIVATE
     info/bot/starref/info_bot_starref_join_widget.h
     info/bot/starref/info_bot_starref_setup_widget.cpp
     info/bot/starref/info_bot_starref_setup_widget.h
+    info/bot_statistics_widget.cpp
+    info/bot_statistics_widget.h
     info/channel_statistics/boosts/create_giveaway_box.cpp
     info/channel_statistics/boosts/create_giveaway_box.h
     info/channel_statistics/boosts/giveaway/giveaway_list_controllers.cpp
@@ -1264,6 +1269,8 @@ PRIVATE
     mcp/bot_manager.h
     mcp/context_assistant_bot.cpp
     mcp/context_assistant_bot.h
+    mcp/bot_command_handler.cpp
+    mcp/bot_command_handler.h
     mcp/voice_transcription.cpp
     mcp/voice_transcription.h
     media/audio/media_audio.cpp
@@ -1584,14 +1591,16 @@ PRIVATE
     settings/sections/settings_active_sessions.h
     settings/sections/settings_advanced.cpp
     settings/sections/settings_advanced.h
-    settings/sections/settings_chat.cpp
-    settings/sections/settings_chat.h
     settings/sections/settings_blocked_peers.cpp
     settings/sections/settings_blocked_peers.h
+    settings/sections/settings_bots.cpp
+    settings/sections/settings_bots.h
     settings/sections/settings_business.cpp
     settings/sections/settings_business.h
     settings/sections/settings_calls.cpp
     settings/sections/settings_calls.h
+    settings/sections/settings_chat.cpp
+    settings/sections/settings_chat.h
     settings/settings_codes.cpp
     settings/settings_codes.h
     settings/settings_common_session.cpp

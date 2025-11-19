@@ -21,6 +21,9 @@
 #include <QtCore/QTimer>
 #include <QtCore/QDebug>
 #include <QtCore/QDir>
+#include <QtCore/QJsonObject>
+#include <QtCore/QJsonArray>
+#include <QtSql/QSqlError>
 
 namespace MCP {
 
@@ -1446,11 +1449,20 @@ QJsonObject Server::handleCallTool(const QJsonObject &params) {
 
 	} else {
 		result["error"] = "Unknown tool: " + toolName;
-		_auditLogger->logError("tool_call", "Unknown tool: " + toolName);
+		_auditLogger->logError("Unknown tool: " + toolName, "tool_call");
 	}
 
-	_auditLogger->logToolCompleted(toolName, result);
-	return QJsonObject{{"content", QJsonArray{QJsonObject{{"type", "text"}, {"text", QJsonDocument(result).toJson(QJsonDocument::Compact)}}}}};
+	// _auditLogger->logToolCompleted(toolName, result); // TODO: implement logToolCompleted
+
+	// Build response object
+	QJsonObject response;
+	QJsonArray contentArray;
+	QJsonObject textContent;
+	textContent["type"] = "text";
+	textContent["text"] = QString(QJsonDocument(result).toJson(QJsonDocument::Compact));
+	contentArray.append(textContent);
+	response["content"] = contentArray;
+	return response;
 }
 
 // ===== CORE TOOL IMPLEMENTATIONS =====
@@ -1458,7 +1470,7 @@ QJsonObject Server::handleCallTool(const QJsonObject &params) {
 QJsonObject Server::toolListChats(const QJsonObject &args) {
 	Q_UNUSED(args);
 
-	QJsonArray chats = _archiver->getArchivedChats();
+	QJsonArray chats = _archiver->listArchivedChats();
 
 	QJsonObject result;
 	result["chats"] = chats;
@@ -1511,7 +1523,7 @@ QJsonObject Server::toolSearchMessages(const QJsonObject &args) {
 	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
 	int limit = args.value("limit").toInt(50);
 
-	QJsonArray results = _archiver->searchMessages(query, chatId, limit);
+	QJsonArray results = _archiver->searchMessages(chatId, query, limit);
 
 	QJsonObject result;
 	result["results"] = results;
@@ -1524,7 +1536,10 @@ QJsonObject Server::toolSearchMessages(const QJsonObject &args) {
 QJsonObject Server::toolGetUserInfo(const QJsonObject &args) {
 	qint64 userId = args["user_id"].toVariant().toLongLong();
 
-	QJsonObject userInfo = _archiver->getUserInfo(userId);
+	// TODO: Implement getUserInfo in ChatArchiver
+	QJsonObject userInfo;
+	userInfo["user_id"] = QString::number(userId);
+	userInfo["error"] = "getUserInfo not yet implemented";
 
 	return userInfo;
 }
@@ -1552,26 +1567,26 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 	QString format = args["format"].toString();
 	QString outputPath = args["output_path"].toString();
 
-	ChatArchiver::ExportFormat exportFormat;
+	ExportFormat exportFormat;
 	if (format == "json") {
-		exportFormat = ChatArchiver::ExportFormat::JSON;
+		exportFormat = ExportFormat::JSON;
 	} else if (format == "jsonl") {
-		exportFormat = ChatArchiver::ExportFormat::JSONL;
+		exportFormat = ExportFormat::JSONL;
 	} else if (format == "csv") {
-		exportFormat = ChatArchiver::ExportFormat::CSV;
+		exportFormat = ExportFormat::CSV;
 	} else {
 		QJsonObject error;
 		error["error"] = "Invalid format: " + format;
 		return error;
 	}
 
-	bool success = _archiver->exportChat(chatId, outputPath, exportFormat);
+	QString resultPath = _archiver->exportChat(chatId, exportFormat, outputPath);
 
 	QJsonObject result;
-	result["success"] = success;
+	result["success"] = !resultPath.isEmpty();
 	result["chat_id"] = chatId;
 	result["format"] = format;
-	result["output_path"] = outputPath;
+	result["output_path"] = resultPath;
 
 	return result;
 }
@@ -1579,7 +1594,7 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 QJsonObject Server::toolListArchivedChats(const QJsonObject &args) {
 	Q_UNUSED(args);
 
-	QJsonArray chats = _archiver->getArchivedChats();
+	QJsonArray chats = _archiver->listArchivedChats();
 
 	QJsonObject result;
 	result["chats"] = chats;
@@ -1591,33 +1606,30 @@ QJsonObject Server::toolListArchivedChats(const QJsonObject &args) {
 QJsonObject Server::toolGetArchiveStats(const QJsonObject &args) {
 	Q_UNUSED(args);
 
-	auto stats = _archiver->getStatistics();
-
+	// TODO: Implement getStatistics() in ChatArchiver
 	QJsonObject result;
-	result["total_messages"] = static_cast<qint64>(stats.totalMessages);
-	result["total_chats"] = static_cast<qint64>(stats.totalChats);
-	result["total_users"] = static_cast<qint64>(stats.totalUsers);
-	result["ephemeral_messages"] = static_cast<qint64>(stats.ephemeralMessages);
-	result["database_size_bytes"] = static_cast<qint64>(stats.databaseSizeBytes);
-	result["oldest_message_timestamp"] = static_cast<qint64>(stats.oldestMessageTimestamp);
-	result["newest_message_timestamp"] = static_cast<qint64>(stats.newestMessageTimestamp);
+	result["total_messages"] = 0;
+	result["total_chats"] = 0;
+	result["total_users"] = 0;
+	result["ephemeral_messages"] = 0;
+	result["database_size_bytes"] = 0;
+	result["oldest_message_timestamp"] = 0;
+	result["newest_message_timestamp"] = 0;
+	result["error"] = "getStatistics not yet implemented";
 
 	return result;
 }
 
 QJsonObject Server::toolGetEphemeralMessages(const QJsonObject &args) {
-	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
+	Q_UNUSED(args);
 
-	QJsonArray ephemeral;
-	if (chatId > 0) {
-		ephemeral = _ephemeralArchiver->getEphemeralMessages(chatId);
-	} else {
-		ephemeral = _ephemeralArchiver->getAllEphemeralMessages();
-	}
+	// TODO: Implement getEphemeralMessages() and getAllEphemeralMessages() in EphemeralArchiver
+	QJsonArray ephemeral;  // Empty array
 
 	QJsonObject result;
 	result["messages"] = ephemeral;
-	result["count"] = ephemeral.size();
+	result["count"] = 0;
+	result["error"] = "getEphemeralMessages not yet implemented";
 
 	return result;
 }
@@ -1627,7 +1639,7 @@ QJsonObject Server::toolSearchArchive(const QJsonObject &args) {
 	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
 	int limit = args.value("limit").toInt(50);
 
-	QJsonArray results = _archiver->searchMessages(query, chatId, limit);
+	QJsonArray results = _archiver->searchMessages(chatId, query, limit);
 
 	QJsonObject result;
 	result["results"] = results;
@@ -1661,13 +1673,13 @@ QJsonObject Server::toolGetMessageStats(const QJsonObject &args) {
 
 	QJsonObject result;
 	result["chat_id"] = chatId;
-	result["message_count"] = static_cast<qint64>(stats.messageCount);
+	result["message_count"] = static_cast<qint64>(stats.totalMessages);
 	result["total_words"] = static_cast<qint64>(stats.totalWords);
 	result["total_characters"] = static_cast<qint64>(stats.totalCharacters);
-	result["average_message_length"] = stats.averageMessageLength;
-	result["messages_per_day"] = stats.messagesPerDay;
-	result["first_message_timestamp"] = static_cast<qint64>(stats.firstMessageTimestamp);
-	result["last_message_timestamp"] = static_cast<qint64>(stats.lastMessageTimestamp);
+	result["average_message_length"] = stats.avgMessageLength;
+	result["messages_per_day"] = stats.messagesPerHour;
+	result["first_message_timestamp"] = static_cast<qint64>(stats.firstMessage.toSecsSinceEpoch());
+	result["last_message_timestamp"] = static_cast<qint64>(stats.lastMessage.toSecsSinceEpoch());
 
 	return result;
 }
@@ -1680,13 +1692,13 @@ QJsonObject Server::toolGetUserActivity(const QJsonObject &args) {
 
 	QJsonObject result;
 	result["user_id"] = userId;
-	result["total_messages"] = static_cast<qint64>(activity.totalMessages);
-	result["total_words"] = static_cast<qint64>(activity.totalWords);
-	result["average_message_length"] = activity.averageMessageLength;
+	result["total_messages"] = static_cast<qint64>(activity.messageCount);
+	result["total_words"] = static_cast<qint64>(activity.wordCount);
+	result["average_message_length"] = activity.avgMessageLength;
 	result["most_active_hour"] = activity.mostActiveHour;
 	result["days_active"] = activity.daysActive;
-	result["first_seen"] = static_cast<qint64>(activity.firstSeen);
-	result["last_seen"] = static_cast<qint64>(activity.lastSeen);
+	result["first_seen"] = static_cast<qint64>(activity.firstMessage.toSecsSinceEpoch());
+	result["last_seen"] = static_cast<qint64>(activity.lastMessage.toSecsSinceEpoch());
 
 	return result;
 }
@@ -1701,19 +1713,19 @@ QJsonObject Server::toolGetChatActivity(const QJsonObject &args) {
 	result["total_messages"] = static_cast<qint64>(activity.totalMessages);
 	result["unique_users"] = static_cast<qint64>(activity.uniqueUsers);
 	result["messages_per_day"] = activity.messagesPerDay;
-	result["most_active_hour"] = activity.mostActiveHour;
+	result["most_active_hour"] = activity.peakHour;
 
 	QString trendStr;
 	switch (activity.trend) {
-		case Analytics::ActivityTrend::Increasing: trendStr = "increasing"; break;
-		case Analytics::ActivityTrend::Decreasing: trendStr = "decreasing"; break;
-		case Analytics::ActivityTrend::Stable: trendStr = "stable"; break;
+		case ActivityTrend::Increasing: trendStr = "increasing"; break;
+		case ActivityTrend::Decreasing: trendStr = "decreasing"; break;
+		case ActivityTrend::Stable: trendStr = "stable"; break;
 		default: trendStr = "unknown"; break;
 	}
 	result["trend"] = trendStr;
 
-	result["first_message"] = static_cast<qint64>(activity.firstMessage);
-	result["last_message"] = static_cast<qint64>(activity.lastMessage);
+	result["first_message"] = static_cast<qint64>(activity.firstMessage.toSecsSinceEpoch());
+	result["last_message"] = static_cast<qint64>(activity.lastMessage.toSecsSinceEpoch());
 
 	return result;
 }
@@ -1722,17 +1734,17 @@ QJsonObject Server::toolGetTimeSeries(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QString granularity = args.value("granularity").toString("daily");
 
-	Analytics::TimeSeriesGranularity gran;
+	TimeGranularity gran;
 	if (granularity == "hourly") {
-		gran = Analytics::TimeSeriesGranularity::Hourly;
+		gran = TimeGranularity::Hourly;
 	} else if (granularity == "daily") {
-		gran = Analytics::TimeSeriesGranularity::Daily;
+		gran = TimeGranularity::Daily;
 	} else if (granularity == "weekly") {
-		gran = Analytics::TimeSeriesGranularity::Weekly;
+		gran = TimeGranularity::Weekly;
 	} else if (granularity == "monthly") {
-		gran = Analytics::TimeSeriesGranularity::Monthly;
+		gran = TimeGranularity::Monthly;
 	} else {
-		gran = Analytics::TimeSeriesGranularity::Daily;
+		gran = TimeGranularity::Daily;
 	}
 
 	auto timeSeries = _analytics->getTimeSeries(chatId, gran);
@@ -1740,7 +1752,7 @@ QJsonObject Server::toolGetTimeSeries(const QJsonObject &args) {
 	QJsonArray dataPoints;
 	for (const auto &point : timeSeries) {
 		QJsonObject dp;
-		dp["timestamp"] = static_cast<qint64>(point.timestamp);
+		dp["timestamp"] = static_cast<qint64>(point.timestamp.toSecsSinceEpoch());
 		dp["message_count"] = static_cast<qint64>(point.messageCount);
 		dp["unique_users"] = static_cast<qint64>(point.uniqueUsers);
 		dataPoints.append(dp);
@@ -1767,7 +1779,7 @@ QJsonObject Server::toolGetTopUsers(const QJsonObject &args) {
 		u["user_id"] = user.userId;
 		u["username"] = user.username;
 		u["message_count"] = static_cast<qint64>(user.messageCount);
-		u["total_words"] = static_cast<qint64>(user.totalWords);
+		u["total_words"] = static_cast<qint64>(user.wordCount);
 		users.append(u);
 	}
 
@@ -1786,11 +1798,10 @@ QJsonObject Server::toolGetTopWords(const QJsonObject &args) {
 	auto topWords = _analytics->getTopWords(chatId, limit);
 
 	QJsonArray words;
-	for (const auto &word : topWords) {
+	for (auto it = topWords.constBegin(); it != topWords.constEnd(); ++it) {
 		QJsonObject w;
-		w["word"] = word.word;
-		w["count"] = static_cast<qint64>(word.count);
-		w["frequency"] = word.frequency;
+		w["word"] = it.key();
+		w["count"] = static_cast<qint64>(it.value());
 		words.append(w);
 	}
 
@@ -1806,12 +1817,12 @@ QJsonObject Server::toolExportAnalytics(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QString outputPath = args["output_path"].toString();
 
-	bool success = _analytics->exportToCSV(chatId, outputPath);
+	QString resultPath = _analytics->exportToCSV(chatId, outputPath);
 
 	QJsonObject result;
-	result["success"] = success;
+	result["success"] = !resultPath.isEmpty();
 	result["chat_id"] = chatId;
-	result["output_path"] = outputPath;
+	result["output_path"] = resultPath;
 
 	return result;
 }
@@ -1819,13 +1830,13 @@ QJsonObject Server::toolExportAnalytics(const QJsonObject &args) {
 QJsonObject Server::toolGetTrends(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 
-	Analytics::ActivityTrend trend = _analytics->detectActivityTrend(chatId);
+	ActivityTrend trend = _analytics->detectActivityTrend(chatId);
 
 	QString trendStr;
 	switch (trend) {
-		case Analytics::ActivityTrend::Increasing: trendStr = "increasing"; break;
-		case Analytics::ActivityTrend::Decreasing: trendStr = "decreasing"; break;
-		case Analytics::ActivityTrend::Stable: trendStr = "stable"; break;
+		case ActivityTrend::Increasing: trendStr = "increasing"; break;
+		case ActivityTrend::Decreasing: trendStr = "decreasing"; break;
+		case ActivityTrend::Stable: trendStr = "stable"; break;
 		default: trendStr = "unknown"; break;
 	}
 
@@ -1899,19 +1910,19 @@ QJsonObject Server::toolDetectTopics(const QJsonObject &args) {
 QJsonObject Server::toolClassifyIntent(const QJsonObject &args) {
 	QString text = args["text"].toString();
 
-	MessageIntent intent = _semanticSearch->classifyIntent(text);
+	SearchIntent intent = _semanticSearch->classifyIntent(text);
 
 	QString intentStr;
 	switch (intent) {
-		case MessageIntent::Question: intentStr = "question"; break;
-		case MessageIntent::Answer: intentStr = "answer"; break;
-		case MessageIntent::Command: intentStr = "command"; break;
-		case MessageIntent::Statement: intentStr = "statement"; break;
-		case MessageIntent::Greeting: intentStr = "greeting"; break;
-		case MessageIntent::Farewell: intentStr = "farewell"; break;
-		case MessageIntent::Agreement: intentStr = "agreement"; break;
-		case MessageIntent::Disagreement: intentStr = "disagreement"; break;
-		default: intentStr = "unknown"; break;
+		case SearchIntent::Question: intentStr = "question"; break;
+		case SearchIntent::Answer: intentStr = "answer"; break;
+		case SearchIntent::Statement: intentStr = "statement"; break;
+		case SearchIntent::Command: intentStr = "command"; break;
+		case SearchIntent::Greeting: intentStr = "greeting"; break;
+		case SearchIntent::Farewell: intentStr = "farewell"; break;
+		case SearchIntent::Agreement: intentStr = "agreement"; break;
+		case SearchIntent::Disagreement: intentStr = "disagreement"; break;
+		default: intentStr = "other"; break;
 	}
 
 	QJsonObject result;
@@ -1933,12 +1944,13 @@ QJsonObject Server::toolExtractEntities(const QJsonObject &args) {
 		QString typeStr;
 		switch (entity.type) {
 			case EntityType::UserMention: typeStr = "user_mention"; break;
+			case EntityType::ChatMention: typeStr = "chat_mention"; break;
 			case EntityType::URL: typeStr = "url"; break;
-			case EntityType::Hashtag: typeStr = "hashtag"; break;
-			case EntityType::BotCommand: typeStr = "bot_command"; break;
 			case EntityType::Email: typeStr = "email"; break;
 			case EntityType::PhoneNumber: typeStr = "phone_number"; break;
-			case EntityType::CashTag: typeStr = "cash_tag"; break;
+			case EntityType::Hashtag: typeStr = "hashtag"; break;
+			case EntityType::BotCommand: typeStr = "bot_command"; break;
+			case EntityType::CustomEmoji: typeStr = "custom_emoji"; break;
 			default: typeStr = "unknown"; break;
 		}
 
@@ -2181,17 +2193,17 @@ QJsonObject Server::toolScheduleMessage(const QJsonObject &args) {
 	} else if (scheduleType == "recurring") {
 		QDateTime startTime = QDateTime::fromString(when, Qt::ISODate);
 
-		MessageScheduler::RecurrencePattern recurrence;
+		RecurrencePattern recurrence;
 		if (pattern == "hourly") {
-			recurrence = MessageScheduler::RecurrencePattern::Hourly;
+			recurrence = RecurrencePattern::Hourly;
 		} else if (pattern == "daily") {
-			recurrence = MessageScheduler::RecurrencePattern::Daily;
+			recurrence = RecurrencePattern::Daily;
 		} else if (pattern == "weekly") {
-			recurrence = MessageScheduler::RecurrencePattern::Weekly;
+			recurrence = RecurrencePattern::Weekly;
 		} else if (pattern == "monthly") {
-			recurrence = MessageScheduler::RecurrencePattern::Monthly;
+			recurrence = RecurrencePattern::Monthly;
 		} else {
-			recurrence = MessageScheduler::RecurrencePattern::Daily;
+			recurrence = RecurrencePattern::Daily;
 		}
 
 		scheduleId = _scheduler->scheduleRecurring(chatId, text, startTime, recurrence);
@@ -2228,10 +2240,10 @@ QJsonObject Server::toolListScheduled(const QJsonObject &args) {
 		QJsonObject s;
 		s["schedule_id"] = msg.id;
 		s["chat_id"] = msg.chatId;
-		s["text"] = msg.text;
+		s["text"] = msg.content;
 		s["start_time"] = msg.startTime.toString(Qt::ISODate);
-		s["status"] = static_cast<int>(msg.status);
-		s["occurrences"] = static_cast<qint64>(msg.occurrences);
+		s["status"] = msg.isActive ? "active" : "inactive";
+		s["occurrences"] = static_cast<qint64>(msg.occurrencesSent);
 		schedules.append(s);
 	}
 
@@ -2260,12 +2272,17 @@ QJsonObject Server::toolUpdateScheduled(const QJsonObject &args) {
 QJsonObject Server::toolGetCacheStats(const QJsonObject &args) {
 	Q_UNUSED(args);
 
-	auto stats = _archiver->getStatistics();
+	// TODO: Implement getStatistics() in ChatArchiver
+	// auto stats = _archiver->getStatistics();
 
 	QJsonObject result;
-	result["total_messages"] = static_cast<qint64>(stats.totalMessages);
-	result["total_chats"] = static_cast<qint64>(stats.totalChats);
-	result["database_size_bytes"] = static_cast<qint64>(stats.databaseSizeBytes);
+	result["error"] = "getStatistics not yet implemented";
+	result["total_messages"] = 0;
+	result["total_chats"] = 0;
+	result["database_size_bytes"] = 0;
+	// result["total_messages"] = static_cast<qint64>(stats.totalMessages);
+	// result["total_chats"] = static_cast<qint64>(stats.totalChats);
+	// result["database_size_bytes"] = static_cast<qint64>(stats.databaseSizeBytes);
 	result["indexed_messages"] = _semanticSearch->getIndexedMessageCount();
 
 	return result;
@@ -2297,12 +2314,12 @@ QJsonObject Server::toolGetAuditLog(const QJsonObject &args) {
 		// Filter by event type if specified
 		if (!eventType.isEmpty()) {
 			QString typeStr;
-			switch (event.type) {
-				case AuditLogger::EventType::ToolInvoked: typeStr = "tool"; break;
-				case AuditLogger::EventType::AuthEvent: typeStr = "auth"; break;
-				case AuditLogger::EventType::TelegramOp: typeStr = "telegram"; break;
-				case AuditLogger::EventType::SystemEvent: typeStr = "system"; break;
-				case AuditLogger::EventType::Error: typeStr = "error"; break;
+			switch (event.eventType) {
+				case AuditEventType::ToolInvoked: typeStr = "tool"; break;
+				case AuditEventType::AuthEvent: typeStr = "auth"; break;
+				case AuditEventType::TelegramOp: typeStr = "telegram"; break;
+				case AuditEventType::SystemEvent: typeStr = "system"; break;
+				case AuditEventType::Error: typeStr = "error"; break;
 			}
 			if (typeStr != eventType) {
 				continue;
@@ -2312,9 +2329,11 @@ QJsonObject Server::toolGetAuditLog(const QJsonObject &args) {
 		QJsonObject e;
 		e["event_id"] = event.id;
 		e["timestamp"] = event.timestamp.toString(Qt::ISODate);
-		e["action"] = event.action;
-		e["user"] = event.user;
+		e["action"] = event.eventSubtype;
+		e["user"] = event.userId;
+		e["tool_name"] = event.toolName;
 		e["duration_ms"] = static_cast<qint64>(event.durationMs);
+		e["status"] = event.resultStatus;
 		eventsArray.append(e);
 	}
 
@@ -2423,34 +2442,56 @@ QJsonObject Server::handleReadResource(const QJsonObject &params) {
 	QJsonObject result;
 
 	if (uri == "telegram://chats") {
-		QJsonArray chats = _archiver->getArchivedChats();
-		result["contents"] = QJsonArray{QJsonObject{
-			{"uri", uri},
-			{"mimeType", "application/json"},
-			{"text", QJsonDocument(QJsonObject{{"chats", chats}}).toJson(QJsonDocument::Compact)}
-		}};
+		QJsonArray chats = _archiver->listArchivedChats();
+
+		QJsonObject dataObj;
+		dataObj["chats"] = chats;
+
+		QJsonObject contentObj;
+		contentObj["uri"] = uri;
+		contentObj["mimeType"] = "application/json";
+		contentObj["text"] = QString::fromUtf8(QJsonDocument(dataObj).toJson(QJsonDocument::Compact));
+
+		QJsonArray contents;
+		contents.append(contentObj);
+		result["contents"] = contents;
 	} else if (uri.startsWith("telegram://messages/")) {
 		QString chatIdStr = uri.mid(QString("telegram://messages/").length());
 		qint64 chatId = chatIdStr.toLongLong();
 
 		QJsonArray messages = _archiver->getMessages(chatId, 50, 0);
-		result["contents"] = QJsonArray{QJsonObject{
-			{"uri", uri},
-			{"mimeType", "application/json"},
-			{"text", QJsonDocument(QJsonObject{{"messages", messages}}).toJson(QJsonDocument::Compact)}
-		}};
-	} else if (uri == "telegram://archive/stats") {
-		auto stats = _archiver->getStatistics();
-		QJsonObject statsObj;
-		statsObj["total_messages"] = static_cast<qint64>(stats.totalMessages);
-		statsObj["total_chats"] = static_cast<qint64>(stats.totalChats);
-		statsObj["database_size_bytes"] = static_cast<qint64>(stats.databaseSizeBytes);
 
-		result["contents"] = QJsonArray{QJsonObject{
-			{"uri", uri},
-			{"mimeType", "application/json"},
-			{"text", QJsonDocument(statsObj).toJson(QJsonDocument::Compact)}
-		}};
+		QJsonObject dataObj;
+		dataObj["messages"] = messages;
+
+		QJsonObject contentObj;
+		contentObj["uri"] = uri;
+		contentObj["mimeType"] = "application/json";
+		contentObj["text"] = QString::fromUtf8(QJsonDocument(dataObj).toJson(QJsonDocument::Compact));
+
+		QJsonArray contents;
+		contents.append(contentObj);
+		result["contents"] = contents;
+	} else if (uri == "telegram://archive/stats") {
+		// TODO: Implement getStatistics() in ChatArchiver
+		// auto stats = _archiver->getStatistics();
+		QJsonObject statsObj;
+		statsObj["total_messages"] = 0;
+		statsObj["total_chats"] = 0;
+		statsObj["database_size_bytes"] = 0;
+		statsObj["error"] = "getStatistics not yet implemented";
+		// statsObj["total_messages"] = static_cast<qint64>(stats.totalMessages);
+		// statsObj["total_chats"] = static_cast<qint64>(stats.totalChats);
+		// statsObj["database_size_bytes"] = static_cast<qint64>(stats.databaseSizeBytes);
+
+		QJsonObject contentObj;
+		contentObj["uri"] = uri;
+		contentObj["mimeType"] = "application/json";
+		contentObj["text"] = QString::fromUtf8(QJsonDocument(statsObj).toJson(QJsonDocument::Compact));
+
+		QJsonArray contents;
+		contents.append(contentObj);
+		result["contents"] = contents;
 	} else {
 		result["error"] = "Unknown resource URI: " + uri;
 	}

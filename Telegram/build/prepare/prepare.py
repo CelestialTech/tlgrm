@@ -450,7 +450,7 @@ if customRunCommand:
     finish(0)
 
 stage('patches', """
-    git clone https://github.com/desktop-app/patches.git
+    git clone git@github.com:desktop-app/patches.git
     cd patches
     git checkout b8c3a8ffc1514861837b9213383133c63023e0de
 """)
@@ -461,7 +461,7 @@ win:
     SET CHERE_INVOKING=enabled_from_arguments
     SET MSYS2_PATH_TYPE=inherit
 
-    powershell -Command "iwr -OutFile ./msys64.exe https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.sfx.exe"
+    powershell -Command "iwr -OutFile ./msys64.exe git@github.com:msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.sfx.exe"
     msys64.exe
     del msys64.exe
 
@@ -500,7 +500,7 @@ win:
 if not mac or 'build-stackwalk' in options:
     stage('gyp', """
 win:
-    git clone https://github.com/desktop-app/gyp.git
+    git clone git@github.com:desktop-app/gyp.git
     cd gyp
     git checkout 5e2425c47b
 mac:
@@ -512,7 +512,7 @@ mac:
 
 stage('lzma', """
 win:
-    git clone https://github.com/desktop-app/lzma.git
+    git clone git@github.com:desktop-app/lzma.git
     cd lzma\\C\\Util\\LzmaLib
     msbuild -m LzmaLib.sln /property:Configuration=Debug /property:Platform="$X8664"
 release:
@@ -521,7 +521,7 @@ release:
 
 stage('xz', """
 !win:
-    git clone -b v5.4.5 https://github.com/tukaani-project/xz.git
+    git clone -b v5.4.5 git@github.com:tukaani-project/xz.git
     cd xz
     sed -i '' '\\@check_symbol_exists(futimens "sys/types.h;sys/stat.h" HAVE_FUTIMENS)@d' CMakeLists.txt
     CFLAGS="$UNGUARDED" CPPFLAGS="$UNGUARDED" cmake -B build . \\
@@ -532,7 +532,7 @@ stage('xz', """
 """)
 
 stage('zlib', """
-    git clone -b v1.3.1 https://github.com/madler/zlib.git
+    git clone -b v1.3.1 git@github.com:madler/zlib.git
     cd zlib
 win:
     cmake . ^
@@ -553,7 +553,7 @@ mac:
 """)
 
 stage('mozjpeg', """
-    git clone -b v4.1.5 https://github.com/mozilla/mozjpeg.git
+    git clone -b v4.1.5 git@github.com:mozilla/mozjpeg.git
     cd mozjpeg
 win:
     cmake . ^
@@ -590,7 +590,7 @@ mac:
 """)
 
 stage('openssl3', """
-    git clone -b openssl-3.2.1 https://github.com/openssl/openssl openssl3
+    git clone -b openssl-3.2.1 git@github.com:openssl/openssl openssl3
     cd openssl3
 win32:
     perl Configure no-shared no-tests debug-VC-WIN32 /FS
@@ -637,7 +637,7 @@ mac:
 """)
 
 stage('opus', """
-    git clone -b v1.5.2 https://github.com/xiph/opus.git
+    git clone -b v1.5.2 git@github.com:xiph/opus.git
     cd opus
 win:
     cmake -B out . ^
@@ -655,7 +655,7 @@ mac:
 """)
 
 stage('rnnoise', """
-    git clone https://github.com/desktop-app/rnnoise.git
+    git clone git@github.com:desktop-app/rnnoise.git
     cd rnnoise
     git checkout d8ea2b0
     mkdir out
@@ -707,7 +707,7 @@ mac:
 
 stage('gas-preprocessor', """
 win:
-    git clone https://github.com/FFmpeg/gas-preprocessor
+    git clone git@github.com:FFmpeg/gas-preprocessor
     cd gas-preprocessor
     echo @echo off > cpp.bat
     echo cl %%%%%%** >> cpp.bat
@@ -780,7 +780,7 @@ mac:
 """)
 
 stage('openh264', """
-    git clone -b v2.6.0 https://github.com/cisco/openh264.git
+    git clone -b v2.6.0 git@github.com:cisco/openh264.git
     cd openh264
 win32:
     SET "TARGET=x86"
@@ -838,7 +838,7 @@ mac:
 """)
 
 stage('libavif', """
-    git clone -b v1.3.0 https://github.com/AOMediaCodec/libavif.git
+    git clone -b v1.3.0 git@github.com:AOMediaCodec/libavif.git
     cd libavif
 win:
     cmake . ^
@@ -867,7 +867,7 @@ mac:
 """)
 
 stage('libde265', """
-    git clone -b v1.0.16 https://github.com/strukturag/libde265.git
+    git clone -b v1.0.16 git@github.com:strukturag/libde265.git
     cd libde265
 win:
     cmake . ^
@@ -899,7 +899,7 @@ mac:
 """)
 
 stage('libwebp', """
-    git clone -b v1.5.0 https://github.com/webmproject/libwebp.git
+    git clone -b v1.5.0 git@github.com:webmproject/libwebp.git
     cd libwebp
 win:
     nmake /f Makefile.vc CFG=debug-static OBJDIR=out RTLIBCFG=static all
@@ -938,7 +938,7 @@ mac:
 """)
 
 stage('libheif', """
-    git clone -b v1.19.8 https://github.com/strukturag/libheif.git
+    git clone -b v1.19.8 git@github.com:strukturag/libheif.git
     cd libheif
 win:
     %THIRDPARTY_DIR%\\msys64\\usr\\bin\\sed.exe -i 's/LIBHEIF_EXPORTS/LIBDE265_STATIC_BUILD/g' libheif/CMakeLists.txt
@@ -996,7 +996,7 @@ mac:
 """)
 
 stage('libjxl', """
-    git clone -b v0.11.1 --recursive --shallow-submodules https://github.com/libjxl/libjxl.git
+    git clone -b v0.11.1 --recursive --shallow-submodules git@github.com:libjxl/libjxl.git
     cd libjxl
 """ + setVar("cmake_defines", """
     -DBUILD_SHARED_LIBS=OFF
@@ -1040,7 +1040,7 @@ mac:
 """)
 
 stage('libvpx', """
-    git clone https://github.com/webmproject/libvpx.git
+    git clone git@github.com:webmproject/libvpx.git
 depends:patches/libvpx/*.patch
     cd libvpx
     git checkout v1.14.1
@@ -1102,7 +1102,7 @@ mac:
 """)
 
 stage('liblcms2', """
-    git clone -b lcms2.16 https://github.com/mm2/Little-CMS.git liblcms2
+    git clone -b lcms2.16 git@github.com:mm2/Little-CMS.git liblcms2
     cd liblcms2
 win:
 depends:python/Scripts/activate.bat
@@ -1139,15 +1139,15 @@ mac:
 
 stage('nv-codec-headers', """
 win:
-    git clone -b n12.1.14.0 https://github.com/FFmpeg/nv-codec-headers.git
+    git clone -b n12.1.14.0 git@github.com:FFmpeg/nv-codec-headers.git
 """)
 
 stage('regex', """
-    git clone -b boost-1.83.0 https://github.com/boostorg/regex.git
+    git clone -b boost-1.83.0 git@github.com:boostorg/regex.git
 """)
 
 stage('ffmpeg', """
-    git clone -b n6.1.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
+    git clone -b n6.1.1 git@github.com:FFmpeg/FFmpeg.git ffmpeg
     cd ffmpeg
 win:
 depends:patches/ffmpeg.patch
@@ -1327,7 +1327,7 @@ mac:
 """)
 
 stage('openal-soft', """
-    git clone https://github.com/telegramdesktop/openal-soft.git
+    git clone git@github.com:telegramdesktop/openal-soft.git
     cd openal-soft
 win:
     git checkout 291c0fdbbd
@@ -1362,7 +1362,7 @@ mac:
     git checkout dfcb7b6799
 depends:patches/breakpad.diff
     git apply ../patches/breakpad.diff
-    git clone -b release-1.11.0 https://github.com/google/googletest src/testing
+    git clone -b release-1.11.0 git@github.com:google/googletest src/testing
     git clone https://chromium.googlesource.com/linux-syscall-support src/third_party/lss
     cd src/third_party/lss
     git checkout e1e7b0ad8e
@@ -1378,7 +1378,7 @@ stage('breakpad', """
     git checkout dfcb7b6799
 depends:patches/breakpad.diff
     git apply ../patches/breakpad.diff
-    git clone -b release-1.11.0 https://github.com/google/googletest src/testing
+    git clone -b release-1.11.0 git@github.com:google/googletest src/testing
 win:
     SET "PYTHONUTF8=1"
     SET "FolderPostfix="
@@ -1415,7 +1415,7 @@ release:
 
 stage('crashpad', """
 mac:
-    git clone https://github.com/desktop-app/crashpad.git
+    git clone git@github.com:desktop-app/crashpad.git
     cd crashpad
     git checkout 3279fae3f0
     git submodule init
@@ -1477,7 +1477,7 @@ if qt < '6':
     if win:
         stage('tg_angle', """
 win:
-    git clone https://github.com/desktop-app/tg_angle.git
+    git clone git@github.com:desktop-app/tg_angle.git
     cd tg_angle
     git checkout e3f59e8d0c
     cmake -B out ^
@@ -1489,7 +1489,7 @@ release:
 """)
 
     stage('qt_' + qt, """
-    git clone -b v$QT-lts-lgpl https://github.com/qt/qt5.git qt_$QT
+    git clone -b v$QT-lts-lgpl git@github.com:qt/qt5.git qt_$QT
     cd qt_$QT
     git submodule update --init --recursive --progress qtbase qtimageformats qtsvg
 depends:patches/qtbase_""" + qt + """/*.patch
@@ -1582,7 +1582,7 @@ mac:
 else: # qt > '6'
     branch = 'v$QT' + ('-lts-lgpl' if qt.startswith('6.2.') else '')
     stage('qt_' + qt, """
-    git clone -b """ + branch + """ https://github.com/qt/qt5.git qt_$QT
+    git clone -b """ + branch + """ git@github.com:qt/qt5.git qt_$QT
     cd qt_$QT
     git submodule update --init --recursive --progress qtbase qtimageformats qtsvg
 depends:patches/qtbase_""" + qt + """/*.patch
@@ -1676,7 +1676,7 @@ win:
 """)
 
 stage('tg_owt', """
-    git clone https://github.com/desktop-app/tg_owt.git
+    git clone git@github.com:desktop-app/tg_owt.git
     cd tg_owt
     git checkout 5c5c71258777d0196dbb3a09cc37d2f56ead28ab
     git submodule update --init --recursive
@@ -1774,7 +1774,7 @@ release:
 """)
 
 stage('ada', """
-    git clone -b v3.2.4 https://github.com/ada-url/ada.git
+    git clone -b v3.2.4 git@github.com:ada-url/ada.git
     cd ada
 win:
     cmake -B out . ^
@@ -1796,9 +1796,9 @@ mac:
 
 stage('protobuf', """
 win:
-    git clone --recursive -b v21.9 https://github.com/protocolbuffers/protobuf
+    git clone --recursive -b v21.9 git@github.com:protocolbuffers/protobuf
     cd protobuf
-    git clone https://github.com/abseil/abseil-cpp third_party/abseil-cpp
+    git clone git@github.com:abseil/abseil-cpp third_party/abseil-cpp
     cd third_party/abseil-cpp
     git checkout 273292d1cf
     cd ../..
@@ -1814,9 +1814,9 @@ win:
     cmake --build . --config Debug
 """)
 # mac:
-#     git clone --recursive -b v21.9 https://github.com/protocolbuffers/protobuf
+#     git clone --recursive -b v21.9 git@github.com:protocolbuffers/protobuf
 #     cd protobuf
-#     git clone https://github.com/abseil/abseil-cpp third_party/abseil-cpp
+#     git clone git@github.com:abseil/abseil-cpp third_party/abseil-cpp
 #     cd third_party/abseil-cpp
 #     git checkout 273292d1cf
 #     cd ../..
@@ -1830,7 +1830,7 @@ win:
 #     cmake --build .
 
 stage('tde2e', """
-    git clone https://github.com/tdlib/td.git tde2e
+    git clone git@github.com:tdlib/td.git tde2e
     cd tde2e
     git checkout 51743df
 win:

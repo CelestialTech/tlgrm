@@ -141,7 +141,6 @@ private:
 	int findPeakHour(qint64 chatId) const;
 
 	ChatArchiver *_archiver;
-	QSqlDatabase *_db;
 };
 
 } // namespace MCP
