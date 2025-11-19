@@ -5,6 +5,8 @@
 
 #include <QtCore/QTimer>
 #include <QtCore/QDateTime>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonObject>
 #include <QtSql/QSqlQuery>
 #include <QtSql/QSqlError>
 

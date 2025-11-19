@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_global_privacy.h"
 #include "apiwrap.h"
+#include "settings/settings_bots.h"
 #include "settings/settings_chat.h"
 #include "settings/settings_power_saving.h"
 #include "settings/settings_privacy_security.h"
@@ -1089,6 +1090,20 @@ void Advanced::setupContent(not_null<Window::SessionController*> controller) {
 	if (cAutoUpdate()) {
 		addUpdate();
 	}
+
+	// Bot Framework
+	AddDivider(content);
+	AddSkip(content);
+	AddSubsectionTitle(content, rpl::single(QString("Bot Framework")));
+	const auto botButton = AddButtonWithIcon(
+		content,
+		rpl::single(QString("Manage Bots")),
+		st::settingsButton,
+		{ &st::menuIconManage });
+	botButton->addClickHandler([=] {
+		controller->showSettings(Settings::Bots::Id());
+	});
+	AddSkip(content);
 
 	AddSkip(content);
 	AddDivider(content);

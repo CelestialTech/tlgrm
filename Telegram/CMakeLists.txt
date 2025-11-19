@@ -86,6 +86,7 @@ PRIVATE
     desktop-app::external_kcoreaddons
     desktop-app::external_qt_static_plugins
     desktop-app::external_qt
+    Qt${QT_VERSION_MAJOR}::Sql
     desktop-app::external_qr_code_generator
     desktop-app::external_crash_reports
     desktop-app::external_auto_updates
@@ -265,6 +266,8 @@ PRIVATE
     boxes/auto_lock_box.h
     boxes/auto_download_box.cpp
     boxes/auto_download_box.h
+    boxes/bot_config_box.cpp
+    boxes/bot_config_box.h
     boxes/background_box.cpp
     boxes/background_box.h
     boxes/background_preview_box.cpp
@@ -994,6 +997,8 @@ PRIVATE
     info/bot/starref/info_bot_starref_join_widget.h
     info/bot/starref/info_bot_starref_setup_widget.cpp
     info/bot/starref/info_bot_starref_setup_widget.h
+    info/bot_statistics_widget.cpp
+    info/bot_statistics_widget.h
     info/channel_statistics/boosts/create_giveaway_box.cpp
     info/channel_statistics/boosts/create_giveaway_box.h
     info/channel_statistics/boosts/giveaway/giveaway_list_controllers.cpp
@@ -1231,6 +1236,8 @@ PRIVATE
     mcp/bot_manager.h
     mcp/context_assistant_bot.cpp
     mcp/context_assistant_bot.h
+    mcp/bot_command_handler.cpp
+    mcp/bot_command_handler.h
     mcp/voice_transcription.cpp
     mcp/voice_transcription.h
     media/audio/media_audio.cpp
@@ -1551,6 +1558,8 @@ PRIVATE
     settings/settings_advanced.h
     settings/settings_blocked_peers.cpp
     settings/settings_blocked_peers.h
+    settings/settings_bots.cpp
+    settings/settings_bots.h
     settings/settings_business.cpp
     settings/settings_business.h
     settings/settings_chat.cpp

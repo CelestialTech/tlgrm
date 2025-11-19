@@ -27,9 +27,11 @@ class RBAC;
 
 // Bot execution statistics
 struct BotStats {
+	QString botId;
 	qint64 messagesProcessed = 0;
 	qint64 commandsExecuted = 0;
 	qint64 errorsOccurred = 0;
+	qint64 errorCount = 0;  // Alias for errorsOccurred
 	qint64 totalExecutionTimeMs = 0;
 	qint64 lastExecutionTimeMs = 0;
 	QDateTime lastActive;
@@ -39,6 +41,10 @@ struct BotStats {
 		return messagesProcessed > 0
 			? static_cast<double>(totalExecutionTimeMs) / messagesProcessed
 			: 0.0;
+	}
+
+	double averageResponseTime() const {
+		return avgExecutionTimeMs();  // Alias for compatibility
 	}
 };
 
@@ -68,6 +74,8 @@ public:
 	bool startBot(const QString &botId);
 	bool stopBot(const QString &botId);
 	bool restartBot(const QString &botId);
+	bool enableBot(const QString &botId);
+	bool disableBot(const QString &botId);
 
 	// Bot queries
 	BotBase* getBot(const QString &botId) const;

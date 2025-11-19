@@ -7,8 +7,11 @@
 #include "data/data_user.h"
 #include "data/data_chat.h"
 #include "data/data_channel.h"
+#include "data/data_messages.h"
+#include "data/data_document.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_item_components.h"
 
 #include <QtCore/QFile>
 #include <QtCore/QDir>
@@ -16,6 +19,7 @@
 #include <QtCore/QTextStream>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QTimer>
+#include <QtCore/QJsonDocument>
 #include <QtSql/QSqlError>
 #include <QtSql/QSqlRecord>
 
@@ -130,7 +134,7 @@ bool ChatArchiver::executeSQLFile(const QString &filePath) {
 	return true;
 }
 
-bool ChatArchiver::archiveMessage(const Data::Message *message) {
+bool ChatArchiver::archiveMessage(HistoryItem *message) {
 	if (!message || !_isRunning) {
 		return false;
 	}
@@ -140,13 +144,13 @@ bool ChatArchiver::archiveMessage(const Data::Message *message) {
 	const auto history = item->history();
 	const auto peer = history->peer;
 	const qint64 chatId = peer->id.value;
-	const qint64 messageId = item->id.msg.bare;
+	const qint64 messageId = item->id.bare;
 	const auto from = item->from();
 	const qint64 userId = from ? from->id.value : 0;
 
 	// Get message content
 	QString content = item->originalText().text;
-	const qint64 timestamp = item->date().toTime_t();
+	const qint64 timestamp = item->date();  // TimeId is already a Unix timestamp (int32)
 	QString date = QDateTime::fromSecsSinceEpoch(timestamp).toString(Qt::ISODate);
 
 	// Detect message type
@@ -156,7 +160,7 @@ bool ChatArchiver::archiveMessage(const Data::Message *message) {
 	// Check for reply
 	qint64 replyToId = 0;
 	if (const auto replyTo = item->replyToId()) {
-		replyToId = replyTo.msg.bare;
+		replyToId = replyTo.bare;
 	}
 
 	// Check for forward
@@ -260,7 +264,7 @@ bool ChatArchiver::archiveAllChats(int messagesPerChat) {
 }
 
 bool ChatArchiver::archiveEphemeralMessage(
-		const Data::Message *message,
+		HistoryItem *message,
 		const QString &ephemeralType,
 		int ttlSeconds) {
 
@@ -272,7 +276,7 @@ bool ChatArchiver::archiveEphemeralMessage(
 	const auto history = item->history();
 	const auto peer = history->peer;
 	const qint64 chatId = peer->id.value;
-	const qint64 messageId = item->id.msg.bare;
+	const qint64 messageId = item->id.bare;
 	const auto from = item->from();
 	const qint64 userId = from ? from->id.value : 0;
 	QString username = from ? from->name() : QString();
@@ -322,7 +326,7 @@ bool ChatArchiver::archiveEphemeralMessage(
 	return true;
 }
 
-bool ChatArchiver::isEphemeral(const Data::Message *message) const {
+bool ChatArchiver::isEphemeral(HistoryItem *message) const {
 	if (!message) {
 		return false;
 	}
@@ -615,7 +619,7 @@ void ChatArchiver::updateStats() {
 }
 
 // Helper implementations
-MessageType ChatArchiver::detectMessageType(const Data::Message *message) const {
+MessageType ChatArchiver::detectMessageType(HistoryItem *message) const {
 	if (!message || !message->media()) {
 		return MessageType::Text;
 	}
@@ -682,7 +686,7 @@ QJsonObject ChatArchiver::messageToJson(const QSqlQuery &query) const {
 	return msg;
 }
 
-QString ChatArchiver::downloadMedia(const Data::Message *message) {
+QString ChatArchiver::downloadMedia(HistoryItem *message) {
 	// Placeholder: Implement actual media download
 	// This would use tdesktop's media download APIs
 	Q_UNUSED(message);
@@ -774,11 +778,11 @@ void ChatArchiver::updateChatActivity(qint64 chatId) {
 }
 
 // Slots
-void ChatArchiver::onNewMessage(const Data::Message *message) {
+void ChatArchiver::onNewMessage(HistoryItem *message) {
 	archiveMessage(message);
 }
 
-void ChatArchiver::onMessageEdited(const Data::Message *message) {
+void ChatArchiver::onMessageEdited(HistoryItem *message) {
 	Q_UNUSED(message);
 	// Handle edited messages
 }
@@ -786,6 +790,30 @@ void ChatArchiver::onMessageEdited(const Data::Message *message) {
 void ChatArchiver::checkForNewMessages() {
 	// Periodic check for new messages
 	// This would poll the Data::Session for new messages
+}
+
+bool ChatArchiver::purgeOldMessages(int daysToKeep) {
+	if (!_isRunning || daysToKeep < 0) {
+		return false;
+	}
+
+	// Calculate cutoff timestamp
+	const qint64 cutoffTime = QDateTime::currentSecsSinceEpoch() - (daysToKeep * 86400);
+
+	// Delete messages older than cutoff
+	QSqlQuery query(_db);
+	query.prepare("DELETE FROM messages WHERE timestamp < :cutoff");
+	query.bindValue(":cutoff", cutoffTime);
+
+	if (!query.exec()) {
+		Q_EMIT error(QString("Failed to purge old messages: %1").arg(query.lastError().text()));
+		return false;
+	}
+
+	// Update statistics
+	updateStats();
+
+	return true;
 }
 
 // ===================================
@@ -831,7 +859,7 @@ void EphemeralArchiver::setCaptureTypes(bool selfDestruct, bool viewOnce, bool v
 	_captureVanishing = vanishing;
 }
 
-void EphemeralArchiver::onNewMessage(const Data::Message *message) {
+void EphemeralArchiver::onNewMessage(HistoryItem *message) {
 	if (!_autoCapture || !message) {
 		return;
 	}
@@ -845,7 +873,7 @@ void EphemeralArchiver::onNewMessage(const Data::Message *message) {
 }
 
 bool EphemeralArchiver::detectEphemeralType(
-		const Data::Message *message,
+		HistoryItem *message,
 		QString &type,
 		int &ttl) {
 
@@ -869,7 +897,7 @@ bool EphemeralArchiver::detectEphemeralType(
 }
 
 bool EphemeralArchiver::captureMessage(
-		const Data::Message *message,
+		HistoryItem *message,
 		const QString &type,
 		int ttl) {
 
@@ -894,7 +922,7 @@ bool EphemeralArchiver::captureMessage(
 
 	const auto history = message->history();
 	const qint64 chatId = history->peer->id.value;
-	const qint64 messageId = message->id.msg.bare;
+	const qint64 messageId = message->id.bare;
 
 	Q_EMIT ephemeralCaptured(chatId, messageId, type);
 	return true;

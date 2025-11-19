@@ -406,10 +406,12 @@ QString BatchOperations::exportBatchResultToCSV(const BatchResult &result, const
 
 	// Rows
 	for (const auto &opResult : result.results) {
+		QString escapedError = opResult.error;
+		escapedError.replace("\"", "\"\"");
 		out << opResult.index << ","
 		    << (opResult.success ? "true" : "false") << ","
 		    << opResult.duration << ","
-		    << "\"" << opResult.error.replace("\"", "\"\"") << "\"\n";
+		    << "\"" << escapedError << "\"\n";
 	}
 
 	file.close();

@@ -14,8 +14,9 @@
 
 namespace Data {
 class Session;
-class Message;
 } // namespace Data
+
+class HistoryItem;
 
 namespace MCP {
 
@@ -69,17 +70,17 @@ public:
 	[[nodiscard]] bool isRunning() const { return _isRunning; }
 
 	// Core archival functions
-	bool archiveMessage(const Data::Message *message);
+	bool archiveMessage(HistoryItem *message);
 	bool archiveChat(qint64 chatId, int messageLimit = -1);  // -1 = all messages
 	bool archiveAllChats(int messagesPerChat = 1000);
 
 	// Ephemeral message handling
 	bool archiveEphemeralMessage(
-		const Data::Message *message,
+		HistoryItem *message,
 		const QString &ephemeralType,
 		int ttlSeconds = 0
 	);
-	bool isEphemeral(const Data::Message *message) const;
+	bool isEphemeral(HistoryItem *message) const;
 
 	// Query functions
 	QJsonArray getMessages(qint64 chatId, int limit = 100, qint64 beforeTimestamp = 0);
@@ -121,8 +122,8 @@ Q_SIGNALS:
 	void error(const QString &errorMessage);
 
 private Q_SLOTS:
-	void onNewMessage(const Data::Message *message);
-	void onMessageEdited(const Data::Message *message);
+	void onNewMessage(HistoryItem *message);
+	void onMessageEdited(HistoryItem *message);
 	void checkForNewMessages();
 
 private:
@@ -133,7 +134,7 @@ private:
 
 	// Message conversion
 	QJsonObject messageToJson(const QSqlQuery &query) const;
-	MessageType detectMessageType(const Data::Message *message) const;
+	MessageType detectMessageType(HistoryItem *message) const;
 	QString messageTypeToString(MessageType type) const;
 
 	// Text processing
@@ -156,7 +157,7 @@ private:
 	QString detectActivityTrend(qint64 chatId) const;
 
 	// Media handling
-	QString downloadMedia(const Data::Message *message);
+	QString downloadMedia(HistoryItem *message);
 	QString getMediaPath(qint64 chatId, qint64 messageId, const QString &extension);
 
 	Data::Session *_session = nullptr;
@@ -199,14 +200,14 @@ Q_SIGNALS:
 	void error(const QString &errorMessage);
 
 private Q_SLOTS:
-	void onNewMessage(const Data::Message *message);
+	void onNewMessage(HistoryItem *message);
 	void onMessageDeleted(qint64 chatId, qint64 messageId);
 	void checkForEphemeral();
 
 private:
-	bool captureMessage(const Data::Message *message, const QString &type, int ttl);
-	bool detectEphemeralType(const Data::Message *message, QString &type, int &ttl);
-	QString downloadEphemeralMedia(const Data::Message *message);
+	bool captureMessage(HistoryItem *message, const QString &type, int ttl);
+	bool detectEphemeralType(HistoryItem *message, QString &type, int &ttl);
+	QString downloadEphemeralMedia(HistoryItem *message);
 
 	ChatArchiver *_archiver = nullptr;
 	Data::Session *_session = nullptr;

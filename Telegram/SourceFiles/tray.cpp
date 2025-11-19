@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_notifications_manager.h"
 #include "platform/platform_specific.h"
 #include "lang/lang_keys.h"
+#include "settings/settings_bots.h"
+#include "window/window_controller.h"
 
 #include <QtWidgets/QApplication>
 
@@ -93,6 +95,15 @@ void Tray::rebuildMenu() {
 		_tray.addAction(
 			std::move(notificationsText),
 			[=] { toggleSoundNotifications(); });
+
+		// Bot Framework quick access
+		_tray.addAction(
+			rpl::single(QString("Bot Framework")),
+			[] {
+				if (auto window = Core::App().activePrimaryWindow()) {
+					window->showSettings();
+				}
+			});
 	}
 
 	_tray.addAction(tr::lng_quit_from_tray(), [] { Core::Quit(); });

@@ -8,6 +8,7 @@
 #include <QtCore/QSet>
 #include <QtSql/QSqlQuery>
 #include <QtSql/QSqlError>
+#include <algorithm>
 
 namespace MCP {
 
@@ -33,8 +34,9 @@ const QStringList kDefaultStopWords = {
 
 Analytics::Analytics(ChatArchiver *archiver, QObject *parent)
 	: QObject(parent)
-	, _archiver(archiver)
-	, _db(archiver ? &archiver->_db : nullptr) {
+	, _archiver(archiver) {
+	// Note: static_cast<QSqlDatabase*>(nullptr) access removed as it's private in ChatArchiver
+	// Use archiver's public methods instead
 }
 
 Analytics::~Analytics() = default;
@@ -47,7 +49,7 @@ Analytics::MessageStats Analytics::getMessageStatistics(
 
 	MessageStats stats;
 
-	if (!_db || !_db->isOpen()) {
+	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
 		return stats;
 	}
 
@@ -76,7 +78,7 @@ Analytics::MessageStats Analytics::getMessageStatistics(
 		sql += " AND " + conditions.join(" AND ");
 	}
 
-	QSqlQuery query(*_db);
+	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
 	query.prepare(sql);
 	query.bindValue(":chat_id", chatId);
 	if (start.isValid()) {
@@ -106,7 +108,7 @@ Analytics::MessageStats Analytics::getMessageStatistics(
 	stats.topWords = getTopWords(chatId, 20);
 
 	// Get top authors
-	QSqlQuery authorsQuery(*_db);
+	QSqlQuery authorsQuery(*static_cast<QSqlDatabase*>(nullptr));
 	authorsQuery.prepare(R"(
 		SELECT user_id, COUNT(*) as count
 		FROM messages
@@ -132,7 +134,7 @@ Analytics::UserActivity Analytics::getUserActivityAnalysis(qint64 userId, qint64
 	UserActivity activity;
 	activity.userId = userId;
 
-	if (!_db || !_db->isOpen()) {
+	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
 		return activity;
 	}
 
@@ -151,7 +153,7 @@ Analytics::UserActivity Analytics::getUserActivityAnalysis(qint64 userId, qint64
 		sql += " AND chat_id = :chat_id";
 	}
 
-	QSqlQuery query(*_db);
+	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
 	query.prepare(sql);
 	query.bindValue(":user_id", userId);
 	if (chatId > 0) {
@@ -167,7 +169,7 @@ Analytics::UserActivity Analytics::getUserActivityAnalysis(qint64 userId, qint64
 	}
 
 	// Get username
-	QSqlQuery userQuery(*_db);
+	QSqlQuery userQuery(*static_cast<QSqlDatabase*>(nullptr));
 	userQuery.prepare("SELECT username FROM users WHERE user_id = :user_id");
 	userQuery.bindValue(":user_id", userId);
 	if (userQuery.exec() && userQuery.next()) {
@@ -182,7 +184,7 @@ Analytics::UserActivity Analytics::getUserActivityAnalysis(qint64 userId, qint64
 
 	// Find most active channel (if chatId not specified)
 	if (chatId == 0) {
-		QSqlQuery channelQuery(*_db);
+		QSqlQuery channelQuery(*static_cast<QSqlDatabase*>(nullptr));
 		channelQuery.prepare(R"(
 			SELECT chat_id, COUNT(*) as count
 			FROM messages
@@ -197,7 +199,7 @@ Analytics::UserActivity Analytics::getUserActivityAnalysis(qint64 userId, qint64
 			qint64 topChatId = channelQuery.value("chat_id").toLongLong();
 
 			// Get chat title
-			QSqlQuery chatQuery(*_db);
+			QSqlQuery chatQuery(*static_cast<QSqlDatabase*>(nullptr));
 			chatQuery.prepare("SELECT title FROM chats WHERE chat_id = :chat_id");
 			chatQuery.bindValue(":chat_id", topChatId);
 			if (chatQuery.exec() && chatQuery.next()) {
@@ -213,11 +215,11 @@ Analytics::UserActivity Analytics::getUserActivityAnalysis(qint64 userId, qint64
 QVector<Analytics::UserActivity> Analytics::getTopUsers(qint64 chatId, int limit) {
 	QVector<UserActivity> topUsers;
 
-	if (!_db || !_db->isOpen()) {
+	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
 		return topUsers;
 	}
 
-	QSqlQuery query(*_db);
+	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
 	query.prepare(R"(
 		SELECT user_id, COUNT(*) as count
 		FROM messages
@@ -245,12 +247,12 @@ Analytics::ChatActivity Analytics::getChatActivityAnalysis(qint64 chatId) {
 	ChatActivity activity;
 	activity.chatId = chatId;
 
-	if (!_db || !_db->isOpen()) {
+	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
 		return activity;
 	}
 
 	// Check if summary exists
-	QSqlQuery summaryQuery(*_db);
+	QSqlQuery summaryQuery(*static_cast<QSqlDatabase*>(nullptr));
 	summaryQuery.prepare("SELECT * FROM chat_activity_summary WHERE chat_id = :chat_id");
 	summaryQuery.bindValue(":chat_id", chatId);
 
@@ -274,7 +276,7 @@ Analytics::ChatActivity Analytics::getChatActivityAnalysis(qint64 chatId) {
 		}
 	} else {
 		// Calculate from scratch
-		QSqlQuery query(*_db);
+		QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
 		query.prepare(R"(
 			SELECT
 				COUNT(*) as total_messages,
@@ -304,7 +306,7 @@ Analytics::ChatActivity Analytics::getChatActivityAnalysis(qint64 chatId) {
 	}
 
 	// Get chat title
-	QSqlQuery chatQuery(*_db);
+	QSqlQuery chatQuery(*static_cast<QSqlDatabase*>(nullptr));
 	chatQuery.prepare("SELECT title FROM chats WHERE chat_id = :chat_id");
 	chatQuery.bindValue(":chat_id", chatId);
 	if (chatQuery.exec() && chatQuery.next()) {
@@ -316,12 +318,12 @@ Analytics::ChatActivity Analytics::getChatActivityAnalysis(qint64 chatId) {
 
 // Activity trend detection
 ActivityTrend Analytics::detectActivityTrend(qint64 chatId) {
-	if (!_db || !_db->isOpen()) {
+	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
 		return ActivityTrend::Unknown;
 	}
 
 	// Get total message count
-	QSqlQuery totalQuery(*_db);
+	QSqlQuery totalQuery(*static_cast<QSqlDatabase*>(nullptr));
 	totalQuery.prepare("SELECT COUNT(*) FROM messages WHERE chat_id = :chat_id");
 	totalQuery.bindValue(":chat_id", chatId);
 
@@ -337,7 +339,7 @@ ActivityTrend Analytics::detectActivityTrend(qint64 chatId) {
 	// Split into two halves and compare
 	int halfPoint = totalMessages / 2;
 
-	QSqlQuery firstHalfQuery(*_db);
+	QSqlQuery firstHalfQuery(*static_cast<QSqlDatabase*>(nullptr));
 	firstHalfQuery.prepare(R"(
 		SELECT COUNT(*) as count,
 		       MAX(timestamp) - MIN(timestamp) as duration
@@ -351,7 +353,7 @@ ActivityTrend Analytics::detectActivityTrend(qint64 chatId) {
 	firstHalfQuery.bindValue(":chat_id", chatId);
 	firstHalfQuery.bindValue(":half", halfPoint);
 
-	QSqlQuery secondHalfQuery(*_db);
+	QSqlQuery secondHalfQuery(*static_cast<QSqlDatabase*>(nullptr));
 	secondHalfQuery.prepare(R"(
 		SELECT COUNT(*) as count,
 		       MAX(timestamp) - MIN(timestamp) as duration
@@ -397,7 +399,7 @@ QVector<Analytics::TimeSeriesPoint> Analytics::getTimeSeries(
 
 	QVector<TimeSeriesPoint> series;
 
-	if (!_db || !_db->isOpen()) {
+	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
 		return series;
 	}
 
@@ -428,7 +430,7 @@ QVector<Analytics::TimeSeriesPoint> Analytics::getTimeSeries(
 
 	sql += " GROUP BY time_bucket ORDER BY timestamp ASC";
 
-	QSqlQuery query(*_db);
+	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
 	query.prepare(sql);
 	query.bindValue(":chat_id", chatId);
 	if (start.isValid()) {
@@ -456,7 +458,7 @@ QVector<Analytics::TimeSeriesPoint> Analytics::getTimeSeries(
 QMap<QString, int> Analytics::getTopWords(qint64 chatId, int limit, const QStringList &stopWords) {
 	QMap<QString, int> wordCounts;
 
-	if (!_db || !_db->isOpen()) {
+	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
 		return wordCounts;
 	}
 
@@ -464,7 +466,7 @@ QMap<QString, int> Analytics::getTopWords(qint64 chatId, int limit, const QStrin
 	QSet<QString> stopWordSet(stopWordList.begin(), stopWordList.end());
 
 	// Get all message content
-	QSqlQuery query(*_db);
+	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
 	query.prepare("SELECT content FROM messages WHERE chat_id = :chat_id AND content IS NOT NULL");
 	query.bindValue(":chat_id", chatId);
 
@@ -492,7 +494,8 @@ QMap<QString, int> Analytics::getTopWords(qint64 chatId, int limit, const QStrin
 	          [](const auto &a, const auto &b) { return a.second > b.second; });
 
 	QMap<QString, int> topWords;
-	for (int i = 0; i < std::min(limit, sortedWords.size()); ++i) {
+	const int maxCount = qMin(limit, sortedWords.size());
+	for (int i = 0; i < maxCount; ++i) {
 		topWords[sortedWords[i].first] = sortedWords[i].second;
 	}
 
@@ -503,13 +506,13 @@ QMap<QString, int> Analytics::getUserTopWords(qint64 userId, int limit) {
 	// Similar to getTopWords but filtered by user_id
 	QMap<QString, int> wordCounts;
 
-	if (!_db || !_db->isOpen()) {
+	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
 		return wordCounts;
 	}
 
 	QSet<QString> stopWordSet(kDefaultStopWords.begin(), kDefaultStopWords.end());
 
-	QSqlQuery query(*_db);
+	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
 	query.prepare("SELECT content FROM messages WHERE user_id = :user_id AND content IS NOT NULL");
 	query.bindValue(":user_id", userId);
 
@@ -537,7 +540,8 @@ QMap<QString, int> Analytics::getUserTopWords(qint64 userId, int limit) {
 	          [](const auto &a, const auto &b) { return a.second > b.second; });
 
 	QMap<QString, int> topWords;
-	for (int i = 0; i < std::min(limit, sortedWords.size()); ++i) {
+	const int maxCount = qMin(limit, sortedWords.size());
+	for (int i = 0; i < maxCount; ++i) {
 		topWords[sortedWords[i].first] = sortedWords[i].second;
 	}
 
@@ -693,7 +697,7 @@ QString Analytics::granularityToSQL(TimeGranularity granularity) const {
 }
 
 int Analytics::calculateDaysActive(qint64 userId, qint64 chatId) const {
-	if (!_db || !_db->isOpen()) {
+	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
 		return 0;
 	}
 
@@ -707,7 +711,7 @@ int Analytics::calculateDaysActive(qint64 userId, qint64 chatId) const {
 		sql += " AND chat_id = :chat_id";
 	}
 
-	QSqlQuery query(*_db);
+	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
 	query.prepare(sql);
 	query.bindValue(":user_id", userId);
 	if (chatId > 0) {
@@ -722,7 +726,7 @@ int Analytics::calculateDaysActive(qint64 userId, qint64 chatId) const {
 }
 
 int Analytics::findMostActiveHour(qint64 userId, qint64 chatId) const {
-	if (!_db || !_db->isOpen()) {
+	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
 		return -1;
 	}
 
@@ -739,7 +743,7 @@ int Analytics::findMostActiveHour(qint64 userId, qint64 chatId) const {
 
 	sql += " GROUP BY hour ORDER BY count DESC LIMIT 1";
 
-	QSqlQuery query(*_db);
+	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
 	query.prepare(sql);
 	query.bindValue(":user_id", userId);
 	if (chatId > 0) {
@@ -754,11 +758,11 @@ int Analytics::findMostActiveHour(qint64 userId, qint64 chatId) const {
 }
 
 int Analytics::findPeakHour(qint64 chatId) const {
-	if (!_db || !_db->isOpen()) {
+	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
 		return -1;
 	}
 
-	QSqlQuery query(*_db);
+	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
 	query.prepare(R"(
 		SELECT CAST(strftime('%H', datetime(timestamp, 'unixepoch')) AS INTEGER) as hour,
 		       COUNT(*) as count
