@@ -1,66 +1,100 @@
-/out/
-Debug/
-Release/
-/ThirdParty/
-/Telegram/build/target
-/Telegram/tests/
-/Telegram/gyp/tests/*.test
-/Telegram/out/
-/Telegram/*.user
-*.vcxproj*
-*.sln
-*.suo
-*.sdf
-*.opensdf
-*.opendb
-*.VC.db
-*.aps
+# Build artifacts
+build/
+out/
+*.log
+*.bak
+
+# Xcode
 *.xcodeproj
-ipch/
-.vs/
-.vscode/
-.cache/
-compile_commands.json
+*.xcworkspace
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData/
+*.hmap
+*.ipa
 
-/Telegram/log.txt
-/Telegram/data
-/Telegram/data_config
-/Telegram/DebugLogs/
-/Telegram/tdata/
-/Telegram/tdumps/
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
 
+# Compiled Object files
+*.o
+*.obj
+*.slo
+*.lo
+*.ko
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.a
+*.la
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Temporary files
+*~
+*.swp
+*.swo
 .DS_Store
-._*
-.qmake.stash
-/Mac/
-project.xcworkspace
-xcuserdata
+*.tmp
 
-parts
-prime
-stage
-*.snap
-.snapcraft
-/snap/gui/*.png
-/snap/gui/*.desktop
-/snap/plugins/__pycache__
+# Shell scripts (temporary)
+monitor_build.sh
+preflight_check.sh
 
-/Telegram/*.user.*
-*.txt.user
-*.pro.user
-/Linux/
-/Telegram/Makefile
-*.*~
+# Documentation (generated)
+docs/
+
+# Qt
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.qm
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
 .idea/
-cmake-build-debug/
+*.sublime-*
 
-# Local configuration files
-settings.local.json
-*.local.json
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+env/
+venv/
 .env
-.env.local
-.env.*.local
 
-# Cursor IDE local settings (but keep .cursor/rules/)
-.cursor/*
-!.cursor/rules/
+# Node
+node_modules/
+npm-debug.log
+
+# Misc
+compilation_errors.txt
