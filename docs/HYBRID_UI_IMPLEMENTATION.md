@@ -445,7 +445,7 @@ botManager->resetStats(botId);
 ## Documentation References
 
 - **Architecture**: `/docs/ARCHITECTURE_DECISION.md`
-- **Implementation Status**: `/docs/IMPLEMENTATION_STATUS.md`
+- **Implementation Status**: `/docs/IMPLEMENTATION_SUMMARY.md`
 - **Bot Framework**: `/docs/BOT_FRAMEWORK_DESIGN.md`
 - **MCP Integration**: `/docs/MCP_INTEGRATION.md`
 

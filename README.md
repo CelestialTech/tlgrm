@@ -986,7 +986,7 @@ When Telegram Desktop releases a new version:
    ```
 4. **If conflicts**: Manually merge and regenerate patches
 
-See [docs/TDESKTOP_INTEGRATION.md](docs/TDESKTOP_INTEGRATION.md) for detailed update procedure.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for system architecture details.
 
 ---
 
@@ -1007,7 +1007,7 @@ Both C++ and Python implementations expose these MCP tools:
 | `search_messages(chat_id, query)` | `chat_id: string`<br>`query: string` | Search messages | ✅ Implemented (stub) |
 
 **Note:** Currently returns stub data. Connecting to real tdesktop data is next phase.
-See [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for roadmap.
+See [docs/IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md) for complete status.
 
 ### MCP Resources
 
@@ -1207,7 +1207,7 @@ QJsonObject Server::toolListChats(const QJsonObject &args) {
 }
 ```
 
-See [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for detailed integration guide.
+See [docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md) for detailed build guide.
 
 ---
 
@@ -1359,7 +1359,7 @@ log show --predicate 'process == "Telegram"' --last 5m | grep MCP
 
 **Reason:** MCP implementation not yet connected to tdesktop session
 
-**Timeline:** See [Phase 2 roadmap](docs/IMPLEMENTATION_STATUS.md#phase-2-data-integration)
+**Status:** See [implementation summary](docs/IMPLEMENTATION_SUMMARY.md)
 
 ---
 
@@ -1509,8 +1509,8 @@ cmake --build . --config Release
 │
 ├── docs/                           # Documentation
 │   ├── ARCHITECTURE_DECISION.md    # Why C++ over Python
-│   ├── TDESKTOP_INTEGRATION.md     # Integration roadmap
-│   └── IMPLEMENTATION_STATUS.md    # Current status & roadmap
+│   ├── IMPLEMENTATION_SUMMARY.md   # Complete implementation overview
+│   └── BUILD_GUIDE.md              # Build instructions & troubleshooting
 │
 ├── Libraries/                      # Build dependencies (ignored)
 │   ├── qt_6.2.12/                 # Qt framework
@@ -1522,7 +1522,7 @@ cmake --build . --config Release
 │   └── depot_tools/               # Chromium build tools
 │
 ├── README.md                       # This file
-├── CLAUDE.md                       # AI assistant context
+├── docs/CLAUDE_NOTES.md            # AI assistant context
 ├── BUILD_BENCHMARKS.md             # Build performance data
 ├── apply-patches.sh                # Patch application script
 └── test_mcp.py                     # MCP testing script
@@ -1545,7 +1545,7 @@ cmake --build . --config Release
 ### Main Documentation
 
 - **[README.md](README.md)** (this file) - Complete guide
-- **[CLAUDE.md](CLAUDE.md)** - Technical context for AI assistants
+- **[docs/CLAUDE_NOTES.md](docs/CLAUDE_NOTES.md)** - Technical context for AI assistants
 - **[BUILD_BENCHMARKS.md](BUILD_BENCHMARKS.md)** - Build performance analysis
 
 ### Detailed Documentation
@@ -1555,15 +1555,15 @@ cmake --build . --config Release
   - Benchmarks and comparisons
   - Design rationale
 
-- **[docs/TDESKTOP_INTEGRATION.md](docs/TDESKTOP_INTEGRATION.md)**
-  - Detailed integration roadmap
-  - Phase-by-phase implementation plan
-  - Future features (voice AI, semantic search)
+- **[docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md)**
+  - Complete build reference with troubleshooting
+  - CMake configuration and options
+  - Common issues and solutions
 
-- **[docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)**
-  - Current implementation status
-  - Completed features
-  - In-progress work
+- **[docs/IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md)**
+  - Complete implementation status
+  - Statistics and metrics
+  - Technology stack
   - Upcoming milestones
 
 - **[python-bridge/README.md](python-bridge/README.md)**

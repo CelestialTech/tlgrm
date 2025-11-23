@@ -624,11 +624,9 @@ void BotStatisticsWidget::updateBotPerformance() {
 ### Created Documentation
 1. **ARCHITECTURE_DECISION.md** - Why hybrid architecture
 2. **HYBRID_UI_IMPLEMENTATION.md** - UI implementation guide (~500 lines)
-3. **COMPILATION_CHECKLIST.md** - Build system guide (~400 lines)
-4. **BUILD_READINESS_REPORT.md** - Pre-build validation results
-5. **IMPLEMENTATION_COMPLETE.md** - Complete implementation summary (~600 lines)
-6. **FINAL_SUMMARY.md** - Final overview and quick start
-7. **NEXT_STEPS.md** - This document
+3. **BUILD_GUIDE.md** - Complete build reference (~450 lines)
+4. **IMPLEMENTATION_SUMMARY.md** - Complete implementation summary (~270 lines)
+5. **NEXT_STEPS.md** - This document
 
 ### External Resources
 - **tdesktop:** https://github.com/telegramdesktop/tdesktop
@@ -671,10 +669,10 @@ void BotStatisticsWidget::updateBotPerformance() {
 4. Check logs for error messages
 
 **For questions about:**
-- **Build system:** See COMPILATION_CHECKLIST.md
+- **Build system:** See BUILD_GUIDE.md
 - **UI implementation:** See HYBRID_UI_IMPLEMENTATION.md
 - **Architecture:** See ARCHITECTURE_DECISION.md
-- **Python MCP:** See /Users/pasha/PycharmProjects/telegramMCP/README.md
+- **Python MCP:** See /Users/pasha/xCode/tlgrm/pythonMCP/README.md
 
 ---
 

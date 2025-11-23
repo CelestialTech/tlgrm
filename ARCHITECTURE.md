@@ -374,3 +374,145 @@ systemctl start telegram-mcp-aiml
 **Key Principle**: Each language does what it's best at.
 - C++: Speed, native access, real-time operations
 - Python: AI/ML, rapid prototyping, rich ecosystem
+
+## Python Component Structure (`pythonMCP/`)
+
+### Unified Design Rationale
+
+The Python component consolidates what were previously two separate codebases into **one unified component** with optional AI/ML features.
+
+### Directory Structure
+
+```
+pythonMCP/
+├── src/
+│   ├── mcp_server.py           # Main MCP server (unified)
+│   ├── ipc_bridge.py           # IPC to C++ server (Unix socket)
+│   ├── core/                   # Core MCP tools (no AI deps)
+│   │   ├── telegram_client.py  # Telegram API client (Pyrogram)
+│   │   ├── cache.py            # Message caching
+│   │   └── config.py           # Config loader
+│   └── aiml/                   # AI/ML features (optional)
+│       ├── service.py          # AI/ML service layer
+│       ├── embeddings.py       # Sentence embeddings
+│       ├── semantic_search.py  # Vector search
+│       └── ...
+├── requirements.txt            # Full install (with AI/ML)
+├── requirements-minimal.txt    # Minimal install (no AI/ML)
+├── config.toml                 # Configuration
+├── models/                     # Downloaded AI models
+└── data/chromadb/              # Vector database
+```
+
+### Server Modes
+
+The Python MCP server supports three operational modes:
+
+**1. Standalone Mode**
+```bash
+python src/mcp_server.py --mode standalone
+```
+- Uses Telegram Bot API directly
+- No C++ dependency required
+- Rate limited (30 messages/sec)
+- Use case: Development, testing without tdesktop
+
+**2. Bridge Mode**
+```bash
+python src/mcp_server.py --mode bridge
+```
+- Connects to C++ server via `/tmp/telegram_mcp.sock`
+- Fast database access via IPC
+- Unlimited queries
+- Use case: Fast queries without AI
+
+**3. Hybrid Mode (Default)**
+```bash
+python src/mcp_server.py --mode hybrid
+```
+- Combines C++ speed with Python AI/ML
+- Reads from C++ → Processes with AI
+- Best of both worlds
+- Use case: Production with full features
+
+### Optional AI/ML Dependencies
+
+**Minimal Install** (fast, lightweight):
+```bash
+uv pip install -r requirements-minimal.txt
+```
+- Installs: mcp, pyrogram, structlog, fastapi
+- Size: ~50MB
+- Use for: Basic MCP operations, IPC bridge
+
+**Full Install** (AI/ML enabled):
+```bash
+uv pip install -r requirements.txt
+```
+- Adds: transformers, torch, chromadb, langchain
+- Size: ~5GB (includes models)
+- Use for: Semantic search, intent classification, summaries
+
+### MCP Tools API
+
+**Core Tools** (always available):
+- `get_messages(chat_id, limit)` - Retrieve messages
+- `search_messages(chat_id, query)` - Keyword search
+- `list_chats()` - List all chats
+- `get_chat_stats(chat_id)` - Chat statistics
+
+**AI/ML Tools** (require full install):
+- `semantic_search(query, chat_id)` - Meaning-based search
+- `classify_intent(text)` - Intent classification
+- `extract_topics(chat_id)` - Topic extraction
+- `summarize_conversation(chat_id)` - AI summaries
+
+### Configuration
+
+**`config.toml`**:
+```toml
+[mcp]
+server_name = "Telegram MCP"
+mode = "hybrid"  # standalone | bridge | hybrid
+transport = "stdio"
+
+[ipc]
+cpp_socket_path = "/tmp/telegram_mcp.sock"
+enabled = true
+
+[aiml]
+enabled = true  # Auto-detected
+embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+device = "mps"  # Apple Silicon GPU
+vector_db_path = "./data/chromadb"
+```
+
+### Development Workflow
+
+**PyCharm Setup**:
+1. Open `/Users/pasha/xCode/tlgrm/pythonMCP`
+2. Create virtual environment: `.venv`
+3. Install dependencies: `uv pip install -r requirements.txt`
+4. Run configurations:
+   - Minimal: `--mode standalone --no-aiml`
+   - Full: `--mode hybrid`
+
+**Testing**:
+```bash
+# Test core features
+pytest tests/test_core.py
+
+# Test AI/ML features
+pytest tests/test_aiml.py
+
+# Test IPC
+pytest tests/test_ipc.py
+```
+
+---
+
+**Key Benefits**:
+- ✅ Single codebase for all Python MCP functionality
+- ✅ Optional AI/ML (install only what you need)
+- ✅ Three operational modes (flexibility)
+- ✅ Clear separation: core vs AI/ML

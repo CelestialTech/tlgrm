@@ -31,46 +31,37 @@
 
 ### 📖 Understanding the Implementation
 
-3. **[FINAL_SUMMARY.md](FINAL_SUMMARY.md)** 🎯 **EXECUTIVE OVERVIEW**
+3. **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** 🎯 **COMPLETE OVERVIEW**
    - What was accomplished
    - Complete file manifest
-   - Feature highlights
-   - Quick start guide
-
-4. **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** 🗂️ **ARCHITECTURE**
-   - Visual file tree
-   - Component architecture diagrams
-   - Data flow illustrations
-   - Integration points
-
-5. **[IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md)** 📊 **DETAILED SUMMARY**
+   - Feature highlights and statistics
    - Phase-by-phase breakdown
-   - Code statistics
-   - Technology stack
-   - Next enhancements
+   - Technology stack and next enhancements
+
+4. **[../ARCHITECTURE.md](../ARCHITECTURE.md)** 🗂️ **SYSTEM ARCHITECTURE**
+   - Complementary C++ + Python design
+   - Component responsibilities
+   - Data flow and IPC communication
+   - Python component structure (pythonMCP/)
 
 ### 🔧 Technical References
 
-6. **[HYBRID_UI_IMPLEMENTATION.md](HYBRID_UI_IMPLEMENTATION.md)** 🎨 **UI GUIDE**
+5. **[HYBRID_UI_IMPLEMENTATION.md](HYBRID_UI_IMPLEMENTATION.md)** 🎨 **UI GUIDE**
    - Three-interface design (Settings + Tray + Chat)
    - Qt widget patterns
    - Code examples
    - Usage instructions
 
-7. **[COMPILATION_CHECKLIST.md](COMPILATION_CHECKLIST.md)** ⚙️ **BUILD SYSTEM**
-   - CMake configuration
-   - Build commands
-   - Dependency requirements
-   - Common issues and solutions
+6. **[BUILD_GUIDE.md](BUILD_GUIDE.md)** ⚙️ **COMPLETE BUILD REFERENCE**
+   - Quick build guide (30-90 minutes)
+   - CMake configuration and options
+   - Build commands and targets
+   - Troubleshooting common errors
+   - Build statistics and validation
+   - Post-build verification
 
-8. **[BUILD_READINESS_REPORT.md](BUILD_READINESS_REPORT.md)** ✅ **VALIDATION**
-   - Pre-build validation results
-   - Expected build times
-   - Known limitations (non-blocking)
-   - Rollback plan
-
-9. **[ARCHITECTURE_DECISION.md](ARCHITECTURE_DECISION.md)** 🏗️ **DESIGN RATIONALE**
-   - Why hybrid architecture (Python + C++)
+7. **[ARCHITECTURE_DECISION.md](ARCHITECTURE_DECISION.md)** 🏗️ **DESIGN RATIONALE**
+   - Why complementary architecture (Python + C++)
    - Technology trade-offs
    - Component responsibilities
 
@@ -99,11 +90,10 @@ sqlite3 "$DB_PATH" < ../Telegram/SourceFiles/mcp/sql/bot_framework_schema.sql
 sqlite3 "$DB_PATH" < ../Telegram/SourceFiles/mcp/sql/bot_framework_migration.sql
 
 # 4. Start Python MCP
-cd /Users/pasha/PycharmProjects/telegramMCP
-python3.12 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env  # Edit with TELEGRAM_BOT_TOKEN
-python src/mcp_server_enhanced.py &
+cd /Users/pasha/xCode/tlgrm/pythonMCP
+uv pip install -r requirements.txt
+cp .env.example .env  # Edit with Telegram credentials
+python src/mcp_server.py --mode hybrid &
 
 # 5. Launch
 cd /Users/pasha/xCode/tlgrm/tdesktop/build
@@ -116,8 +106,8 @@ cd /Users/pasha/xCode/tlgrm/tdesktop/build
 
 **Best for:** Understanding the full system
 
-1. Read [FINAL_SUMMARY.md](FINAL_SUMMARY.md) - Overview
-2. Read [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) - Architecture
+1. Read [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) - Complete overview
+2. Read [../ARCHITECTURE.md](../ARCHITECTURE.md) - System architecture
 3. Read [NEXT_STEPS.md](NEXT_STEPS.md) - Detailed guide
 4. Follow Step 1-7 in NEXT_STEPS.md
 5. Review [HYBRID_UI_IMPLEMENTATION.md](HYBRID_UI_IMPLEMENTATION.md) - UI details
@@ -126,10 +116,10 @@ cd /Users/pasha/xCode/tlgrm/tdesktop/build
 
 **Best for:** Contributing or extending the system
 
-1. Read all 9 documentation files in order
+1. Read all 7 documentation files in order
 2. Review source code in `/Telegram/SourceFiles/`
 3. Study database schemas in `/mcp/sql/`
-4. Examine Python MCP server in `/PycharmProjects/telegramMCP/`
+4. Examine Python MCP server in `/pythonMCP/`
 5. Read code comments and TODOs
 6. Set up development environment for modifications
 
@@ -166,18 +156,16 @@ requirements.txt                           - Dependencies
 README.md                                  - Documentation
 ```
 
-### Documentation (9 files)
+### Documentation (7 files)
 
 ```
 QUICK_START.md                             (Fast-track guide)
 NEXT_STEPS.md                              (Step-by-step instructions)
-FINAL_SUMMARY.md                           (Executive overview)
-PROJECT_STRUCTURE.md                       (Architecture diagrams)
-IMPLEMENTATION_COMPLETE.md                 (Detailed summary)
+IMPLEMENTATION_SUMMARY.md                  (Complete overview & statistics)
 HYBRID_UI_IMPLEMENTATION.md                (UI guide)
-COMPILATION_CHECKLIST.md                   (Build reference)
-BUILD_READINESS_REPORT.md                  (Validation results)
+BUILD_GUIDE.md                             (Build reference & troubleshooting)
 ARCHITECTURE_DECISION.md                   (Design rationale)
+../ARCHITECTURE.md                         (System architecture)
 ```
 
 ### Utilities (1 file)
@@ -365,21 +353,20 @@ ninja 2>&1 | tee build.log
 ## 📞 Getting Help
 
 **For build issues:**
-→ Read [COMPILATION_CHECKLIST.md](COMPILATION_CHECKLIST.md)
-→ Check [BUILD_READINESS_REPORT.md](BUILD_READINESS_REPORT.md)
+→ Read [BUILD_GUIDE.md](BUILD_GUIDE.md)
 
 **For UI questions:**
 → Read [HYBRID_UI_IMPLEMENTATION.md](HYBRID_UI_IMPLEMENTATION.md)
 
 **For architecture understanding:**
-→ Read [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)
+→ Read [../ARCHITECTURE.md](../ARCHITECTURE.md)
 → Read [ARCHITECTURE_DECISION.md](ARCHITECTURE_DECISION.md)
 
 **For Python MCP server:**
-→ Read `/Users/pasha/PycharmProjects/telegramMCP/README.md`
+→ Read `/Users/pasha/xCode/tlgrm/pythonMCP/README.md`
 
 **For complete overview:**
-→ Read [FINAL_SUMMARY.md](FINAL_SUMMARY.md)
+→ Read [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)
 
 ---
 

@@ -887,8 +887,8 @@ The Telegram MCP Server is a **production-ready, enterprise-grade implementation
 
 For implementation details, see:
 - [Architecture Decision](ARCHITECTURE_DECISION.md)
-- [Integration Guide](TDESKTOP_INTEGRATION.md)
-- [Implementation Status](IMPLEMENTATION_STATUS.md)
+- [Build Guide](BUILD_GUIDE.md)
+- [Implementation Summary](IMPLEMENTATION_SUMMARY.md)
 
 ---
 

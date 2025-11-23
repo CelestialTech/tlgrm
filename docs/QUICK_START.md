@@ -269,10 +269,9 @@ pip install --upgrade torch torchvision torchaudio
 For detailed information, see:
 
 - **NEXT_STEPS.md** - Comprehensive build and setup guide
-- **IMPLEMENTATION_COMPLETE.md** - Full implementation summary
+- **IMPLEMENTATION_SUMMARY.md** - Full implementation summary
 - **HYBRID_UI_IMPLEMENTATION.md** - UI architecture details
-- **COMPILATION_CHECKLIST.md** - Build system reference
-- **BUILD_READINESS_REPORT.md** - Pre-build validation results
+- **BUILD_GUIDE.md** - Build system reference & validation
 
 ---
 
