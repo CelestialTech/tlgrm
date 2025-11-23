@@ -2,7 +2,7 @@
 
 ## 🎯 Overview
 
-This project integrates **Model Context Protocol (MCP)** with Telegram Desktop through a hybrid C++/Python architecture that combines native desktop integration with advanced AI/ML capabilities.
+This project integrates **Model Context Protocol (MCP)** with Telegram Desktop through a **complementary C++/Python architecture** that combines native desktop performance with advanced AI/ML intelligence.
 
 ## 🏗️ Architecture
 
@@ -11,32 +11,33 @@ This project integrates **Model Context Protocol (MCP)** with Telegram Desktop t
 │               AI Model (Claude/GPT)                    │
 └───────────────────┬────────────────────────────────────┘
                     │ MCP Protocol (JSON-RPC)
-┌───────────────────▼────────────────────────────────────┐
-│          Python MCP Server (Enhanced)                  │
-│   • Semantic search & embeddings                       │
-│   • Intent classification                              │
-│   • Topic extraction                                   │
-│   • Conversation summarization                         │
-└───────┬──────────────────────────┬─────────────────────┘
-        │ Hybrid Bridge            │
-        │ (90% SQLite direct)      │ (10% subprocess stdio)
-        │                          │
-┌───────▼──────────────┐  ┌────────▼────────────────────┐
-│   SQLite Database    │  │  C++ MCP Server (stdio)     │
-│   • Direct reads     │  │  • Archive operations       │
-│   • Message queries  │  │  • Export functionality     │
-│   • Chat stats       │  │  • Bot management           │
-└──────────────────────┘  └─────────────────────────────┘
-        │                          │
-        └──────────┬───────────────┘
-                   │
-┌──────────────────▼────────────────────────────────────┐
-│          C++ tdesktop Core                            │
-│   • Native Telegram Desktop integration               │
-│   • ChatArchiver (47 tools)                           │
-│   • Analytics & Statistics                            │
-│   • Qt SQL Database                                   │
-└───────────────────────────────────────────────────────┘
+        ┌───────────┴───────────┐
+        │                       │
+┌───────▼──────────┐   ┌────────▼────────────────────┐
+│ C++ MCP Server   │   │ Python MCP Server           │
+│ (Fast Access)    │   │ (AI/ML Intelligence)        │
+│                  │◄──┤                             │
+│ • Direct DB      │IPC│ • Semantic search           │
+│ • Archive ops    │   │ • Intent classification     │
+│ • Export         │   │ • Topic extraction          │
+│ • Bot mgmt       │   │ • Conversation summaries    │
+└───────┬──────────┘   └────────┬────────────────────┘
+        │                       │
+┌───────▼──────────┐   ┌────────▼────────────────────┐
+│ Telegram Data    │   │ AI Models & VecDB           │
+│ • SQLite DB      │   │ • ChromaDB                  │
+│ • Session data   │   │ • Transformers              │
+│ • Media files    │   │ • Embeddings                │
+│ • MTProto API    │   │ • Apple Silicon (MPS)       │
+└──────────────────┘   └─────────────────────────────┘
+        │
+┌───────▼─────────────────────────────────────────────┐
+│          C++ tdesktop Core                          │
+│   • Native Telegram Desktop integration             │
+│   • ChatArchiver (47 tools)                         │
+│   • Analytics & Statistics                          │
+│   • Qt SQL Database                                 │
+└─────────────────────────────────────────────────────┘
 ```
 
 ## 📦 Components
@@ -62,47 +63,64 @@ This project integrates **Model Context Protocol (MCP)** with Telegram Desktop t
 
 **Build Status**: ✅ Compiles successfully on macOS (Apple Silicon)
 
-### 2. Python MCP Server (Enhanced)
+### 2. Python MCP Server (AI/ML Intelligence)
 
-**Location**: `/Users/pasha/PycharmProjects/telegramMCP/`
+**Location**: `/Users/pasha/xCode/tlgrm/pythonMCP/`
 
 **Key Files**:
-- `src/mcp_server_enhanced.py` - Main Python MCP server
-- `src/tdesktop_bridge.py` - Bridge client to C++ server
+- `src/mcp_server.py` - Unified MCP server (3 modes: standalone/bridge/hybrid)
+- `src/ipc_bridge.py` - IPC client to C++ server (Unix socket)
+- `src/aiml/service.py` - AI/ML service layer
+- `src/core/telegram_client.py` - Telegram API client
+- `requirements.txt` - Full dependencies (with AI/ML)
+- `requirements-minimal.txt` - Minimal dependencies (no AI/ML)
 
 **Features**:
 - ✅ AI/ML using sentence-transformers
 - ✅ Vector database (ChromaDB)
 - ✅ Semantic search across messages
 - ✅ Intent classification (BART)
-- ✅ Bridge integration with C++ server
-- ✅ 4 hybrid tools (C++ + Python AI)
+- ✅ IPC integration with C++ server (Unix socket)
+- ✅ Optional AI/ML dependencies
+- ✅ Apple Silicon GPU acceleration (MPS)
+- ✅ Three operation modes
 
 **Dependencies**:
-```python
+
+Minimal (no AI/ML):
+```
 mcp>=1.0.0
+pyrogram>=2.0.0
+structlog, toml, aiofiles
+```
+
+Full (with AI/ML):
+```
+All minimal dependencies plus:
 sentence-transformers
 chromadb
 torch  # Apple Silicon MPS support
 transformers
 langchain
-python-telegram-bot>=20.0
-loguru
-aiohttp
 ```
 
-### 3. Hybrid Bridge
+Install: `uv pip install -r requirements.txt` (full) or `requirements-minimal.txt`
 
-**Architecture**: SQLite (direct reads) + subprocess stdio (C++ operations)
-**Why Hybrid?**:
-- 90% of operations are reads (messages, stats) → Direct SQLite access is 10x faster than IPC
-- 10% of operations need C++ logic (archive, export) → subprocess stdio via MCP protocol
-- **No HTTP server needed** - simpler, more efficient, fewer dependencies
+### 3. IPC Communication
+
+**Architecture**: Unix domain socket (`/tmp/telegram_mcp.sock`)
+**Protocol**: JSON-RPC 2.0
+
+**How it works**:
+- Python server connects to C++ server via Unix socket
+- Python requests data → C++ fetches from SQLite → Python processes with AI
+- Fast: <1ms latency for local socket communication
+- Secure: Filesystem permissions control access
 
 **Performance**:
-- Read operations: <1ms (direct SQLite)
-- Write operations: ~50ms (subprocess stdio)
-- Memory: Shared database, minimal overhead
+- IPC call overhead: <1ms
+- Message fetch (100 msgs): ~5ms
+- AI processing: 20-100ms depending on model
 
 **Status**: ✅ Fully implemented
 
@@ -134,18 +152,16 @@ xcodebuild -project Telegram.xcodeproj -scheme Telegram -configuration Release b
 ### 2. Setup Python Server
 
 ```bash
-cd /Users/pasha/PycharmProjects/telegramMCP
+cd /Users/pasha/xCode/tlgrm/pythonMCP
 
-# Create virtual environment
-python3.12 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies using uv (fast!)
+uv pip install -r requirements-minimal.txt  # Basic features
+# OR
+uv pip install -r requirements.txt          # Full AI/ML features
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your TELEGRAM_BOT_TOKEN
+# Edit .env with your Telegram credentials
 ```
 
 ### 3. Run the System

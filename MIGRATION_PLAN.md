@@ -1,7 +1,12 @@
 # Migration Plan: Integrate Python AI/ML into Monorepo
 
+> **✅ STATUS: COMPLETED**
+> This migration was successfully completed on 2025-11-22.
+> The Python project has been moved from `/Users/pasha/PycharmProjects/telegramMCP` to `/Users/pasha/xCode/tlgrm/pythonMCP/`.
+> This document is kept for historical reference.
+
 ## Goal
-Move `/Users/pasha/PycharmProjects/telegramMCP` into `/Users/pasha/xCode/tlgrm/python-ml/` as a **complementary component** (not fallback).
+Move `/Users/pasha/PycharmProjects/telegramMCP` into `/Users/pasha/xCode/tlgrm/pythonMCP/` as a **complementary component** (not fallback).
 
 ## Current State
 

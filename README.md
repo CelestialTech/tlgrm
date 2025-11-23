@@ -1,6 +1,6 @@
 # Telegram MCP: Complete AI Integration
 
-A comprehensive **Model Context Protocol (MCP)** integration for Telegram, featuring a **high-performance C++ MCP server** embedded directly into a modified Telegram Desktop with optional Python fallback.
+A comprehensive **Model Context Protocol (MCP)** integration for Telegram, featuring a **high-performance C++ MCP server** embedded directly into a modified Telegram Desktop with **complementary Python AI/ML capabilities**.
 
 [![MCP](https://img.shields.io/badge/MCP-1.0-green.svg)](https://modelcontextprotocol.io/)
 [![C++20](https://img.shields.io/badge/C++-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
@@ -30,29 +30,32 @@ A comprehensive **Model Context Protocol (MCP)** integration for Telegram, featu
 
 ### What Makes This Different
 
-This project provides **two complementary MCP implementations** for Telegram:
+This project provides **two complementary MCP components** that work together:
 
-#### 1. **C++ MCP Server** (Primary - Embedded in Telegram Desktop)
+#### 1. **C++ MCP Server** (Fast Native Access)
 - ⚡ **10-100x faster** than API-based solutions
 - 💾 **Direct SQLite database access** - instant message retrieval
 - 🚫 **No rate limits** - unlimited local queries
-- 📦 **Single binary** - no Python dependency for production
+- 📦 **Single binary** - embedded in Telegram Desktop
 - 🔓 **Full MTProto access** - same capabilities as Telegram Desktop
 
-#### 2. **Python MCP Bridge** (Fallback - Development Tool)
-- 🛠️ **Rapid prototyping** - test MCP features quickly
-- 🔌 **IPC client** - can connect to C++ server via Unix socket
-- 🤖 **Bot API mode** - standalone operation (with rate limits)
-- 📚 **FastMCP** - clean Python implementation for reference
+#### 2. **Python MCP Server** (AI/ML Intelligence)
+- 🧠 **Semantic search** - find messages by meaning, not keywords
+- 🎯 **Intent classification** - understand what users want
+- 📊 **Topic extraction** - identify conversation themes
+- 💬 **Conversation summarization** - AI-powered summaries
+- 🔌 **IPC bridge** - connects to C++ server for fast data access
+- 🍎 **Apple Silicon optimized** - MPS GPU acceleration
 
 ### Key Features
 
 - **Direct Database Access**: Read messages instantly from local SQLite database (no API calls)
 - **Native Integration**: MCP server runs within Telegram Desktop process
+- **AI/ML Intelligence**: Semantic search, intent classification, topic extraction via Python
+- **Complementary Design**: C++ handles speed, Python handles AI understanding
 - **Full Protocol Support**: JSON-RPC 2.0 over stdio transport
-- **Production Ready**: Single self-contained binary
-- **Development Tools**: Python bridge for rapid feature prototyping
-- **Patch System**: Easy updates to new Telegram Desktop versions
+- **Production Ready**: Both C++ and Python components deployable
+- **Unified Build System**: Single Makefile for both components
 
 ---
 
@@ -67,30 +70,31 @@ This project provides **two complementary MCP implementations** for Telegram:
         ┌───────────────┴──────────────┐
         │                              │
 ┌───────▼──────────┐          ┌───────▼────────────┐
-│  C++ MCP Server  │          │ Python MCP Bridge  │
-│  (PRIMARY)       │          │ (FALLBACK)         │
+│  C++ MCP Server  │          │ Python MCP Server  │
+│  (Fast Access)   │          │ (AI/ML Layer)      │
 │                  │◄────IPC──┤                    │
-│  Embedded in     │          │ Development tool   │
-│  Telegram        │          │ Bot API access     │
-│  Desktop         │          └────────────────────┘
-└───────┬──────────┘
-        │ Direct Access (No Network)
-┌───────▼──────────┐
-│  Telegram Data   │
-│  • SQLite DB     │
-│  • Session Data  │
-│  • Media Files   │
-│  • MTProto API   │
-└──────────────────┘
+│  Embedded in     │          │ Semantic search    │
+│  Telegram        │          │ Intent classify    │
+│  Desktop         │          │ Topic extraction   │
+└───────┬──────────┘          └────────┬───────────┘
+        │ Direct Access                │
+┌───────▼──────────┐          ┌────────▼───────────┐
+│  Telegram Data   │          │  AI Models & VecDB │
+│  • SQLite DB     │          │  • ChromaDB        │
+│  • Session Data  │          │  • Transformers    │
+│  • Media Files   │          │  • Embeddings      │
+│  • MTProto API   │          │  • Apple Silicon   │
+└──────────────────┘          └────────────────────┘
 ```
 
 ### How It Works
 
-1. **Telegram Desktop** is modified to embed an MCP server
-2. **MCP Server** starts when launched with `--mcp` flag
-3. **Claude Desktop** connects via stdio transport (stdin/stdout)
-4. **Direct Access** to local database - no API rate limits
-5. **Python Bridge** (optional) for development and testing
+1. **C++ Server**: Embedded in Telegram Desktop, provides fast database access
+2. **Python Server**: Runs separately, adds AI/ML intelligence to messages
+3. **IPC Communication**: Unix socket (`/tmp/telegram_mcp.sock`) connects both
+4. **Complementary**: C++ fetches data fast, Python analyzes with AI
+5. **Claude Desktop**: Can connect to either or both servers via MCP protocol
+6. **Unified Management**: Single `make` command controls both components
 
 ---
 
