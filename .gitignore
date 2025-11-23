@@ -180,3 +180,8 @@ docs/_templates/
 
 ThirdParty/*/
 !ThirdParty/README.md
+
+# Backup files
+*.backup.tar.gz
+*.backup
+
