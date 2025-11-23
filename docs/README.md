@@ -65,6 +65,12 @@
    - Technology trade-offs
    - Component responsibilities
 
+8. **[FUTURE_FEATURES.md](FUTURE_FEATURES.md)** 🔮 **ROADMAP**
+   - Voice AI (Whisper integration)
+   - Semantic search (FAISS)
+   - Media processing (OCR, video analysis)
+   - IPC bridge enhancements
+
 ---
 
 ## 🎯 Choose Your Path
