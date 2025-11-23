@@ -1,0 +1,30 @@
+# Minimal Python MCP Server for Telegram
+# Core dependencies only (no AI/ML)
+# Install: pip install -r requirements-minimal.txt
+
+# MCP SDK
+mcp>=1.0.0
+
+# Telegram integration (MTProto - full client access)
+pyrogram>=2.0.0
+tgcrypto>=1.2.5  # Speeds up Pyrogram encryption
+
+# Configuration
+python-dotenv>=1.0.0
+toml>=0.10.2
+
+# Logging
+structlog>=23.0.0
+rich>=13.0.0
+
+# Async utilities
+aiofiles>=23.0.0
+aiohttp>=3.9.0
+
+# Optional: Debug dashboard
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Development tools
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
