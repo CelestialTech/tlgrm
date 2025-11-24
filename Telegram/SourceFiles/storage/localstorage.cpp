@@ -143,8 +143,11 @@ void applyReadContext(ReadSettingsContext &&context) {
 
 bool _readOldSettings(bool remove, ReadSettingsContext &context) {
 	bool result = false;
-	auto file = QFile(cWorkingDir() + u"tdata/config"_q);
+	const auto configPath = cWorkingDir() + u"tdata/config"_q;
+	LOG(("TData: Attempting to read old config from: %1").arg(configPath));
+	auto file = QFile(configPath);
 	if (file.open(QIODevice::ReadOnly)) {
+		LOG(("TData: Successfully opened config file, size: %1 bytes").arg(file.size()));
 		LOG(("App Info: reading old config..."));
 		QDataStream stream(&file);
 		stream.setVersion(QDataStream::Qt_5_1);
@@ -166,6 +169,8 @@ bool _readOldSettings(bool remove, ReadSettingsContext &context) {
 		}
 		file.close();
 		result = true;
+	} else {
+		LOG(("TData: Failed to open config file: %1 (error: %2)").arg(configPath).arg(file.errorString()));
 	}
 	if (remove) file.remove();
 	return result;
