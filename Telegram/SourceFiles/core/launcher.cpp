@@ -414,13 +414,18 @@ int Launcher::exec() {
 
 bool Launcher::validateCustomWorkingDir() {
 	if (customWorkingDir()) {
+		LOG(("TData: Validating custom working directory: %1").arg(_customWorkingDir));
 		if (_customWorkingDir == cWorkingDir()) {
+			LOG(("TData: Custom working directory same as current, ignoring"));
 			_customWorkingDir = QString();
 			return false;
 		}
+		LOG(("TData: Setting working directory to: %1").arg(_customWorkingDir));
 		cForceWorkingDir(_customWorkingDir);
+		LOG(("TData: Working directory set successfully"));
 		return true;
 	}
+	LOG(("TData: No custom working directory specified"));
 	return false;
 }
 
@@ -586,7 +591,11 @@ void Launcher::processArguments() {
 	gQuit = parseResult.contains("-quit");
 	_customWorkingDir = parseResult.value("-workdir", {}).join(QString());
 	if (!_customWorkingDir.isEmpty()) {
+		LOG(("TData: Custom working directory requested: %1").arg(_customWorkingDir));
 		_customWorkingDir = QDir(_customWorkingDir).absolutePath() + '/';
+		LOG(("TData: Custom working directory (absolute): %1").arg(_customWorkingDir));
+	} else {
+		LOG(("TData: Using default working directory"));
 	}
 
 	const auto startUrls = parseResult.value("--", {});
