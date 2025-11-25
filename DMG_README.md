@@ -6,7 +6,7 @@
    Drag the Tlgrm.app icon to the Applications folder
 
 **2. Install Session Data** (Optional - for pre-configured login)
-   Double-click `TlgrmSessionData.pkg` and follow the prompts
+   Double-click `initiate.pkg` and follow the prompts
    → Installs Telegram session to `~/tdata`
 
 **3. Launch Tlgrm**
@@ -35,9 +35,9 @@ Skip the login process by installing existing session files
 
 ### Option B: With Pre-configured Session
 1. Install Tlgrm.app
-2. Run TlgrmSessionData.pkg installer
+2. Run initiate.pkg installer
    ```bash
-   sudo installer -pkg TlgrmSessionData.pkg -target /
+   sudo installer -pkg initiate.pkg -target /
    ```
 3. Launch Tlgrm - already logged in!
 

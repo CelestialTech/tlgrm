@@ -185,3 +185,5 @@ ThirdParty/*/
 *.backup.tar.gz
 *.backup
 
+Tlgrm-Installer.dmg
+dmg_build/
