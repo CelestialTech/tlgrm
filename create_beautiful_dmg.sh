@@ -6,8 +6,8 @@ set -e
 echo "Creating enhanced Tlgrm DMG installer..."
 
 # Configuration
-DMG_NAME="Tlgrm-Installer"
-VOLUME_NAME="Tlgrm Installer"
+DMG_NAME="Tlgrm"
+VOLUME_NAME="Tlgrm"
 SOURCE_DIR="dmg_build"
 FINAL_DMG="${DMG_NAME}.dmg"
 TEMP_DMG="${DMG_NAME}-temp.dmg"
