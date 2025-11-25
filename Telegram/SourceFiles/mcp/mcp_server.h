@@ -17,6 +17,10 @@
 #include <QtNetwork/QTcpServer>
 #include <QtSql/QSqlDatabase>
 
+namespace Main {
+class Session;
+} // namespace Main
+
 namespace MCP {
 
 // Forward declarations
@@ -30,6 +34,7 @@ class AuditLogger;
 class RBAC;
 class VoiceTranscription;
 class BotManager;
+class CacheManager;
 
 // MCP Protocol types
 enum class TransportType {
@@ -63,6 +68,8 @@ struct Prompt {
 class Server : public QObject {
 	Q_OBJECT
 
+	friend class Bridge;  // Allow Bridge to access private tool methods
+
 public:
 	explicit Server(QObject *parent = nullptr);
 	~Server();
@@ -72,6 +79,9 @@ public:
 
 	// Stop MCP server
 	void stop();
+
+	// Set session for live data access
+	void setSession(Main::Session *session);
 
 	// Server info
 	struct ServerInfo {
@@ -111,11 +121,13 @@ private:
 	QJsonObject toolSearchMessages(const QJsonObject &args);
 	QJsonObject toolGetUserInfo(const QJsonObject &args);
 
-	// Archive tools (7 tools)
+	// Archive tools (9 tools - includes ephemeral capture)
 	QJsonObject toolArchiveChat(const QJsonObject &args);
 	QJsonObject toolExportChat(const QJsonObject &args);
 	QJsonObject toolListArchivedChats(const QJsonObject &args);
 	QJsonObject toolGetArchiveStats(const QJsonObject &args);
+	QJsonObject toolConfigureEphemeralCapture(const QJsonObject &args);
+	QJsonObject toolGetEphemeralStats(const QJsonObject &args);
 	QJsonObject toolGetEphemeralMessages(const QJsonObject &args);
 	QJsonObject toolSearchArchive(const QJsonObject &args);
 	QJsonObject toolPurgeArchive(const QJsonObject &args);
@@ -224,10 +236,12 @@ private:
 	RBAC *_rbac = nullptr;
 	VoiceTranscription *_voiceTranscription = nullptr;
 	BotManager *_botManager = nullptr;
+	CacheManager *_cache = nullptr;
 
 	// State
 	bool _initialized = false;
 	QString _databasePath;
+	Main::Session *_session = nullptr;
 };
 
 } // namespace MCP

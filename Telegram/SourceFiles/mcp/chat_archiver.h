@@ -115,6 +115,9 @@ public:
 	bool rebuildIndexes();
 	bool purgeOldMessages(int daysToKeep);
 
+	// Database access
+	[[nodiscard]] QSqlDatabase database() const { return _db; }
+
 Q_SIGNALS:
 	void messageArchived(qint64 chatId, qint64 messageId);
 	void chatArchived(qint64 chatId, int messageCount);

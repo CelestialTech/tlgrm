@@ -2,420 +2,730 @@
 // Licensed under GPLv3 with OpenSSL exception.
 
 #include "batch_operations.h"
+#include "data/data_session.h"
+#include "history/history.h"
+#include "history/history_item.h"
+#include "main/main_session.h"
+#include "apiwrap.h"
+#include "data/data_peer.h"
+#include "api/api_sending.h"
 
-#include <QtCore/QThread>
 #include <QtCore/QFile>
 #include <QtCore/QTextStream>
-#include <QtCore/QDateTime>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QTimer>
+#include <QtCore/QThread>
 
 namespace MCP {
 
 BatchOperations::BatchOperations(QObject *parent)
-	: QObject(parent) {
+: QObject(parent) {
 }
 
-BatchOperations::~BatchOperations() = default;
-
-// Send messages to multiple chats
-BatchResult BatchOperations::sendMessages(
-		const QVector<qint64> &chatIds,
-		const QString &message,
-		bool silent) {
-
-	return executeOperations<qint64>(
-		"SEND_MESSAGES",
-		chatIds,
-		[this, &message, silent](const qint64 &chatId, OperationResult &result) -> bool {
-			auto start = QDateTime::currentMSecsSinceEpoch();
-
-			// TODO: Implement actual message sending via tdesktop API
-			// For now, this is a placeholder
-			Q_UNUSED(message);
-			Q_UNUSED(silent);
-
-			// Simulate operation
-			result.data["chat_id"] = chatId;
-			result.data["message"] = message;
-			result.duration = QDateTime::currentMSecsSinceEpoch() - start;
-
-			return true; // Success placeholder
-		}
-	);
+BatchOperations::~BatchOperations() {
+	stop();
 }
 
-// Send multiple messages to one chat
-BatchResult BatchOperations::sendMessagesToChat(
-		qint64 chatId,
-		const QVector<QString> &messages,
-		int delayMs) {
+bool BatchOperations::start(Main::Session *session) {
+	if (_isRunning) {
+		return true;
+	}
 
-	return executeOperations<QString>(
-		"SEND_MESSAGES_TO_CHAT",
-		messages,
-		[this, chatId, delayMs](const QString &message, OperationResult &result) -> bool {
-			auto start = QDateTime::currentMSecsSinceEpoch();
+	if (!session) {
+		return false;
+	}
 
-			// TODO: Implement via tdesktop API
-			Q_UNUSED(chatId);
-			Q_UNUSED(message);
+	_session = session;
 
-			// Apply delay
-			if (delayMs > 0) {
-				QThread::msleep(delayMs);
-			}
+	// Set up queue processing timer
+	_queueTimer = new QTimer(this);
+	connect(_queueTimer, &QTimer::timeout, this, &BatchOperations::processOperationQueue);
+	_queueTimer->start(_queueProcessIntervalMs);
 
-			result.data["chat_id"] = chatId;
-			result.data["message"] = message;
-			result.duration = QDateTime::currentMSecsSinceEpoch() - start;
+	_isRunning = true;
 
-			return true;
-		}
-	);
+	return true;
 }
 
-// Delete multiple messages
-BatchResult BatchOperations::deleteMessages(
-		qint64 chatId,
-		const QVector<qint64> &messageIds) {
+void BatchOperations::stop() {
+	if (!_isRunning) {
+		return;
+	}
 
-	return executeOperations<qint64>(
-		"DELETE_MESSAGES",
-		messageIds,
-		[this, chatId](const qint64 &messageId, OperationResult &result) -> bool {
-			auto start = QDateTime::currentMSecsSinceEpoch();
+	if (_queueTimer) {
+		_queueTimer->stop();
+		delete _queueTimer;
+		_queueTimer = nullptr;
+	}
 
-			// TODO: Implement via tdesktop API
-			Q_UNUSED(chatId);
-			Q_UNUSED(messageId);
-
-			result.data["chat_id"] = chatId;
-			result.data["message_id"] = messageId;
-			result.duration = QDateTime::currentMSecsSinceEpoch() - start;
-
-			return true;
-		}
-	);
+	_session = nullptr;
+	_isRunning = false;
 }
 
-// Delete messages in multiple chats
-BatchResult BatchOperations::deleteMessagesInChats(
-		const QVector<qint64> &chatIds,
-		const QVector<qint64> &messageIds) {
+qint64 BatchOperations::batchDeleteMessages(const BatchDeleteParams &params) {
+	if (!_isRunning) {
+		return 0;
+	}
 
-	struct ChatMessage {
-		qint64 chatId;
-		qint64 messageId;
-	};
+	qint64 operationId = createOperation(BatchOperationType::Delete);
+	
+	auto &result = _operations[operationId];
+	result.totalItems = params.messageIds.size();
 
-	QVector<ChatMessage> operations;
-	for (qint64 chatId : chatIds) {
-		for (qint64 messageId : messageIds) {
-			operations.append({chatId, messageId});
+	Q_EMIT operationStarted(operationId, "delete");
+
+	// Execute operation
+	executeDeleteOperation(operationId, params);
+
+	return operationId;
+}
+
+qint64 BatchOperations::deleteMessageRange(
+	qint64 chatId,
+	qint64 startMessageId,
+	qint64 endMessageId,
+	bool deleteForAll
+) {
+	// Collect message IDs in range
+	QVector<qint64> messageIds;
+	for (qint64 id = startMessageId; id <= endMessageId; ++id) {
+		messageIds.append(id);
+	}
+
+	BatchDeleteParams params;
+	params.chatId = chatId;
+	params.messageIds = messageIds;
+	params.deleteForAll = deleteForAll;
+
+	return batchDeleteMessages(params);
+}
+
+qint64 BatchOperations::deleteMessagesByFilter(
+	qint64 chatId,
+	const QString &filter,
+	const QJsonObject &filterParams
+) {
+	QVector<qint64> messageIds;
+
+	if (filter == "date") {
+		QDateTime startDate = QDateTime::fromString(filterParams["startDate"].toString(), Qt::ISODate);
+		QDateTime endDate = QDateTime::fromString(filterParams["endDate"].toString(), Qt::ISODate);
+		messageIds = filterMessagesByDate(chatId, startDate, endDate);
+	} else if (filter == "user") {
+		qint64 userId = filterParams["userId"].toString().toLongLong();
+		messageIds = filterMessagesByUser(chatId, userId);
+	} else if (filter == "type") {
+		QString messageType = filterParams["messageType"].toString();
+		messageIds = filterMessagesByType(chatId, messageType);
+	}
+
+	BatchDeleteParams params;
+	params.chatId = chatId;
+	params.messageIds = messageIds;
+	params.deleteForAll = filterParams["deleteForAll"].toBool(false);
+
+	return batchDeleteMessages(params);
+}
+
+qint64 BatchOperations::batchForwardMessages(const BatchForwardParams &params) {
+	if (!_isRunning) {
+		return 0;
+	}
+
+	qint64 operationId = createOperation(BatchOperationType::Forward);
+	
+	auto &result = _operations[operationId];
+	result.totalItems = params.messageIds.size();
+
+	Q_EMIT operationStarted(operationId, "forward");
+
+	// Execute operation
+	executeForwardOperation(operationId, params);
+
+	return operationId;
+}
+
+qint64 BatchOperations::forwardAllMessages(
+	qint64 sourceChatId,
+	qint64 targetChatId,
+	int limit
+) {
+	// This is a stub - would need to collect all message IDs from source chat
+	BatchForwardParams params;
+	params.sourceChatId = sourceChatId;
+	params.targetChatId = targetChatId;
+	// params.messageIds would be populated with actual message IDs
+
+	return batchForwardMessages(params);
+}
+
+qint64 BatchOperations::batchExportMessages(const BatchExportParams &params) {
+	if (!_isRunning) {
+		return 0;
+	}
+
+	qint64 operationId = createOperation(BatchOperationType::Export);
+	
+	auto &result = _operations[operationId];
+	result.totalItems = params.messageIds.size();
+
+	Q_EMIT operationStarted(operationId, "export");
+
+	// Execute operation
+	executeExportOperation(operationId, params);
+
+	return operationId;
+}
+
+qint64 BatchOperations::exportChatMessages(
+	qint64 chatId,
+	const QString &format,
+	const QString &outputPath,
+	int limit
+) {
+	// This is a stub - would need to collect message IDs
+	BatchExportParams params;
+	params.chatId = chatId;
+	params.format = format;
+	params.outputPath = outputPath;
+
+	return batchExportMessages(params);
+}
+
+qint64 BatchOperations::batchMarkAsRead(const BatchMarkReadParams &params) {
+	if (!_isRunning) {
+		return 0;
+	}
+
+	qint64 operationId = createOperation(BatchOperationType::MarkAsRead);
+	
+	auto &result = _operations[operationId];
+	result.totalItems = params.chatIds.size();
+
+	Q_EMIT operationStarted(operationId, "mark_read");
+
+	// Execute operation
+	executeMarkReadOperation(operationId, params);
+
+	return operationId;
+}
+
+qint64 BatchOperations::markAllChatsRead() {
+	// This is a stub - would need to collect all chat IDs
+	BatchMarkReadParams params;
+	// params.chatIds would be populated
+
+	return batchMarkAsRead(params);
+}
+
+bool BatchOperations::cancelOperation(qint64 operationId) {
+	if (!_operations.contains(operationId)) {
+		return false;
+	}
+
+	auto &result = _operations[operationId];
+	if (result.status != BatchStatus::Running && result.status != BatchStatus::Pending) {
+		return false;
+	}
+
+	result.status = BatchStatus::Cancelled;
+	result.endTime = QDateTime::currentDateTime();
+
+	Q_EMIT operationCancelled(operationId);
+
+	return true;
+}
+
+bool BatchOperations::pauseOperation(qint64 operationId) {
+	// Stub - would need more complex state management
+	return false;
+}
+
+bool BatchOperations::resumeOperation(qint64 operationId) {
+	// Stub - would need more complex state management
+	return false;
+}
+
+QJsonObject BatchOperations::getOperationStatus(qint64 operationId) {
+	if (!_operations.contains(operationId)) {
+		QJsonObject error;
+		error["error"] = "Operation not found";
+		return error;
+	}
+
+	return operationResultToJson(_operations[operationId]);
+}
+
+QJsonArray BatchOperations::listOperations(BatchStatus status) {
+	QJsonArray result;
+
+	for (const auto &op : _operations) {
+		if (op.status == status) {
+			result.append(operationResultToJson(op));
 		}
 	}
 
-	return executeOperations<ChatMessage>(
-		"DELETE_MESSAGES_IN_CHATS",
-		operations,
-		[this](const ChatMessage &op, OperationResult &result) -> bool {
-			auto start = QDateTime::currentMSecsSinceEpoch();
-
-			// TODO: Implement via tdesktop API
-			Q_UNUSED(op);
-
-			result.data["chat_id"] = op.chatId;
-			result.data["message_id"] = op.messageId;
-			result.duration = QDateTime::currentMSecsSinceEpoch() - start;
-
-			return true;
-		}
-	);
+	return result;
 }
 
-// Forward messages
-BatchResult BatchOperations::forwardMessages(
-		qint64 fromChatId,
-		qint64 toChatId,
-		const QVector<qint64> &messageIds) {
+QJsonArray BatchOperations::getRecentOperations(int limit) {
+	// Collect all operations and sort by start time
+	QVector<BatchOperationResult> operations;
+	for (const auto &op : _operations) {
+		operations.append(op);
+	}
 
-	return executeOperations<qint64>(
-		"FORWARD_MESSAGES",
-		messageIds,
-		[this, fromChatId, toChatId](const qint64 &messageId, OperationResult &result) -> bool {
-			auto start = QDateTime::currentMSecsSinceEpoch();
+	std::sort(operations.begin(), operations.end(), 
+		[](const BatchOperationResult &a, const BatchOperationResult &b) {
+			return a.startTime > b.startTime;
+		});
 
-			// TODO: Implement via tdesktop API
-			Q_UNUSED(fromChatId);
-			Q_UNUSED(toChatId);
-			Q_UNUSED(messageId);
+	QJsonArray result;
+	for (int i = 0; i < qMin(limit, operations.size()); ++i) {
+		result.append(operationResultToJson(operations[i]));
+	}
 
-			result.data["from_chat_id"] = fromChatId;
-			result.data["to_chat_id"] = toChatId;
-			result.data["message_id"] = messageId;
-			result.duration = QDateTime::currentMSecsSinceEpoch() - start;
-
-			return true;
-		}
-	);
+	return result;
 }
 
-// Pin messages
-BatchResult BatchOperations::pinMessages(
-		qint64 chatId,
-		const QVector<qint64> &messageIds,
-		bool notify) {
+QJsonObject BatchOperations::getOperationStatistics() {
+	QJsonObject stats;
 
-	return executeOperations<qint64>(
-		"PIN_MESSAGES",
-		messageIds,
-		[this, chatId, notify](const qint64 &messageId, OperationResult &result) -> bool {
-			auto start = QDateTime::currentMSecsSinceEpoch();
+	int total = _operations.size();
+	int pending = 0, running = 0, completed = 0, failed = 0, cancelled = 0;
 
-			// TODO: Implement via tdesktop API
-			Q_UNUSED(chatId);
-			Q_UNUSED(messageId);
-			Q_UNUSED(notify);
-
-			result.data["chat_id"] = chatId;
-			result.data["message_id"] = messageId;
-			result.data["notify"] = notify;
-			result.duration = QDateTime::currentMSecsSinceEpoch() - start;
-
-			return true;
+	for (const auto &op : _operations) {
+		switch (op.status) {
+			case BatchStatus::Pending: pending++; break;
+			case BatchStatus::Running: running++; break;
+			case BatchStatus::Completed: completed++; break;
+			case BatchStatus::Failed: failed++; break;
+			case BatchStatus::Cancelled: cancelled++; break;
 		}
-	);
+	}
+
+	stats["total"] = total;
+	stats["pending"] = pending;
+	stats["running"] = running;
+	stats["completed"] = completed;
+	stats["failed"] = failed;
+	stats["cancelled"] = cancelled;
+
+	return stats;
 }
 
-// Unpin messages
-BatchResult BatchOperations::unpinMessages(
-		qint64 chatId,
-		const QVector<qint64> &messageIds) {
+// Private slots
 
-	return executeOperations<qint64>(
-		"UNPIN_MESSAGES",
-		messageIds,
-		[this, chatId](const qint64 &messageId, OperationResult &result) -> bool {
-			auto start = QDateTime::currentMSecsSinceEpoch();
-
-			// TODO: Implement via tdesktop API
-			Q_UNUSED(chatId);
-			Q_UNUSED(messageId);
-
-			result.data["chat_id"] = chatId;
-			result.data["message_id"] = messageId;
-			result.duration = QDateTime::currentMSecsSinceEpoch() - start;
-
-			return true;
-		}
-	);
-}
-
-// Add reactions
-BatchResult BatchOperations::addReactions(
-		qint64 chatId,
-		const QVector<qint64> &messageIds,
-		const QString &emoji) {
-
-	return executeOperations<qint64>(
-		"ADD_REACTIONS",
-		messageIds,
-		[this, chatId, &emoji](const qint64 &messageId, OperationResult &result) -> bool {
-			auto start = QDateTime::currentMSecsSinceEpoch();
-
-			// TODO: Implement via tdesktop API
-			Q_UNUSED(chatId);
-			Q_UNUSED(messageId);
-			Q_UNUSED(emoji);
-
-			result.data["chat_id"] = chatId;
-			result.data["message_id"] = messageId;
-			result.data["emoji"] = emoji;
-			result.duration = QDateTime::currentMSecsSinceEpoch() - start;
-
-			return true;
-		}
-	);
-}
-
-// Generic batch executor
-BatchResult BatchOperations::executeBatch(
-		const QString &operationType,
-		const QVector<QJsonObject> &operations,
-		std::function<bool(const QJsonObject&, OperationResult&)> executor) {
-
-	return executeOperations<QJsonObject>(operationType, operations, executor);
-}
-
-// Template implementation for batch operations
-template<typename T>
-BatchResult BatchOperations::executeOperations(
-		const QString &operationType,
-		const QVector<T> &items,
-		std::function<bool(const T&, OperationResult&)> executor) {
-
-	BatchResult batch;
-	batch.operationType = operationType;
-	batch.total = items.size();
-	batch.successful = 0;
-	batch.failed = 0;
-	batch.status = OperationStatus::Running;
-	batch.startedAt = QDateTime::currentDateTime();
-
-	Q_EMIT batchStarted(operationType, items.size());
-
-	auto overallStart = QDateTime::currentMSecsSinceEpoch();
-
-	// Process items with concurrency control
-	int processed = 0;
-	int concurrentCount = 0;
-
-	for (int i = 0; i < items.size(); ++i) {
-		const T &item = items[i];
-
-		OperationResult opResult;
-		opResult.index = i;
-		opResult.success = false;
-
-		try {
-			// Apply rate limiting
-			if (concurrentCount >= _concurrencyLimit) {
-				applyRateLimit();
-				concurrentCount = 0;
-			}
-
-			// Execute operation
-			opResult.success = executor(item, opResult);
-
-			if (opResult.success) {
-				batch.successful++;
-			} else {
-				batch.failed++;
-				batch.errors.append(opResult.error);
-			}
-
-			concurrentCount++;
-
-		} catch (const std::exception &e) {
-			opResult.success = false;
-			opResult.error = QString::fromStdString(e.what());
-			batch.failed++;
-			batch.errors.append(opResult.error);
-		}
-
-		batch.results.append(opResult);
-		processed++;
-
-		Q_EMIT batchProgress(processed, items.size());
-
-		// Check if we should continue on error
-		if (!opResult.success && !shouldContinueOnError()) {
-			batch.status = OperationStatus::Failed;
+void BatchOperations::processOperationQueue() {
+	// Process pending operations up to max concurrent limit
+	for (auto &op : _operations) {
+		if (_currentConcurrentOperations >= _maxConcurrentOperations) {
 			break;
 		}
+
+		if (op.status == BatchStatus::Pending) {
+			// Start processing this operation
+			op.status = BatchStatus::Running;
+			op.startTime = QDateTime::currentDateTime();
+			_currentConcurrentOperations++;
+
+			// Actual processing is handled by execute* methods
+		}
 	}
-
-	batch.totalDuration = QDateTime::currentMSecsSinceEpoch() - overallStart;
-	batch.completedAt = QDateTime::currentDateTime();
-
-	// Determine final status
-	if (batch.failed == 0) {
-		batch.status = OperationStatus::Completed;
-	} else if (batch.successful > 0) {
-		batch.status = OperationStatus::Partial;
-	} else {
-		batch.status = OperationStatus::Failed;
-	}
-
-	Q_EMIT batchCompleted(operationType, batch.successful, batch.failed);
-
-	return batch;
 }
 
-// Apply rate limiting delay
-void BatchOperations::applyRateLimit() {
-	if (_rateLimitDelay > 0) {
-		auto now = QDateTime::currentDateTime();
-		qint64 elapsed = _lastOperationTime.msecsTo(now);
+// Private methods - Operation execution
 
-		if (elapsed < _rateLimitDelay) {
-			QThread::msleep(_rateLimitDelay - elapsed);
+void BatchOperations::executeDeleteOperation(qint64 operationId, const BatchDeleteParams &params) {
+	auto &result = _operations[operationId];
+
+	int successful = 0;
+	int failed = 0;
+
+	for (qint64 messageId : params.messageIds) {
+		if (result.status == BatchStatus::Cancelled) {
+			break;
 		}
 
-		_lastOperationTime = QDateTime::currentDateTime();
-	}
-}
-
-// Export batch result to JSON
-QJsonObject BatchOperations::exportBatchResult(const BatchResult &result) {
-	QJsonObject json;
-	json["operation_type"] = result.operationType;
-
-	QString statusStr;
-	switch (result.status) {
-	case OperationStatus::Pending: statusStr = "pending"; break;
-	case OperationStatus::Running: statusStr = "running"; break;
-	case OperationStatus::Completed: statusStr = "completed"; break;
-	case OperationStatus::Failed: statusStr = "failed"; break;
-	case OperationStatus::Partial: statusStr = "partial"; break;
-	}
-	json["status"] = statusStr;
-
-	json["total"] = result.total;
-	json["successful"] = result.successful;
-	json["failed"] = result.failed;
-	json["total_duration_ms"] = static_cast<qint64>(result.totalDuration);
-	json["started_at"] = result.startedAt.toString(Qt::ISODate);
-	json["completed_at"] = result.completedAt.toString(Qt::ISODate);
-
-	// Results array
-	QJsonArray resultsArray;
-	for (const auto &opResult : result.results) {
-		QJsonObject opJson;
-		opJson["index"] = opResult.index;
-		opJson["success"] = opResult.success;
-		opJson["duration_ms"] = opResult.duration;
-		if (!opResult.error.isEmpty()) {
-			opJson["error"] = opResult.error;
+		bool success = deleteMessage(params.chatId, messageId, params.deleteForAll);
+		if (success) {
+			successful++;
+		} else {
+			failed++;
 		}
-		opJson["data"] = opResult.data;
-		resultsArray.append(opJson);
-	}
-	json["results"] = resultsArray;
 
-	// Errors array
-	QJsonArray errorsArray;
-	for (const QString &error : result.errors) {
-		errorsArray.append(error);
-	}
-	json["errors"] = errorsArray;
+		result.processedItems++;
+		Q_EMIT operationProgress(operationId, result.processedItems, result.totalItems);
 
-	return json;
+		// Rate limiting
+		QThread::msleep(1000 / _operationsPerSecond);
+	}
+
+	completeOperation(operationId, failed == 0, failed > 0 ? "Some deletions failed" : QString());
 }
 
-// Export to CSV
-QString BatchOperations::exportBatchResultToCSV(const BatchResult &result, const QString &outputPath) {
-	QFile file(outputPath);
-	if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-		return QString();
+void BatchOperations::executeForwardOperation(qint64 operationId, const BatchForwardParams &params) {
+	auto &result = _operations[operationId];
+
+	int successful = 0;
+	int failed = 0;
+
+	for (qint64 messageId : params.messageIds) {
+		if (result.status == BatchStatus::Cancelled) {
+			break;
+		}
+
+		bool success = forwardMessage(params.sourceChatId, params.targetChatId, messageId, params);
+		if (success) {
+			successful++;
+		} else {
+			failed++;
+		}
+
+		result.processedItems++;
+		Q_EMIT operationProgress(operationId, result.processedItems, result.totalItems);
+
+		QThread::msleep(1000 / _operationsPerSecond);
 	}
 
-	QTextStream out(&file);
+	completeOperation(operationId, failed == 0, failed > 0 ? "Some forwards failed" : QString());
+}
 
-	// Header
-	out << "index,success,duration_ms,error\n";
+void BatchOperations::executeExportOperation(qint64 operationId, const BatchExportParams &params) {
+	auto &result = _operations[operationId];
 
-	// Rows
-	for (const auto &opResult : result.results) {
-		QString escapedError = opResult.error;
-		escapedError.replace("\"", "\"\"");
-		out << opResult.index << ","
-		    << (opResult.success ? "true" : "false") << ","
-		    << opResult.duration << ","
-		    << "\"" << escapedError << "\"\n";
+	QFile file(params.outputPath);
+	if (!file.open(QIODevice::WriteOnly)) {
+		completeOperation(operationId, false, "Failed to open output file");
+		return;
+	}
+
+	QTextStream stream(&file);
+
+	int successful = 0;
+	int failed = 0;
+
+	for (qint64 messageId : params.messageIds) {
+		if (result.status == BatchStatus::Cancelled) {
+			break;
+		}
+
+		bool success = exportMessage(params.chatId, messageId, params.format, stream);
+		if (success) {
+			successful++;
+		} else {
+			failed++;
+		}
+
+		result.processedItems++;
+		Q_EMIT operationProgress(operationId, result.processedItems, result.totalItems);
 	}
 
 	file.close();
-	return outputPath;
+
+	completeOperation(operationId, failed == 0, failed > 0 ? "Some exports failed" : QString());
+}
+
+void BatchOperations::executeMarkReadOperation(qint64 operationId, const BatchMarkReadParams &params) {
+	auto &result = _operations[operationId];
+
+	int successful = 0;
+	int failed = 0;
+
+	for (qint64 chatId : params.chatIds) {
+		if (result.status == BatchStatus::Cancelled) {
+			break;
+		}
+
+		bool success = markChatAsRead(chatId);
+		if (success) {
+			successful++;
+		} else {
+			failed++;
+		}
+
+		result.processedItems++;
+		Q_EMIT operationProgress(operationId, result.processedItems, result.totalItems);
+
+		QThread::msleep(1000 / _operationsPerSecond);
+	}
+
+	completeOperation(operationId, failed == 0, failed > 0 ? "Some mark-reads failed" : QString());
+}
+
+// Helper methods
+
+bool BatchOperations::deleteMessage(qint64 chatId, qint64 messageId, bool deleteForAll) {
+	if (!_session) {
+		qWarning() << "BatchOperations: Session not available";
+		return false;
+	}
+
+	auto peer = _session->data().peer(PeerId(chatId));
+	if (!peer) {
+		qWarning() << "BatchOperations: Invalid peer ID" << chatId;
+		return false;
+	}
+
+	auto history = _session->data().history(peer);
+	if (!history) {
+		qWarning() << "BatchOperations: History not found";
+		return false;
+	}
+
+	// Find the message
+	auto item = history->owner().message(peer->id, MsgId(messageId));
+	if (!item) {
+		qWarning() << "BatchOperations: Message not found" << messageId;
+		return false;
+	}
+
+	// TODO: Implement deleteMessages with correct tdesktop API
+	// canDeleteForEveryone expects TimeId (int32), not QDateTime
+	// ApiWrap::deleteMessages doesn't exist with this signature
+	qWarning() << "TODO: Implement deleteMessages with correct tdesktop API";
+	qDebug() << "BatchOperations: Stub - message not actually deleted" << messageId << "from chat" << chatId;
+	return false;
+}
+
+bool BatchOperations::forwardMessage(
+	qint64 sourceChatId,
+	qint64 targetChatId,
+	qint64 messageId,
+	const BatchForwardParams &params
+) {
+	if (!_session) {
+		qWarning() << "BatchOperations: Session not available";
+		return false;
+	}
+
+	auto sourcePeer = _session->data().peer(PeerId(sourceChatId));
+	auto targetPeer = _session->data().peer(PeerId(targetChatId));
+
+	if (!sourcePeer || !targetPeer) {
+		qWarning() << "BatchOperations: Invalid peer IDs";
+		return false;
+	}
+
+	auto sourceHistory = _session->data().history(sourcePeer);
+	auto targetHistory = _session->data().history(targetPeer);
+
+	if (!sourceHistory || !targetHistory) {
+		qWarning() << "BatchOperations: History not found";
+		return false;
+	}
+
+	// Find the message
+	auto item = sourceHistory->owner().message(sourcePeer->id, MsgId(messageId));
+	if (!item) {
+		qWarning() << "BatchOperations: Message not found" << messageId;
+		return false;
+	}
+
+	// TODO: Implement forwardMessages with correct tdesktop API
+	// Api::SendOptions doesn't have dropAuthor or dropCaption members
+	// forwardMessages expects HistoryItemsList, not FullMsgId directly
+	qWarning() << "TODO: Implement forwardMessages with correct tdesktop API";
+	qDebug() << "BatchOperations: Stub - message not actually forwarded" << messageId << "from" << sourceChatId << "to" << targetChatId;
+	return false;
+}
+
+bool BatchOperations::exportMessage(qint64 chatId, qint64 messageId, const QString &format, QTextStream &stream) {
+	if (!_session) {
+		qWarning() << "BatchOperations: Session not available";
+		return false;
+	}
+
+	auto peer = _session->data().peer(PeerId(chatId));
+	if (!peer) {
+		qWarning() << "BatchOperations: Invalid peer ID" << chatId;
+		return false;
+	}
+
+	auto history = _session->data().history(peer);
+	if (!history) {
+		qWarning() << "BatchOperations: History not found";
+		return false;
+	}
+
+	// Find the message
+	auto item = history->owner().message(peer->id, MsgId(messageId));
+	if (!item) {
+		qWarning() << "BatchOperations: Message not found" << messageId;
+		return false;
+	}
+
+	// Export based on format
+	// Note: item->date() returns TimeId (int32 unix timestamp), not QDateTime
+	const auto timestamp = item->date();
+	const auto dateTime = QDateTime::fromSecsSinceEpoch(timestamp);
+
+	if (format.toLower() == "json") {
+		QJsonObject json;
+		json["messageId"] = QString::number(messageId);
+		json["chatId"] = QString::number(chatId);
+		json["date"] = dateTime.toString(Qt::ISODate);
+		json["text"] = item->originalText().text;
+		json["fromId"] = QString::number(item->from()->id.value);
+		json["fromName"] = item->from()->name();
+
+		stream << QJsonDocument(json).toJson(QJsonDocument::Compact) << "\n";
+	} else if (format.toLower() == "txt" || format.toLower() == "text") {
+		stream << "[" << dateTime.toString("yyyy-MM-dd HH:mm:ss") << "] ";
+		stream << item->from()->name() << ": ";
+		stream << item->originalText().text << "\n";
+	} else if (format.toLower() == "html") {
+		stream << "<div class=\"message\" data-id=\"" << messageId << "\">";
+		stream << "<span class=\"date\">" << dateTime.toString("yyyy-MM-dd HH:mm:ss") << "</span> ";
+		stream << "<span class=\"author\">" << item->from()->name() << "</span>: ";
+		stream << "<span class=\"text\">" << item->originalText().text << "</span>";
+		stream << "</div>\n";
+	} else {
+		// Default to simple format
+		stream << item->originalText().text << "\n";
+	}
+
+	return true;
+}
+
+bool BatchOperations::markChatAsRead(qint64 chatId) {
+	if (!_session) {
+		qWarning() << "BatchOperations: Session not available";
+		return false;
+	}
+
+	auto peer = _session->data().peer(PeerId(chatId));
+	if (!peer) {
+		qWarning() << "BatchOperations: Invalid peer ID" << chatId;
+		return false;
+	}
+
+	auto history = _session->data().history(peer);
+	if (!history) {
+		qWarning() << "BatchOperations: History not found";
+		return false;
+	}
+
+	// TODO: Implement readInbox with correct tdesktop API
+	// ApiWrap::readInbox doesn't exist with this signature
+	qWarning() << "TODO: Implement readInbox with correct tdesktop API";
+	qDebug() << "BatchOperations: Stub - chat not actually marked as read" << chatId;
+	return false;
+}
+
+// Message filtering
+
+QVector<qint64> BatchOperations::filterMessagesByDate(
+	qint64 chatId,
+	const QDateTime &startDate,
+	const QDateTime &endDate
+) {
+	// Stub - would need to query messages from data session
+	return QVector<qint64>();
+}
+
+QVector<qint64> BatchOperations::filterMessagesByUser(qint64 chatId, qint64 userId) {
+	// Stub
+	return QVector<qint64>();
+}
+
+QVector<qint64> BatchOperations::filterMessagesByType(qint64 chatId, const QString &messageType) {
+	// Stub
+	return QVector<qint64>();
+}
+
+// Operation management
+
+qint64 BatchOperations::createOperation(BatchOperationType type) {
+	qint64 operationId = _nextOperationId++;
+
+	BatchOperationResult result;
+	result.operationId = operationId;
+	result.type = type;
+	result.status = BatchStatus::Pending;
+	result.startTime = QDateTime::currentDateTime();
+
+	_operations[operationId] = result;
+
+	return operationId;
+}
+
+void BatchOperations::updateOperationStatus(qint64 operationId, BatchStatus status) {
+	if (_operations.contains(operationId)) {
+		_operations[operationId].status = status;
+	}
+}
+
+void BatchOperations::updateOperationProgress(qint64 operationId, int processed, int successful, int failed) {
+	if (_operations.contains(operationId)) {
+		auto &result = _operations[operationId];
+		result.processedItems = processed;
+		result.successfulItems = successful;
+		result.failedItems = failed;
+	}
+}
+
+void BatchOperations::completeOperation(qint64 operationId, bool success, const QString &error) {
+	if (!_operations.contains(operationId)) {
+		return;
+	}
+
+	auto &result = _operations[operationId];
+	result.status = success ? BatchStatus::Completed : BatchStatus::Failed;
+	result.endTime = QDateTime::currentDateTime();
+	result.errorMessage = error;
+
+	_currentConcurrentOperations--;
+
+	if (success) {
+		Q_EMIT operationCompleted(operationId);
+	} else {
+		Q_EMIT operationFailed(operationId, error);
+	}
+}
+
+// Conversion
+
+QJsonObject BatchOperations::operationResultToJson(const BatchOperationResult &result) const {
+	QJsonObject json;
+	json["operationId"] = QString::number(result.operationId);
+	json["type"] = batchOperationTypeToString(result.type);
+	json["status"] = batchStatusToString(result.status);
+	json["totalItems"] = result.totalItems;
+	json["processedItems"] = result.processedItems;
+	json["successfulItems"] = result.successfulItems;
+	json["failedItems"] = result.failedItems;
+	json["startTime"] = result.startTime.toString(Qt::ISODate);
+	if (result.endTime.isValid()) {
+		json["endTime"] = result.endTime.toString(Qt::ISODate);
+	}
+	if (!result.errorMessage.isEmpty()) {
+		json["errorMessage"] = result.errorMessage;
+	}
+	json["details"] = result.details;
+	return json;
+}
+
+QString BatchOperations::batchOperationTypeToString(BatchOperationType type) const {
+	switch (type) {
+		case BatchOperationType::Delete: return "delete";
+		case BatchOperationType::Forward: return "forward";
+		case BatchOperationType::Export: return "export";
+		case BatchOperationType::MarkAsRead: return "mark_read";
+		case BatchOperationType::Search: return "search";
+	}
+	return "unknown";
+}
+
+QString BatchOperations::batchStatusToString(BatchStatus status) const {
+	switch (status) {
+		case BatchStatus::Pending: return "pending";
+		case BatchStatus::Running: return "running";
+		case BatchStatus::Completed: return "completed";
+		case BatchStatus::Failed: return "failed";
+		case BatchStatus::Cancelled: return "cancelled";
+	}
+	return "unknown";
 }
 
 } // namespace MCP

@@ -17,6 +17,8 @@
 
 namespace MCP {
 
+class Server;  // Forward declaration
+
 class Bridge : public QObject {
 	Q_OBJECT
 
@@ -32,6 +34,9 @@ public:
 
 	// Check if server is running
 	bool isRunning() const;
+
+	// Set MCP server for delegation
+	void setServer(Server *server);
 
 private Q_SLOTS:
 	void onNewConnection();
@@ -50,6 +55,7 @@ private:
 
 	QLocalServer *_server = nullptr;
 	QString _socketPath;
+	Server *_mcpServer = nullptr;
 };
 
 } // namespace MCP

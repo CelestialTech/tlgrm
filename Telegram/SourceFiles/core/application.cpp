@@ -83,6 +83,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
 #include "mcp/mcp_server.h"
+#include "mcp/mcp_bridge.h"
 #include "boxes/abstract_box.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
@@ -200,6 +201,10 @@ Application::Application()
 		if (session && !UpdaterDisabled()) { // #TODO multi someSessionValue
 			UpdateChecker().setMtproto(session);
 		}
+		// Pass active session to MCP server for live data access
+		if (_mcpServer) {
+			_mcpServer->setSession(session);
+		}
 	}, _lifetime);
 }
 
@@ -214,7 +219,8 @@ void Application::closeAdditionalWindows() {
 }
 
 Application::~Application() {
-	// Stop MCP server before other cleanup
+	// Stop MCP bridge and server before other cleanup
+	_mcpBridge = nullptr;
 	_mcpServer = nullptr;
 
 	if (_saveSettingsTimer && _saveSettingsTimer->isActive()) {
@@ -420,12 +426,44 @@ void Application::run() {
 		});
 	}
 
-	// Start MCP server if --mcp flag is present
+	// Start MCP server and IPC bridge if --mcp flag is present
 	const auto args = QCoreApplication::arguments();
-	if (args.contains(u"--mcp"_q)) {
+
+	// DEBUG: Print all arguments
+	fprintf(stderr, "[MCP] Command-line arguments (%lld total):\n", (long long)args.size());
+	for (int i = 0; i < args.size(); i++) {
+		fprintf(stderr, "[MCP]   [%d]: %s\n", i, args.at(i).toUtf8().constData());
+	}
+	fflush(stderr);
+
+	bool hasMcpFlag = args.contains(u"--mcp"_q);
+	fprintf(stderr, "[MCP] --mcp flag detected: %s\n", hasMcpFlag ? "YES" : "NO");
+	fflush(stderr);
+
+	if (hasMcpFlag) {
 		_mcpServer = std::make_unique<MCP::Server>();
 		if (_mcpServer->start(MCP::TransportType::Stdio)) {
 			DEBUG_LOG(("MCP: Server started successfully"));
+
+			// Subscribe to domain's active session changes
+			domain().activeSessionValue(
+			) | rpl::start_with_next([=](Main::Session *session) {
+				if (session && _mcpServer) {
+					_mcpServer->setSession(session);
+					fprintf(stderr, "[MCP] Session integrated with MCP server\n");
+					fflush(stderr);
+				}
+			}, _lifetime);
+
+			// Start IPC bridge for Python integration
+			_mcpBridge = std::make_unique<MCP::Bridge>();
+			if (_mcpBridge->start("/tmp/tdesktop_mcp.sock")) {
+				_mcpBridge->setServer(_mcpServer.get());
+				DEBUG_LOG(("MCP: IPC Bridge started on /tmp/tdesktop_mcp.sock"));
+			} else {
+				LOG(("MCP Error: Failed to start IPC bridge"));
+				_mcpBridge = nullptr;
+			}
 		} else {
 			LOG(("MCP Error: Failed to start server"));
 			_mcpServer = nullptr;

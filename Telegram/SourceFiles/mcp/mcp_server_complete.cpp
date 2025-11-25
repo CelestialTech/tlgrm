@@ -17,6 +17,7 @@
 #include "voice_transcription.h"
 #include "bot_manager.h"
 #include "context_assistant_bot.h"
+#include "cache_manager.h"
 
 #include <QtCore/QTimer>
 #include <QtCore/QDebug>
@@ -25,10 +26,30 @@
 #include <QtCore/QJsonArray>
 #include <QtSql/QSqlError>
 
+#include "main/main_session.h"
+#include "data/data_session.h"
+#include "data/data_peer.h"
+#include "data/data_user.h"
+#include "data/data_chat.h"
+#include "data/data_channel.h"
+#include "data/data_thread.h"
+#include "data/data_histories.h"
+#include "dialogs/dialogs_main_list.h"
+#include "dialogs/dialogs_indexed_list.h"
+#include "dialogs/dialogs_row.h"
+#include "history/history.h"
+#include "history/history_item.h"
+#include "history/view/history_view_element.h"
+#include "api/api_common.h"
+#include "api/api_editing.h"
+#include "apiwrap.h"
+
 namespace MCP {
 
 Server::Server(QObject *parent)
 	: QObject(parent) {
+	fprintf(stderr, "[MCP] Server object created\n");
+	fflush(stderr);
 	initializeCapabilities();
 	registerTools();
 	registerResources();
@@ -211,14 +232,55 @@ void Server::registerTools() {
 			}
 		},
 		Tool{
+			"configure_ephemeral_capture",
+			"Configure which types of ephemeral messages to capture",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"capture_self_destruct", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Capture self-destruct messages"},
+						{"default", true}
+					}},
+					{"capture_view_once", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Capture view-once messages"},
+						{"default", true}
+					}},
+					{"capture_vanishing", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Capture vanishing messages"},
+						{"default", true}
+					}}
+				}},
+			}
+		},
+		Tool{
+			"get_ephemeral_stats",
+			"Get statistics about captured ephemeral messages",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{}},
+			}
+		},
+		Tool{
 			"get_ephemeral_messages",
-			"Get captured ephemeral messages (self-destruct, view-once)",
+			"Get captured ephemeral messages (self-destruct, view-once, vanishing)",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"chat_id", QJsonObject{
 						{"type", "integer"},
 						{"description", "Optional: filter by chat"}
+					}},
+					{"type", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional: filter by type (self_destruct, view_once, vanishing)"}
+					}},
+					{"limit", QJsonObject{
+						{"type", "integer"},
+						{"description", "Max messages to return"},
+						{"default", 50}
 					}}
 				}},
 			}
@@ -1069,6 +1131,9 @@ void Server::registerPrompts() {
 }
 
 bool Server::start(TransportType transport) {
+	fprintf(stderr, "[MCP] Server::start() called, initialized=%d\n", _initialized);
+	fflush(stderr);
+
 	if (_initialized) {
 		return true;
 	}
@@ -1086,51 +1151,20 @@ bool Server::start(TransportType transport) {
 		return false;
 	}
 
-	// Initialize all components
-	_archiver = new ChatArchiver(this);
-	if (!_archiver->start(_databasePath)) {
-		qWarning() << "MCP: Failed to start ChatArchiver";
-		return false;
-	}
+	fprintf(stderr, "[MCP] Database initialized successfully\n");
+	fflush(stderr);
 
-	_ephemeralArchiver = new EphemeralArchiver(this);
-	_ephemeralArchiver->start(_archiver);
-
-	_analytics = new Analytics(_archiver, this);
-	_semanticSearch = new SemanticSearch(_archiver, this);
-	_semanticSearch->initialize();
-
-	_batchOps = new BatchOperations(this);
-
-	_scheduler = new MessageScheduler(this);
-	_scheduler->start(&_db);
-
+	// Initialize session-independent components only
 	_auditLogger = new AuditLogger(this);
 	_auditLogger->start(&_db, QDir::home().filePath("telegram_mcp_audit.log"));
 
 	_rbac = new RBAC(this);
 	_rbac->start(&_db);
 
-	// Initialize bot framework
-	_botManager = new BotManager(this);
-	_botManager->initialize(
-		_archiver,
-		_analytics,
-		_semanticSearch,
-		_scheduler,
-		_auditLogger,
-		_rbac
-	);
+	fprintf(stderr, "[MCP] Session-independent components initialized (AuditLogger, RBAC)\n");
+	fflush(stderr);
 
-	// Load and register built-in bots
-	_botManager->discoverBots();
-
-	// Register and start the Context Assistant Bot (example)
-	auto *contextBot = new ContextAssistantBot(_botManager);
-	_botManager->registerBot(contextBot);
-	_botManager->startBot("context_assistant");
-
-	// Start transport
+	// Start transport (this allows JSON-RPC to work even without session)
 	switch (_transport) {
 	case TransportType::Stdio:
 		startStdioTransport();
@@ -1145,11 +1179,19 @@ bool Server::start(TransportType transport) {
 
 	_initialized = true;
 
-	_auditLogger->logSystemEvent("server_start", "MCP Server started successfully");
+	_auditLogger->logSystemEvent("server_start", "MCP Server started (session-dependent components will initialize when session available)");
+
+	fprintf(stderr, "[MCP] ========================================\n");
+	fprintf(stderr, "[MCP] SERVER STARTED SUCCESSFULLY\n");
+	fprintf(stderr, "[MCP] Transport: %s\n", (_transport == TransportType::Stdio ? "stdio" : "http"));
+	fprintf(stderr, "[MCP] Session-dependent components will initialize when session is set\n");
+	fprintf(stderr, "[MCP] Ready to receive requests\n");
+	fprintf(stderr, "[MCP] ========================================\n");
+	fflush(stderr);
 
 	qInfo() << "MCP Server started (transport:"
 		<< (_transport == TransportType::Stdio ? "stdio" : "http")
-		<< ")";
+		<< ") - awaiting session";
 
 	return true;
 }
@@ -1210,9 +1252,118 @@ void Server::stop() {
 	qInfo() << "MCP Server stopped";
 }
 
+void Server::setSession(Main::Session *session) {
+	_session = session;
+
+	fprintf(stderr, "[MCP] setSession() called with session=%p\n", (void*)session);
+	fflush(stderr);
+
+	if (!_session) {
+		qWarning() << "MCP: setSession() called with null session";
+		return;
+	}
+
+	// Initialize session-dependent components
+	fprintf(stderr, "[MCP] Initializing session-dependent components...\n");
+	fflush(stderr);
+
+	// CacheManager - initialize first so other components can use it
+	_cache = new CacheManager(this);
+	_cache->setMaxSize(50);  // 50 MB cache
+	_cache->setDefaultTTL(300);  // 5 minutes TTL
+	fprintf(stderr, "[MCP] CacheManager initialized (50MB, 300s TTL)\n");
+	fflush(stderr);
+
+	// ChatArchiver - requires database
+	_archiver = new ChatArchiver(this);
+	if (!_archiver->start(_databasePath)) {
+		qWarning() << "MCP: Failed to start ChatArchiver";
+		fprintf(stderr, "[MCP] WARNING: ChatArchiver failed to start\n");
+		fflush(stderr);
+		// Don't return - continue with other components
+	} else {
+		fprintf(stderr, "[MCP] ChatArchiver initialized\n");
+		fflush(stderr);
+	}
+
+	// EphemeralArchiver - depends on ChatArchiver
+	if (_archiver) {
+		_ephemeralArchiver = new EphemeralArchiver(this);
+		_ephemeralArchiver->start(_archiver);
+		fprintf(stderr, "[MCP] EphemeralArchiver initialized\n");
+		fflush(stderr);
+	}
+
+	// Analytics - requires session data
+	_analytics = new Analytics(this);
+	_analytics->start(&_session->data(), _archiver);
+	fprintf(stderr, "[MCP] Analytics initialized\n");
+	fflush(stderr);
+
+	// SemanticSearch - depends on ChatArchiver
+	if (_archiver) {
+		_semanticSearch = new SemanticSearch(_archiver, this);
+		_semanticSearch->initialize();
+		fprintf(stderr, "[MCP] SemanticSearch initialized\n");
+		fflush(stderr);
+	}
+
+	// BatchOperations - requires session
+	_batchOps = new BatchOperations(this);
+	_batchOps->start(_session);
+	fprintf(stderr, "[MCP] BatchOperations initialized\n");
+	fflush(stderr);
+
+	// MessageScheduler - requires session
+	_scheduler = new MessageScheduler(this);
+	_scheduler->start(_session);
+	fprintf(stderr, "[MCP] MessageScheduler initialized\n");
+	fflush(stderr);
+
+	// BotManager - depends on all other components
+	if (_archiver && _analytics && _semanticSearch && _scheduler && _auditLogger && _rbac) {
+		_botManager = new BotManager(this);
+		_botManager->initialize(
+			_archiver,
+			_analytics,
+			_semanticSearch,
+			_scheduler,
+			_auditLogger,
+			_rbac
+		);
+
+		// Load and register built-in bots
+		_botManager->discoverBots();
+
+		// Register and start the Context Assistant Bot (example)
+		auto *contextBot = new ContextAssistantBot(_botManager);
+		_botManager->registerBot(contextBot);
+		_botManager->startBot("context_assistant");
+
+		fprintf(stderr, "[MCP] BotManager initialized and bots started\n");
+		fflush(stderr);
+	}
+
+	if (_auditLogger) {
+		_auditLogger->logSystemEvent("session_connected", "MCP Server session-dependent components initialized successfully");
+	}
+
+	fprintf(stderr, "[MCP] ========================================\n");
+	fprintf(stderr, "[MCP] SESSION CONNECTED SUCCESSFULLY\n");
+	fprintf(stderr, "[MCP] All components initialized and ready\n");
+	fprintf(stderr, "[MCP] Live Telegram data access enabled\n");
+	fprintf(stderr, "[MCP] ========================================\n");
+	fflush(stderr);
+
+	qInfo() << "MCP: Session set, live data access enabled";
+}
+
 void Server::startStdioTransport() {
 	_stdin = new QTextStream(stdin);
 	_stdout = new QTextStream(stdout);
+
+	fprintf(stderr, "[MCP] Stdio transport started, polling stdin every 100ms\n");
+	fflush(stderr);
 
 	// Use a timer to poll stdin
 	QTimer *timer = new QTimer(this);
@@ -1228,12 +1379,16 @@ void Server::handleStdioInput() {
 			return;
 		}
 
+		fprintf(stderr, "[MCP] Received input: %s\n", line.toUtf8().constData());
+		fflush(stderr);
+
 		// Parse JSON-RPC request
 		QJsonParseError error;
 		QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8(), &error);
 
 		if (error.error != QJsonParseError::NoError) {
-			qWarning() << "MCP: JSON parse error:" << error.errorString();
+			fprintf(stderr, "[MCP] JSON parse error: %s\n", error.errorString().toUtf8().constData());
+			fflush(stderr);
 			return;
 		}
 
@@ -1241,7 +1396,11 @@ void Server::handleStdioInput() {
 		QJsonObject response = handleRequest(request);
 
 		// Write response to stdout
-		*_stdout << QJsonDocument(response).toJson(QJsonDocument::Compact);
+		QByteArray responseBytes = QJsonDocument(response).toJson(QJsonDocument::Compact);
+		fprintf(stderr, "[MCP] Sending response: %s\n", responseBytes.constData());
+		fflush(stderr);
+
+		*_stdout << responseBytes;
 		*_stdout << "\n";
 		_stdout->flush();
 	}
@@ -1340,6 +1499,10 @@ QJsonObject Server::handleCallTool(const QJsonObject &params) {
 		result = toolListArchivedChats(arguments);
 	} else if (toolName == "get_archive_stats") {
 		result = toolGetArchiveStats(arguments);
+	} else if (toolName == "configure_ephemeral_capture") {
+		result = toolConfigureEphemeralCapture(arguments);
+	} else if (toolName == "get_ephemeral_stats") {
+		result = toolGetEphemeralStats(arguments);
 	} else if (toolName == "get_ephemeral_messages") {
 		result = toolGetEphemeralMessages(arguments);
 	} else if (toolName == "search_archive") {
@@ -1470,11 +1633,65 @@ QJsonObject Server::handleCallTool(const QJsonObject &params) {
 QJsonObject Server::toolListChats(const QJsonObject &args) {
 	Q_UNUSED(args);
 
-	QJsonArray chats = _archiver->listArchivedChats();
+	// Check cache first
+	if (_cache) {
+		QJsonObject cached;
+		if (_cache->get(_cache->chatListKey(), cached)) {
+			// Cache hit - return immediately
+			cached["source"] = cached["source"].toString() + " (cached)";
+			return cached;
+		}
+	}
+
+	QJsonArray chats;
+
+	// Try live data first if session is available
+	if (_session) {
+		try {
+			auto chatsList = _session->data().chatsList();  // Main folder chat list
+			auto indexed = chatsList->indexed();
+
+			for (const auto &row : *indexed) {
+				auto thread = row->thread();
+				auto peer = thread->peer();
+
+				QJsonObject chat;
+				chat["id"] = QString::number(peer->id.value);
+				chat["name"] = peer->name();
+				chat["username"] = peer->username();
+				chat["source"] = "live";
+
+				chats.append(chat);
+			}
+
+			QJsonObject result;
+			result["chats"] = chats;
+			result["count"] = chats.size();
+			result["source"] = "live_telegram_data";
+
+			// Cache the result
+			if (_cache) {
+				_cache->put(_cache->chatListKey(), result, 60);  // Cache for 60 seconds
+			}
+
+			return result;
+		} catch (...) {
+			qWarning() << "MCP: Failed to access live chat data, falling back to archive";
+		}
+	}
+
+	// Fallback to archived data
+	chats = _archiver->listArchivedChats();
 
 	QJsonObject result;
 	result["chats"] = chats;
 	result["count"] = chats.size();
+	result["source"] = "archived_data";
+
+	// Cache the archived result too
+	if (_cache) {
+		_cache->put(_cache->chatListKey(), result, 300);  // Cache for 5 minutes
+	}
 
 	return result;
 }
@@ -1482,7 +1699,98 @@ QJsonObject Server::toolListChats(const QJsonObject &args) {
 QJsonObject Server::toolGetChatInfo(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 
-	QJsonObject chatInfo = _archiver->getChatInfo(chatId);
+	QJsonObject chatInfo;
+
+	// Try live data first if session is available
+	if (_session) {
+		try {
+			// Convert chat_id to PeerId
+			PeerId peerId(chatId);
+
+			// Get the peer data
+			auto peer = _session->data().peer(peerId);
+			if (!peer) {
+				qWarning() << "MCP: No peer found for chat" << chatId;
+				chatInfo["error"] = "Chat not found";
+				chatInfo["chat_id"] = QString::number(chatId);
+				return chatInfo;
+			}
+
+			// Basic information
+			chatInfo["id"] = QString::number(peer->id.value);
+			chatInfo["name"] = peer->name();
+
+			// Determine chat type
+			if (peer->isUser()) {
+				chatInfo["type"] = "user";
+				auto user = peer->asUser();
+				if (user->isBot()) {
+					chatInfo["is_bot"] = true;
+				}
+			} else if (peer->isChat()) {
+				chatInfo["type"] = "group";
+				auto chat = peer->asChat();
+				chatInfo["member_count"] = chat->count;
+				chatInfo["is_creator"] = chat->amCreator();
+			} else if (peer->isChannel()) {
+				auto channel = peer->asChannel();
+				if (channel->isMegagroup()) {
+					chatInfo["type"] = "supergroup";
+				} else {
+					chatInfo["type"] = "channel";
+				}
+				chatInfo["member_count"] = channel->membersCount();
+				chatInfo["is_broadcast"] = channel->isBroadcast();
+				chatInfo["is_megagroup"] = channel->isMegagroup();
+				chatInfo["is_creator"] = channel->amCreator();
+			}
+
+			// Optional fields
+			if (!peer->username().isEmpty()) {
+				chatInfo["username"] = peer->username();
+			}
+
+			// Status fields
+			chatInfo["is_verified"] = peer->isVerified();
+			chatInfo["is_scam"] = peer->isScam();
+			chatInfo["is_fake"] = peer->isFake();
+
+			// About/description
+			if (!peer->about().isEmpty()) {
+				chatInfo["about"] = peer->about();
+			}
+
+			// Get message count from history
+			auto history = _session->data().history(peerId);
+			if (history) {
+				int messageCount = 0;
+				for (const auto &block : history->blocks) {
+					messageCount += block->messages.size();
+				}
+				chatInfo["loaded_message_count"] = messageCount;
+			}
+
+			chatInfo["source"] = "live_telegram_data";
+
+			qInfo() << "MCP: Retrieved info for chat" << chatId;
+			return chatInfo;
+
+		} catch (const std::exception &e) {
+			qWarning() << "MCP: Failed to access chat info:" << e.what();
+		} catch (...) {
+			qWarning() << "MCP: Failed to access chat info for" << chatId;
+		}
+	}
+
+	// Fallback to archived data
+	chatInfo = _archiver->getChatInfo(chatId);
+	if (chatInfo.isEmpty() || !chatInfo.contains("id")) {
+		chatInfo["chat_id"] = QString::number(chatId);
+		chatInfo["error"] = "Chat info not available (session not active)";
+		chatInfo["source"] = "error";
+	} else {
+		chatInfo["source"] = "archived_data";
+	}
 
 	return chatInfo;
 }
@@ -1492,12 +1800,102 @@ QJsonObject Server::toolReadMessages(const QJsonObject &args) {
 	int limit = args.value("limit").toInt(50);
 	qint64 beforeTimestamp = args.value("before_timestamp").toVariant().toLongLong();
 
-	QJsonArray messages = _archiver->getMessages(chatId, limit, beforeTimestamp);
+	QJsonArray messages;
+
+	// Try live data first if session is available
+	if (_session) {
+		try {
+			// Convert chat_id to PeerId
+			PeerId peerId(chatId);
+
+			// Get the history for this peer
+			auto history = _session->data().history(peerId);
+			if (!history) {
+				qWarning() << "MCP: No history found for peer" << chatId;
+			} else {
+				// Iterate through blocks and messages (newest first)
+				int collected = 0;
+				for (auto blockIt = history->blocks.rbegin();
+				     blockIt != history->blocks.rend() && collected < limit;
+				     ++blockIt) {
+					const auto &block = *blockIt;
+
+					// Iterate through messages in this block (newest first)
+					for (auto msgIt = block->messages.rbegin();
+					     msgIt != block->messages.rend() && collected < limit;
+					     ++msgIt) {
+						const auto &element = *msgIt;
+						auto item = element->data();
+
+						// Skip if message is after beforeTimestamp filter
+						if (beforeTimestamp > 0 && item->date() >= beforeTimestamp) {
+							continue;
+						}
+
+						// Extract message data
+						QJsonObject msg;
+						msg["message_id"] = QString::number(item->id.bare);
+						msg["date"] = static_cast<qint64>(item->date());
+
+						// Get message text
+						const auto &text = item->originalText();
+						msg["text"] = text.text;
+
+						// Get sender information
+						auto from = item->from();
+						QJsonObject fromUser;
+						fromUser["id"] = QString::number(from->id.value);
+						fromUser["name"] = from->name();
+						if (!from->username().isEmpty()) {
+							fromUser["username"] = from->username();
+						}
+						msg["from_user"] = fromUser;
+
+						// Add optional fields
+						if (item->out()) {
+							msg["is_outgoing"] = true;
+						}
+						if (item->isPinned()) {
+							msg["is_pinned"] = true;
+						}
+
+						// Add reply information if present
+						if (item->replyToId()) {
+							QJsonObject reply;
+							reply["message_id"] = QString::number(item->replyToId().bare);
+							msg["reply_to"] = reply;
+						}
+
+						messages.append(msg);
+						collected++;
+					}
+				}
+
+				// Return live data result
+				QJsonObject result;
+				result["messages"] = messages;
+				result["count"] = messages.size();
+				result["chat_id"] = chatId;
+				result["source"] = "live_telegram_data";
+
+				qInfo() << "MCP: Read" << messages.size() << "live messages from chat" << chatId;
+				return result;
+			}
+		} catch (const std::exception &e) {
+			qWarning() << "MCP: Failed to access live messages:" << e.what();
+		} catch (...) {
+			qWarning() << "MCP: Failed to access live messages, falling back to archive";
+		}
+	}
+
+	// Fallback to archived data
+	messages = _archiver->getMessages(chatId, limit, beforeTimestamp);
 
 	QJsonObject result;
 	result["messages"] = messages;
 	result["count"] = messages.size();
 	result["chat_id"] = chatId;
+	result["source"] = "archived_data";
 
 	return result;
 }
@@ -1506,16 +1904,61 @@ QJsonObject Server::toolSendMessage(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QString text = args["text"].toString();
 
-	// TODO: Implement actual message sending via tdesktop API
-	// For now, return placeholder
-
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Message sending not yet implemented (requires tdesktop API integration)";
-	result["chat_id"] = chatId;
-	result["text"] = text;
 
-	return result;
+	// Check if session is available
+	if (!_session) {
+		result["success"] = false;
+		result["error"] = "Session not available";
+		result["chat_id"] = chatId;
+		return result;
+	}
+
+	try {
+		// Convert chat_id to PeerId
+		PeerId peerId(chatId);
+
+		// Get the history for this peer
+		auto history = _session->data().history(peerId);
+		if (!history) {
+			result["success"] = false;
+			result["error"] = "Chat not found";
+			result["chat_id"] = chatId;
+			return result;
+		}
+
+		// Create SendAction (history is a Data::Thread)
+		Api::SendAction action(history);
+
+		// Create MessageToSend
+		Api::MessageToSend message(action);
+		message.textWithTags = TextWithTags{ text };
+
+		// Send the message via API
+		_session->api().sendMessage(std::move(message));
+
+		// Return success
+		result["success"] = true;
+		result["chat_id"] = chatId;
+		result["text"] = text;
+		result["status"] = "Message queued for sending";
+
+		qInfo() << "MCP: Queued message send to chat" << chatId;
+		return result;
+
+	} catch (const std::exception &e) {
+		qWarning() << "MCP: Failed to send message:" << e.what();
+		result["success"] = false;
+		result["error"] = QString("Failed to send message: %1").arg(e.what());
+		result["chat_id"] = chatId;
+		return result;
+	} catch (...) {
+		qWarning() << "MCP: Failed to send message to chat" << chatId;
+		result["success"] = false;
+		result["error"] = "Failed to send message (unknown error)";
+		result["chat_id"] = chatId;
+		return result;
+	}
 }
 
 QJsonObject Server::toolSearchMessages(const QJsonObject &args) {
@@ -1523,12 +1966,85 @@ QJsonObject Server::toolSearchMessages(const QJsonObject &args) {
 	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
 	int limit = args.value("limit").toInt(50);
 
-	QJsonArray results = _archiver->searchMessages(chatId, query, limit);
+	QJsonArray results;
+
+	// Try live search first if session is available
+	if (_session && chatId != 0) {
+		try {
+			PeerId peerId(chatId);
+			auto history = _session->data().history(peerId);
+
+			if (history) {
+				QString lowerQuery = query.toLower();
+				int found = 0;
+
+				// Search through loaded messages
+				for (auto blockIt = history->blocks.rbegin();
+				     blockIt != history->blocks.rend() && found < limit;
+				     ++blockIt) {
+					const auto &block = *blockIt;
+
+					for (auto msgIt = block->messages.rbegin();
+					     msgIt != block->messages.rend() && found < limit;
+					     ++msgIt) {
+						const auto &element = *msgIt;
+						auto item = element->data();
+
+						// Get message text and check if it contains query
+						const auto &text = item->originalText();
+						if (text.text.toLower().contains(lowerQuery)) {
+							QJsonObject msg;
+							msg["message_id"] = QString::number(item->id.bare);
+							msg["date"] = static_cast<qint64>(item->date());
+							msg["text"] = text.text;
+
+							// Get sender info
+							auto from = item->from();
+							QJsonObject fromUser;
+							fromUser["id"] = QString::number(from->id.value);
+							fromUser["name"] = from->name();
+							if (!from->username().isEmpty()) {
+								fromUser["username"] = from->username();
+							}
+							msg["from_user"] = fromUser;
+
+							msg["source"] = "live";
+							results.append(msg);
+							found++;
+						}
+					}
+				}
+
+				if (found > 0) {
+					QJsonObject result;
+					result["results"] = results;
+					result["count"] = results.size();
+					result["query"] = query;
+					result["chat_id"] = chatId;
+					result["source"] = "live_search";
+
+					qInfo() << "MCP: Found" << found << "messages in live search for:" << query;
+					return result;
+				}
+			}
+		} catch (const std::exception &e) {
+			qWarning() << "MCP: Live search failed:" << e.what();
+		} catch (...) {
+			qWarning() << "MCP: Live search failed, falling back to archive";
+		}
+	}
+
+	// Fallback to archived data search (more comprehensive, uses FTS)
+	results = _archiver->searchMessages(chatId, query, limit);
 
 	QJsonObject result;
 	result["results"] = results;
 	result["count"] = results.size();
 	result["query"] = query;
+	if (chatId != 0) {
+		result["chat_id"] = chatId;
+	}
+	result["source"] = "archived_search";
 
 	return result;
 }
@@ -1536,10 +2052,79 @@ QJsonObject Server::toolSearchMessages(const QJsonObject &args) {
 QJsonObject Server::toolGetUserInfo(const QJsonObject &args) {
 	qint64 userId = args["user_id"].toVariant().toLongLong();
 
-	// TODO: Implement getUserInfo in ChatArchiver
 	QJsonObject userInfo;
+
+	// Try live data first if session is available
+	if (_session) {
+		try {
+			// Convert user_id to UserId and then PeerId
+			UserId uid(userId);
+			PeerId peerId = peerFromUser(uid);
+
+			// Get the user data
+			auto user = _session->data().peer(peerId)->asUser();
+			if (!user) {
+				qWarning() << "MCP: Peer" << userId << "is not a user";
+				userInfo["error"] = "Specified ID is not a user";
+				userInfo["user_id"] = QString::number(userId);
+				return userInfo;
+			}
+
+			// Extract user information
+			userInfo["id"] = QString::number(user->id.value);
+			userInfo["name"] = user->name();
+
+			// Optional fields
+			if (!user->username().isEmpty()) {
+				userInfo["username"] = user->username();
+			}
+			if (!user->firstName.isEmpty()) {
+				userInfo["first_name"] = user->firstName;
+			}
+			if (!user->lastName.isEmpty()) {
+				userInfo["last_name"] = user->lastName;
+			}
+			if (!user->phone().isEmpty()) {
+				userInfo["phone"] = user->phone();
+			}
+
+			// Boolean fields
+			userInfo["is_bot"] = user->isBot();
+			userInfo["is_self"] = user->isSelf();
+			userInfo["is_contact"] = user->isContact();
+			userInfo["is_premium"] = user->isPremium();
+			userInfo["is_verified"] = user->isVerified();
+			userInfo["is_scam"] = user->isScam();
+			userInfo["is_fake"] = user->isFake();
+
+			// User status
+			/* Online status via lastseen() - TODO: implement if needed
+			if (false) {
+				userInfo["online_till"] = static_cast<qint64>(0);
+			}
+			*/
+
+			// About/bio if available
+			if (!user->about().isEmpty()) {
+				userInfo["about"] = user->about();
+			}
+
+			userInfo["source"] = "live_telegram_data";
+
+			qInfo() << "MCP: Retrieved info for user" << userId;
+			return userInfo;
+
+		} catch (const std::exception &e) {
+			qWarning() << "MCP: Failed to access user info:" << e.what();
+		} catch (...) {
+			qWarning() << "MCP: Failed to access user info for" << userId;
+		}
+	}
+
+	// Fallback response if session not available
 	userInfo["user_id"] = QString::number(userId);
-	userInfo["error"] = "getUserInfo not yet implemented";
+	userInfo["error"] = "User info not available (session not active)";
+	userInfo["source"] = "error";
 
 	return userInfo;
 }
@@ -1547,17 +2132,25 @@ QJsonObject Server::toolGetUserInfo(const QJsonObject &args) {
 // ===== ARCHIVE TOOL IMPLEMENTATIONS =====
 
 QJsonObject Server::toolArchiveChat(const QJsonObject &args) {
+	if (!_archiver) {
+		QJsonObject error;
+		error["error"] = "Archiver not available";
+		return error;
+	}
+
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	int limit = args.value("limit").toInt(1000);
 
-	// TODO: Implement actual archiving from tdesktop
-	// For now, return placeholder
+	bool success = _archiver->archiveChat(chatId, limit);
 
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Chat archiving not yet implemented (requires tdesktop API integration)";
+	result["success"] = success;
 	result["chat_id"] = chatId;
 	result["requested_limit"] = limit;
+
+	if (!success) {
+		result["error"] = "Failed to archive chat";
+	}
 
 	return result;
 }
@@ -1606,30 +2199,98 @@ QJsonObject Server::toolListArchivedChats(const QJsonObject &args) {
 QJsonObject Server::toolGetArchiveStats(const QJsonObject &args) {
 	Q_UNUSED(args);
 
-	// TODO: Implement getStatistics() in ChatArchiver
+	if (!_archiver) {
+		QJsonObject error;
+		error["error"] = "Archiver not available";
+		return error;
+	}
+
+	auto stats = _archiver->getStats();
+
 	QJsonObject result;
-	result["total_messages"] = 0;
-	result["total_chats"] = 0;
-	result["total_users"] = 0;
-	result["ephemeral_messages"] = 0;
-	result["database_size_bytes"] = 0;
-	result["oldest_message_timestamp"] = 0;
-	result["newest_message_timestamp"] = 0;
-	result["error"] = "getStatistics not yet implemented";
+	result["total_messages"] = stats.totalMessages;
+	result["total_chats"] = stats.totalChats;
+	result["total_users"] = stats.totalUsers;
+	result["ephemeral_captured"] = stats.ephemeralCaptured;
+	result["media_downloaded"] = stats.mediaDownloaded;
+	result["database_size_bytes"] = stats.databaseSize;
+	result["last_archived"] = stats.lastArchived.toString(Qt::ISODate);
+	result["success"] = true;
 
 	return result;
 }
 
 QJsonObject Server::toolGetEphemeralMessages(const QJsonObject &args) {
-	Q_UNUSED(args);
+	if (!_archiver) {
+		QJsonObject error;
+		error["error"] = "Archiver not available";
+		return error;
+	}
 
-	// TODO: Implement getEphemeralMessages() and getAllEphemeralMessages() in EphemeralArchiver
-	QJsonArray ephemeral;  // Empty array
+	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
+	QString type = args.value("type").toString();  // "self_destruct", "view_once", "vanishing", or empty for all
+	int limit = args.value("limit").toInt(50);
+
+	// Query ephemeral messages from database
+	QSqlQuery query(_archiver->database());
+
+	QString sql;
+	if (chatId > 0 && !type.isEmpty()) {
+		sql = QString("SELECT message_id, chat_id, from_user_id, text, date, ephemeral_type, ttl "
+			"FROM messages WHERE chat_id = ? AND ephemeral_type = ? "
+			"ORDER BY date DESC LIMIT ?");
+		query.prepare(sql);
+		query.addBindValue(chatId);
+		query.addBindValue(type);
+		query.addBindValue(limit);
+	} else if (chatId > 0) {
+		sql = QString("SELECT message_id, chat_id, from_user_id, text, date, ephemeral_type, ttl "
+			"FROM messages WHERE chat_id = ? AND ephemeral_type IS NOT NULL "
+			"ORDER BY date DESC LIMIT ?");
+		query.prepare(sql);
+		query.addBindValue(chatId);
+		query.addBindValue(limit);
+	} else if (!type.isEmpty()) {
+		sql = QString("SELECT message_id, chat_id, from_user_id, text, date, ephemeral_type, ttl "
+			"FROM messages WHERE ephemeral_type = ? "
+			"ORDER BY date DESC LIMIT ?");
+		query.prepare(sql);
+		query.addBindValue(type);
+		query.addBindValue(limit);
+	} else {
+		sql = QString("SELECT message_id, chat_id, from_user_id, text, date, ephemeral_type, ttl "
+			"FROM messages WHERE ephemeral_type IS NOT NULL "
+			"ORDER BY date DESC LIMIT ?");
+		query.prepare(sql);
+		query.addBindValue(limit);
+	}
+
+	QJsonArray messages;
+	if (query.exec()) {
+		while (query.next()) {
+			QJsonObject msg;
+			msg["message_id"] = query.value(0).toLongLong();
+			msg["chat_id"] = query.value(1).toLongLong();
+			msg["from_user_id"] = query.value(2).toLongLong();
+			msg["text"] = query.value(3).toString();
+			msg["date"] = query.value(4).toLongLong();
+			msg["ephemeral_type"] = query.value(5).toString();
+			msg["ttl_seconds"] = query.value(6).toInt();
+			messages.append(msg);
+		}
+	}
 
 	QJsonObject result;
-	result["messages"] = ephemeral;
-	result["count"] = 0;
-	result["error"] = "getEphemeralMessages not yet implemented";
+	result["messages"] = messages;
+	result["count"] = messages.size();
+	result["success"] = true;
+
+	if (!type.isEmpty()) {
+		result["type"] = type;
+	}
+	if (chatId > 0) {
+		result["chat_id"] = chatId;
+	}
 
 	return result;
 }
@@ -1669,17 +2330,11 @@ QJsonObject Server::toolGetMessageStats(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QString period = args.value("period").toString("all");
 
-	auto stats = _analytics->getMessageStatistics(chatId);
+	auto stats = _analytics->getMessageStatistics(chatId, period);
 
-	QJsonObject result;
-	result["chat_id"] = chatId;
-	result["message_count"] = static_cast<qint64>(stats.totalMessages);
-	result["total_words"] = static_cast<qint64>(stats.totalWords);
-	result["total_characters"] = static_cast<qint64>(stats.totalCharacters);
-	result["average_message_length"] = stats.avgMessageLength;
-	result["messages_per_day"] = stats.messagesPerHour;
-	result["first_message_timestamp"] = static_cast<qint64>(stats.firstMessage.toSecsSinceEpoch());
-	result["last_message_timestamp"] = static_cast<qint64>(stats.lastMessage.toSecsSinceEpoch());
+	// stats is already a QJsonObject
+	QJsonObject result = stats;
+	result["chat_id"] = QString::number(chatId);
 
 	return result;
 }
@@ -1688,81 +2343,33 @@ QJsonObject Server::toolGetUserActivity(const QJsonObject &args) {
 	qint64 userId = args["user_id"].toVariant().toLongLong();
 	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
 
-	auto activity = _analytics->getUserActivityAnalysis(userId, chatId);
+	auto activity = _analytics->getUserActivity(userId, chatId);
 
-	QJsonObject result;
-	result["user_id"] = userId;
-	result["total_messages"] = static_cast<qint64>(activity.messageCount);
-	result["total_words"] = static_cast<qint64>(activity.wordCount);
-	result["average_message_length"] = activity.avgMessageLength;
-	result["most_active_hour"] = activity.mostActiveHour;
-	result["days_active"] = activity.daysActive;
-	result["first_seen"] = static_cast<qint64>(activity.firstMessage.toSecsSinceEpoch());
-	result["last_seen"] = static_cast<qint64>(activity.lastMessage.toSecsSinceEpoch());
-
-	return result;
+	// activity is already a QJsonObject
+	return activity;
 }
 
 QJsonObject Server::toolGetChatActivity(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 
-	auto activity = _analytics->getChatActivityAnalysis(chatId);
+	auto activity = _analytics->getChatActivity(chatId);
 
-	QJsonObject result;
-	result["chat_id"] = chatId;
-	result["total_messages"] = static_cast<qint64>(activity.totalMessages);
-	result["unique_users"] = static_cast<qint64>(activity.uniqueUsers);
-	result["messages_per_day"] = activity.messagesPerDay;
-	result["most_active_hour"] = activity.peakHour;
-
-	QString trendStr;
-	switch (activity.trend) {
-		case ActivityTrend::Increasing: trendStr = "increasing"; break;
-		case ActivityTrend::Decreasing: trendStr = "decreasing"; break;
-		case ActivityTrend::Stable: trendStr = "stable"; break;
-		default: trendStr = "unknown"; break;
-	}
-	result["trend"] = trendStr;
-
-	result["first_message"] = static_cast<qint64>(activity.firstMessage.toSecsSinceEpoch());
-	result["last_message"] = static_cast<qint64>(activity.lastMessage.toSecsSinceEpoch());
-
-	return result;
+	// activity is already a QJsonObject
+	return activity;
 }
 
 QJsonObject Server::toolGetTimeSeries(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QString granularity = args.value("granularity").toString("daily");
 
-	TimeGranularity gran;
-	if (granularity == "hourly") {
-		gran = TimeGranularity::Hourly;
-	} else if (granularity == "daily") {
-		gran = TimeGranularity::Daily;
-	} else if (granularity == "weekly") {
-		gran = TimeGranularity::Weekly;
-	} else if (granularity == "monthly") {
-		gran = TimeGranularity::Monthly;
-	} else {
-		gran = TimeGranularity::Daily;
-	}
+	auto timeSeries = _analytics->getTimeSeries(chatId, granularity);
 
-	auto timeSeries = _analytics->getTimeSeries(chatId, gran);
-
-	QJsonArray dataPoints;
-	for (const auto &point : timeSeries) {
-		QJsonObject dp;
-		dp["timestamp"] = static_cast<qint64>(point.timestamp.toSecsSinceEpoch());
-		dp["message_count"] = static_cast<qint64>(point.messageCount);
-		dp["unique_users"] = static_cast<qint64>(point.uniqueUsers);
-		dataPoints.append(dp);
-	}
-
+	// timeSeries is already a QJsonArray
 	QJsonObject result;
-	result["chat_id"] = chatId;
+	result["chat_id"] = QString::number(chatId);
 	result["granularity"] = granularity;
-	result["data_points"] = dataPoints;
-	result["count"] = dataPoints.size();
+	result["data_points"] = timeSeries;
+	result["count"] = timeSeries.size();
 
 	return result;
 }
@@ -1773,20 +2380,11 @@ QJsonObject Server::toolGetTopUsers(const QJsonObject &args) {
 
 	auto topUsers = _analytics->getTopUsers(chatId, limit);
 
-	QJsonArray users;
-	for (const auto &user : topUsers) {
-		QJsonObject u;
-		u["user_id"] = user.userId;
-		u["username"] = user.username;
-		u["message_count"] = static_cast<qint64>(user.messageCount);
-		u["total_words"] = static_cast<qint64>(user.wordCount);
-		users.append(u);
-	}
-
+	// topUsers is already a QJsonArray
 	QJsonObject result;
-	result["chat_id"] = chatId;
-	result["users"] = users;
-	result["count"] = users.size();
+	result["chat_id"] = QString::number(chatId);
+	result["users"] = topUsers;
+	result["count"] = topUsers.size();
 
 	return result;
 }
@@ -1797,18 +2395,11 @@ QJsonObject Server::toolGetTopWords(const QJsonObject &args) {
 
 	auto topWords = _analytics->getTopWords(chatId, limit);
 
-	QJsonArray words;
-	for (auto it = topWords.constBegin(); it != topWords.constEnd(); ++it) {
-		QJsonObject w;
-		w["word"] = it.key();
-		w["count"] = static_cast<qint64>(it.value());
-		words.append(w);
-	}
-
+	// topWords is already a QJsonArray
 	QJsonObject result;
-	result["chat_id"] = chatId;
-	result["words"] = words;
-	result["count"] = words.size();
+	result["chat_id"] = QString::number(chatId);
+	result["words"] = topWords;
+	result["count"] = topWords.size();
 
 	return result;
 }
@@ -1816,33 +2407,31 @@ QJsonObject Server::toolGetTopWords(const QJsonObject &args) {
 QJsonObject Server::toolExportAnalytics(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QString outputPath = args["output_path"].toString();
+	QString format = args.value("format").toString("json");
 
-	QString resultPath = _analytics->exportToCSV(chatId, outputPath);
+	QString resultPath = _analytics->exportAnalytics(chatId, format, outputPath);
 
 	QJsonObject result;
 	result["success"] = !resultPath.isEmpty();
-	result["chat_id"] = chatId;
+	result["chat_id"] = QString::number(chatId);
 	result["output_path"] = resultPath;
+	result["format"] = format;
 
 	return result;
 }
 
 QJsonObject Server::toolGetTrends(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
+	QString metric = args.value("metric").toString("messages");
+	int daysBack = args.value("days_back").toInt(30);
 
-	ActivityTrend trend = _analytics->detectActivityTrend(chatId);
+	auto trends = _analytics->getTrends(chatId, metric, daysBack);
+	// trends is already a QJsonObject with all trend data
 
-	QString trendStr;
-	switch (trend) {
-		case ActivityTrend::Increasing: trendStr = "increasing"; break;
-		case ActivityTrend::Decreasing: trendStr = "decreasing"; break;
-		case ActivityTrend::Stable: trendStr = "stable"; break;
-		default: trendStr = "unknown"; break;
-	}
-
-	QJsonObject result;
-	result["chat_id"] = chatId;
-	result["trend"] = trendStr;
+	QJsonObject result = trends;
+	result["chat_id"] = QString::number(chatId);
+	result["metric"] = metric;
+	result["days_back"] = daysBack;
 
 	return result;
 }
@@ -1972,203 +2561,763 @@ QJsonObject Server::toolExtractEntities(const QJsonObject &args) {
 // ===== MESSAGE OPERATION TOOL IMPLEMENTATIONS =====
 
 QJsonObject Server::toolEditMessage(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Session not available";
+		return error;
+	}
+
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	qint64 messageId = args["message_id"].toVariant().toLongLong();
 	QString newText = args["new_text"].toString();
 
-	// TODO: Implement via tdesktop API
-
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Message editing not yet implemented (requires tdesktop API integration)";
 	result["chat_id"] = chatId;
 	result["message_id"] = messageId;
 
-	return result;
+	// Get the message
+	auto &owner = _session->data();
+	const auto peerId = PeerId(chatId);
+	const auto history = owner.historyLoaded(peerId);
+	if (!history) {
+		result["success"] = false;
+		result["error"] = "Chat not found";
+		return result;
+	}
+
+	auto item = owner.message(history->peer->id, MsgId(messageId));
+	if (!item) {
+		result["success"] = false;
+		result["error"] = "Message not found";
+		return result;
+	}
+
+	// Edit the message via API
+	try {
+		// Prepare text with entities
+		TextWithEntities textWithEntities;
+		textWithEntities.text = newText;
+
+		// Create edit options
+		Api::SendOptions options;
+		options.scheduled = 0;  // Not scheduled
+
+		// Use the Api namespace function (not api member function)
+		// This is an asynchronous operation with callbacks
+		Api::EditTextMessage(
+			item,
+			textWithEntities,
+			Data::WebPageDraft(),  // No webpage
+			options,
+			[=](mtpRequestId) {
+				// Success callback
+				qInfo() << "MCP: Edit message succeeded" << messageId;
+			},
+			[=](const QString &error, mtpRequestId) {
+				// Failure callback
+				qWarning() << "MCP: Edit message failed:" << error;
+			},
+			false  // not spoilered
+		);
+
+		result["success"] = true;
+		result["edited"] = true;
+		result["note"] = "Edit request sent (async operation)";
+
+		qInfo() << "MCP: Edit message requested for" << messageId << "in chat" << chatId;
+		return result;
+
+	} catch (const std::exception &e) {
+		qWarning() << "MCP: Failed to edit message:" << e.what();
+		result["success"] = false;
+		result["error"] = QString("Edit failed: %1").arg(e.what());
+		return result;
+	} catch (...) {
+		qWarning() << "MCP: Failed to edit message (unknown error)";
+		result["success"] = false;
+		result["error"] = "Edit failed with unknown error";
+		return result;
+	}
 }
 
 QJsonObject Server::toolDeleteMessage(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Session not available";
+		return error;
+	}
+
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	qint64 messageId = args["message_id"].toVariant().toLongLong();
-
-	// TODO: Implement via tdesktop API
+	bool revoke = args.value("revoke").toBool(true);  // Delete for everyone by default
 
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Message deletion not yet implemented (requires tdesktop API integration)";
 	result["chat_id"] = chatId;
 	result["message_id"] = messageId;
 
-	return result;
+	// Get the history
+	auto &owner = _session->data();
+	const auto peerId = PeerId(chatId);
+	const auto history = owner.historyLoaded(peerId);
+	if (!history) {
+		result["success"] = false;
+		result["error"] = "Chat not found";
+		return result;
+	}
+
+	// Verify message exists
+	auto item = owner.message(history->peer->id, MsgId(messageId));
+	if (!item) {
+		result["success"] = false;
+		result["error"] = "Message not found";
+		return result;
+	}
+
+	// Delete the message using Data::Histories API
+	try {
+		// Create message ID list
+		MessageIdsList ids = { item->fullId() };
+
+		// Delete via session's histories manager
+		_session->data().histories().deleteMessages(ids, revoke);
+		_session->data().sendHistoryChangeNotifications();
+
+		result["success"] = true;
+		result["revoked"] = revoke;
+
+		qInfo() << "MCP: Deleted message" << messageId << "from chat" << chatId << "(revoke:" << revoke << ")";
+		return result;
+
+	} catch (const std::exception &e) {
+		qWarning() << "MCP: Failed to delete message:" << e.what();
+		result["success"] = false;
+		result["error"] = QString("Delete failed: %1").arg(e.what());
+		return result;
+	} catch (...) {
+		qWarning() << "MCP: Failed to delete message (unknown error)";
+		result["success"] = false;
+		result["error"] = "Delete failed with unknown error";
+		return result;
+	}
 }
 
 QJsonObject Server::toolForwardMessage(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Session not available";
+		return error;
+	}
+
 	qint64 fromChatId = args["from_chat_id"].toVariant().toLongLong();
 	qint64 toChatId = args["to_chat_id"].toVariant().toLongLong();
 	qint64 messageId = args["message_id"].toVariant().toLongLong();
 
-	// TODO: Implement via tdesktop API
-
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Message forwarding not yet implemented (requires tdesktop API integration)";
 	result["from_chat_id"] = fromChatId;
 	result["to_chat_id"] = toChatId;
 	result["message_id"] = messageId;
 
-	return result;
+	// Get source message
+	auto &owner = _session->data();
+	const auto fromPeerId = PeerId(fromChatId);
+	const auto fromHistory = owner.historyLoaded(fromPeerId);
+	if (!fromHistory) {
+		result["success"] = false;
+		result["error"] = "Source chat not found";
+		return result;
+	}
+
+	auto item = owner.message(fromHistory->peer->id, MsgId(messageId));
+	if (!item) {
+		result["success"] = false;
+		result["error"] = "Message not found";
+		return result;
+	}
+
+	// Get destination peer
+	const auto toPeerId = PeerId(toChatId);
+	const auto toPeer = owner.peer(toPeerId);
+	if (!toPeer) {
+		result["success"] = false;
+		result["error"] = "Destination chat not found";
+		return result;
+	}
+
+	// Forward the message
+	try {
+		// Get destination history
+		auto toHistory = _session->data().history(toPeerId);
+		if (!toHistory) {
+			result["success"] = false;
+			result["error"] = "Failed to get destination history";
+			return result;
+		}
+
+		// Create HistoryItemsList with the item to forward
+		HistoryItemsList items;
+		items.push_back(item);
+
+		// Create ResolvedForwardDraft
+		Data::ResolvedForwardDraft draft;
+		draft.items = items;
+		draft.options = Data::ForwardOptions::PreserveInfo;  // Preserve original sender info
+
+		// Create SendAction with destination thread
+		// For simple cases, history can be cast to Data::Thread*
+		auto thread = (Data::Thread*)toHistory;
+		Api::SendAction action(thread, Api::SendOptions());
+
+		// Forward via session API
+		auto &api = _session->api();
+		api.forwardMessages(std::move(draft), action);
+
+		result["success"] = true;
+		result["forwarded"] = true;
+
+		qInfo() << "MCP: Forwarded message" << messageId << "from chat" << fromChatId << "to chat" << toChatId;
+		return result;
+
+	} catch (const std::exception &e) {
+		qWarning() << "MCP: Failed to forward message:" << e.what();
+		result["success"] = false;
+		result["error"] = QString("Forward failed: %1").arg(e.what());
+		return result;
+	} catch (...) {
+		qWarning() << "MCP: Failed to forward message (unknown error)";
+		result["success"] = false;
+		result["error"] = "Forward failed with unknown error";
+		return result;
+	}
 }
 
 QJsonObject Server::toolPinMessage(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Session not available";
+		return error;
+	}
+
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	qint64 messageId = args["message_id"].toVariant().toLongLong();
 	bool notify = args.value("notify").toBool(false);
 
-	// TODO: Implement via tdesktop API
-
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Message pinning not yet implemented (requires tdesktop API integration)";
 	result["chat_id"] = chatId;
 	result["message_id"] = messageId;
 
-	return result;
+	// Get the message
+	auto &owner = _session->data();
+	const auto peerId = PeerId(chatId);
+	const auto history = owner.historyLoaded(peerId);
+	if (!history) {
+		result["success"] = false;
+		result["error"] = "Chat not found";
+		return result;
+	}
+
+	auto item = owner.message(history->peer->id, MsgId(messageId));
+	if (!item) {
+		result["success"] = false;
+		result["error"] = "Message not found";
+		return result;
+	}
+
+	// Check permissions
+	const auto peer = history->peer;
+	if (const auto chat = peer->asChat()) {
+		if (!chat->canPinMessages()) {
+			result["success"] = false;
+			result["error"] = "No permission to pin messages in this chat";
+			return result;
+		}
+	} else if (const auto channel = peer->asChannel()) {
+		if (!channel->canPinMessages()) {
+			result["success"] = false;
+			result["error"] = "No permission to pin messages in this channel";
+			return result;
+		}
+	}
+
+	// Pin via API
+	try {
+		// Use the session's API to pin the message
+		auto &api = _session->api();
+
+		// Request message pin (notify parameter controls silent pinning)
+		// Using the peer's pinMessage method through API
+		api.request(MTPmessages_UpdatePinnedMessage(
+			MTP_flags(notify ? MTPmessages_UpdatePinnedMessage::Flag::f_unpin : MTPmessages_UpdatePinnedMessage::Flags(0)),
+			peer->input,
+			MTP_int(messageId)
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+		}).fail([=](const MTP::Error &error) {
+			qWarning() << "MCP: Pin message failed:" << error.type();
+		}).send();
+
+		result["success"] = true;
+		result["pinned"] = true;
+		result["notify"] = notify;
+
+		qInfo() << "MCP: Pinned message" << messageId << "in chat" << chatId << "(notify:" << notify << ")";
+		return result;
+
+	} catch (const std::exception &e) {
+		qWarning() << "MCP: Failed to pin message:" << e.what();
+		result["success"] = false;
+		result["error"] = QString("Pin failed: %1").arg(e.what());
+		return result;
+	} catch (...) {
+		qWarning() << "MCP: Failed to pin message (unknown error)";
+		result["success"] = false;
+		result["error"] = "Pin failed with unknown error";
+		return result;
+	}
 }
 
 QJsonObject Server::toolUnpinMessage(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Session not available";
+		return error;
+	}
+
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	qint64 messageId = args["message_id"].toVariant().toLongLong();
 
-	// TODO: Implement via tdesktop API
-
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Message unpinning not yet implemented (requires tdesktop API integration)";
 	result["chat_id"] = chatId;
 	result["message_id"] = messageId;
 
-	return result;
+	// Get the peer
+	auto &owner = _session->data();
+	const auto peerId = PeerId(chatId);
+	const auto peer = owner.peer(peerId);
+	if (!peer) {
+		result["success"] = false;
+		result["error"] = "Chat not found";
+		return result;
+	}
+
+	// Check permissions
+	if (const auto chat = peer->asChat()) {
+		if (!chat->canPinMessages()) {
+			result["success"] = false;
+			result["error"] = "No permission to unpin messages in this chat";
+			return result;
+		}
+	} else if (const auto channel = peer->asChannel()) {
+		if (!channel->canPinMessages()) {
+			result["success"] = false;
+			result["error"] = "No permission to unpin messages in this channel";
+			return result;
+		}
+	}
+
+	// Unpin via API
+	try {
+		// Use the session's API to unpin the message
+		auto &api = _session->api();
+
+		// Request message unpin (using the same API as pin with unpin flag)
+		api.request(MTPmessages_UpdatePinnedMessage(
+			MTP_flags(MTPmessages_UpdatePinnedMessage::Flag::f_unpin),
+			peer->input,
+			MTP_int(messageId)
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+		}).fail([=](const MTP::Error &error) {
+			qWarning() << "MCP: Unpin message failed:" << error.type();
+		}).send();
+
+		result["success"] = true;
+		result["unpinned"] = true;
+
+		qInfo() << "MCP: Unpinned message" << messageId << "in chat" << chatId;
+		return result;
+
+	} catch (const std::exception &e) {
+		qWarning() << "MCP: Failed to unpin message:" << e.what();
+		result["success"] = false;
+		result["error"] = QString("Unpin failed: %1").arg(e.what());
+		return result;
+	} catch (...) {
+		qWarning() << "MCP: Failed to unpin message (unknown error)";
+		result["success"] = false;
+		result["error"] = "Unpin failed with unknown error";
+		return result;
+	}
 }
 
 QJsonObject Server::toolAddReaction(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Session not available";
+		return error;
+	}
+
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	qint64 messageId = args["message_id"].toVariant().toLongLong();
 	QString emoji = args["emoji"].toString();
 
-	// TODO: Implement via tdesktop API
-
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Reactions not yet implemented (requires tdesktop API integration)";
 	result["chat_id"] = chatId;
 	result["message_id"] = messageId;
 	result["emoji"] = emoji;
 
-	return result;
+	// Get the message
+	auto &owner = _session->data();
+	const auto peerId = PeerId(chatId);
+	const auto history = owner.historyLoaded(peerId);
+	if (!history) {
+		result["success"] = false;
+		result["error"] = "Chat not found";
+		return result;
+	}
+
+	auto item = owner.message(history->peer->id, MsgId(messageId));
+	if (!item) {
+		result["success"] = false;
+		result["error"] = "Message not found";
+		return result;
+	}
+
+	// Check if reactions are available
+	const auto reactionsOwner = &owner.reactions();
+	if (!reactionsOwner) {
+		result["success"] = false;
+		result["error"] = "Reactions system not available";
+		return result;
+	}
+
+	// Add reaction via HistoryItem API
+	try {
+		// Create reaction ID from emoji string
+		const Data::ReactionId reactionId{ emoji };
+
+		// Toggle the reaction (will add if not present, remove if already present)
+		// Using HistoryReactionSource::Selector for programmatic reactions
+		item->toggleReaction(reactionId, HistoryReactionSource::Selector);
+
+		result["success"] = true;
+		result["added"] = true;
+
+		qInfo() << "MCP: Added reaction" << emoji << "to message" << messageId << "in chat" << chatId;
+		return result;
+
+	} catch (const std::exception &e) {
+		qWarning() << "MCP: Failed to add reaction:" << e.what();
+		result["success"] = false;
+		result["error"] = QString("Add reaction failed: %1").arg(e.what());
+		return result;
+	} catch (...) {
+		qWarning() << "MCP: Failed to add reaction (unknown error)";
+		result["success"] = false;
+		result["error"] = "Add reaction failed with unknown error";
+		return result;
+	}
 }
 
 // ===== BATCH OPERATION TOOL IMPLEMENTATIONS =====
 
 QJsonObject Server::toolBatchSend(const QJsonObject &args) {
-	QJsonArray chatIdsArray = args["chat_ids"].toArray();
-	QString message = args["message"].toString();
-
-	QVector<qint64> chatIds;
-	for (const auto &id : chatIdsArray) {
-		chatIds.append(id.toVariant().toLongLong());
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Session not available";
+		return error;
 	}
 
-	// TODO: Implement via BatchOperations component
+	QJsonArray chatIdsArray = args["chat_ids"].toArray();
+	QString text = args["message"].toString();
+
+	int successCount = 0;
+	int failureCount = 0;
+	QJsonArray results;
+
+	// Loop through all chat IDs and send message to each
+	for (const auto &chatIdVal : chatIdsArray) {
+		qint64 chatId = chatIdVal.toVariant().toLongLong();
+
+		// Create args for single send
+		QJsonObject sendArgs;
+		sendArgs["chat_id"] = chatId;
+		sendArgs["text"] = text;
+
+		// Call single send_message implementation
+		QJsonObject sendResult = toolSendMessage(sendArgs);
+
+		// Track success/failure
+		if (sendResult.value("success").toBool()) {
+			successCount++;
+		} else {
+			failureCount++;
+		}
+
+		// Add to results array
+		QJsonObject chatResult;
+		chatResult["chat_id"] = chatId;
+		chatResult["success"] = sendResult.value("success").toBool();
+		if (sendResult.contains("error")) {
+			chatResult["error"] = sendResult["error"];
+		}
+		results.append(chatResult);
+	}
 
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Batch send not yet implemented (requires tdesktop API integration)";
-	result["chat_count"] = chatIds.size();
-	result["message"] = message;
+	result["success"] = (failureCount == 0);
+	result["total_chats"] = chatIdsArray.size();
+	result["succeeded"] = successCount;
+	result["failed"] = failureCount;
+	result["results"] = results;
+
+	qInfo() << "MCP: Batch send to" << chatIdsArray.size() << "chats -" << successCount << "succeeded," << failureCount << "failed";
 
 	return result;
 }
 
 QJsonObject Server::toolBatchDelete(const QJsonObject &args) {
-	qint64 chatId = args["chat_id"].toVariant().toLongLong();
-	QJsonArray messageIdsArray = args["message_ids"].toArray();
-
-	QVector<qint64> messageIds;
-	for (const auto &id : messageIdsArray) {
-		messageIds.append(id.toVariant().toLongLong());
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Session not available";
+		return error;
 	}
 
-	// TODO: Implement via BatchOperations component
+	qint64 chatId = args["chat_id"].toVariant().toLongLong();
+	QJsonArray messageIdsArray = args["message_ids"].toArray();
+	bool revoke = args.value("revoke").toBool(true);
+
+	int successCount = 0;
+	int failureCount = 0;
+	QJsonArray results;
+
+	// Loop through all message IDs and delete each
+	for (const auto &msgIdVal : messageIdsArray) {
+		qint64 messageId = msgIdVal.toVariant().toLongLong();
+
+		// Create args for single delete
+		QJsonObject deleteArgs;
+		deleteArgs["chat_id"] = chatId;
+		deleteArgs["message_id"] = messageId;
+		deleteArgs["revoke"] = revoke;
+
+		// Call single delete_message implementation
+		QJsonObject deleteResult = toolDeleteMessage(deleteArgs);
+
+		// Track success/failure
+		if (deleteResult.value("success").toBool()) {
+			successCount++;
+		} else {
+			failureCount++;
+		}
+
+		// Add to results array
+		QJsonObject msgResult;
+		msgResult["message_id"] = messageId;
+		msgResult["success"] = deleteResult.value("success").toBool();
+		if (deleteResult.contains("error")) {
+			msgResult["error"] = deleteResult["error"];
+		}
+		results.append(msgResult);
+	}
 
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Batch delete not yet implemented (requires tdesktop API integration)";
+	result["success"] = (failureCount == 0);
 	result["chat_id"] = chatId;
-	result["message_count"] = messageIds.size();
+	result["total_messages"] = messageIdsArray.size();
+	result["succeeded"] = successCount;
+	result["failed"] = failureCount;
+	result["revoke"] = revoke;
+	result["results"] = results;
+
+	qInfo() << "MCP: Batch delete" << messageIdsArray.size() << "messages from chat" << chatId << "-" << successCount << "succeeded," << failureCount << "failed";
 
 	return result;
 }
 
 QJsonObject Server::toolBatchForward(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Session not available";
+		return error;
+	}
+
 	qint64 fromChatId = args["from_chat_id"].toVariant().toLongLong();
 	qint64 toChatId = args["to_chat_id"].toVariant().toLongLong();
 	QJsonArray messageIdsArray = args["message_ids"].toArray();
 
-	QVector<qint64> messageIds;
-	for (const auto &id : messageIdsArray) {
-		messageIds.append(id.toVariant().toLongLong());
+	int successCount = 0;
+	int failureCount = 0;
+	QJsonArray results;
+
+	// Loop through all message IDs and forward each
+	for (const auto &msgIdVal : messageIdsArray) {
+		qint64 messageId = msgIdVal.toVariant().toLongLong();
+
+		// Create args for single forward
+		QJsonObject forwardArgs;
+		forwardArgs["from_chat_id"] = fromChatId;
+		forwardArgs["to_chat_id"] = toChatId;
+		forwardArgs["message_id"] = messageId;
+
+		// Call single forward_message implementation
+		QJsonObject forwardResult = toolForwardMessage(forwardArgs);
+
+		// Track success/failure
+		if (forwardResult.value("success").toBool()) {
+			successCount++;
+		} else {
+			failureCount++;
+		}
+
+		// Add to results array
+		QJsonObject msgResult;
+		msgResult["message_id"] = messageId;
+		msgResult["success"] = forwardResult.value("success").toBool();
+		if (forwardResult.contains("error")) {
+			msgResult["error"] = forwardResult["error"];
+		}
+		results.append(msgResult);
 	}
 
-	// TODO: Implement via BatchOperations component
-
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Batch forward not yet implemented (requires tdesktop API integration)";
+	result["success"] = (failureCount == 0);
 	result["from_chat_id"] = fromChatId;
 	result["to_chat_id"] = toChatId;
-	result["message_count"] = messageIds.size();
+	result["total_messages"] = messageIdsArray.size();
+	result["succeeded"] = successCount;
+	result["failed"] = failureCount;
+	result["results"] = results;
+
+	qInfo() << "MCP: Batch forward" << messageIdsArray.size() << "messages from chat" << fromChatId << "to chat" << toChatId << "-" << successCount << "succeeded," << failureCount << "failed";
 
 	return result;
 }
 
 QJsonObject Server::toolBatchPin(const QJsonObject &args) {
-	qint64 chatId = args["chat_id"].toVariant().toLongLong();
-	QJsonArray messageIdsArray = args["message_ids"].toArray();
-
-	QVector<qint64> messageIds;
-	for (const auto &id : messageIdsArray) {
-		messageIds.append(id.toVariant().toLongLong());
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Session not available";
+		return error;
 	}
 
-	// TODO: Implement via BatchOperations component
+	qint64 chatId = args["chat_id"].toVariant().toLongLong();
+	QJsonArray messageIdsArray = args["message_ids"].toArray();
+	bool notify = args.value("notify").toBool(false);
+
+	int successCount = 0;
+	int failureCount = 0;
+	QJsonArray results;
+
+	// Loop through all message IDs and pin each
+	for (const auto &msgIdVal : messageIdsArray) {
+		qint64 messageId = msgIdVal.toVariant().toLongLong();
+
+		// Create args for single pin
+		QJsonObject pinArgs;
+		pinArgs["chat_id"] = chatId;
+		pinArgs["message_id"] = messageId;
+		pinArgs["notify"] = notify;
+
+		// Call single pin_message implementation
+		QJsonObject pinResult = toolPinMessage(pinArgs);
+
+		// Track success/failure
+		if (pinResult.value("success").toBool()) {
+			successCount++;
+		} else {
+			failureCount++;
+		}
+
+		// Add to results array
+		QJsonObject msgResult;
+		msgResult["message_id"] = messageId;
+		msgResult["success"] = pinResult.value("success").toBool();
+		if (pinResult.contains("error")) {
+			msgResult["error"] = pinResult["error"];
+		}
+		results.append(msgResult);
+	}
 
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Batch pin not yet implemented (requires tdesktop API integration)";
+	result["success"] = (failureCount == 0);
 	result["chat_id"] = chatId;
-	result["message_count"] = messageIds.size();
+	result["total_messages"] = messageIdsArray.size();
+	result["succeeded"] = successCount;
+	result["failed"] = failureCount;
+	result["notify"] = notify;
+	result["results"] = results;
+
+	qInfo() << "MCP: Batch pin" << messageIdsArray.size() << "messages in chat" << chatId << "-" << successCount << "succeeded," << failureCount << "failed";
 
 	return result;
 }
 
 QJsonObject Server::toolBatchReaction(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Session not available";
+		return error;
+	}
+
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QJsonArray messageIdsArray = args["message_ids"].toArray();
 	QString emoji = args["emoji"].toString();
 
-	QVector<qint64> messageIds;
-	for (const auto &id : messageIdsArray) {
-		messageIds.append(id.toVariant().toLongLong());
+	int successCount = 0;
+	int failureCount = 0;
+	QJsonArray results;
+
+	// Loop through all message IDs and add reaction to each
+	for (const auto &msgIdVal : messageIdsArray) {
+		qint64 messageId = msgIdVal.toVariant().toLongLong();
+
+		// Create args for single reaction
+		QJsonObject reactionArgs;
+		reactionArgs["chat_id"] = chatId;
+		reactionArgs["message_id"] = messageId;
+		reactionArgs["emoji"] = emoji;
+
+		// Call single add_reaction implementation
+		QJsonObject reactionResult = toolAddReaction(reactionArgs);
+
+		// Track success/failure
+		if (reactionResult.value("success").toBool()) {
+			successCount++;
+		} else {
+			failureCount++;
+		}
+
+		// Add to results array
+		QJsonObject msgResult;
+		msgResult["message_id"] = messageId;
+		msgResult["success"] = reactionResult.value("success").toBool();
+		if (reactionResult.contains("error")) {
+			msgResult["error"] = reactionResult["error"];
+		}
+		results.append(msgResult);
 	}
 
-	// TODO: Implement via BatchOperations component
-
 	QJsonObject result;
-	result["success"] = false;
-	result["error"] = "Batch reactions not yet implemented (requires tdesktop API integration)";
+	result["success"] = (failureCount == 0);
 	result["chat_id"] = chatId;
-	result["message_count"] = messageIds.size();
 	result["emoji"] = emoji;
+	result["total_messages"] = messageIdsArray.size();
+	result["succeeded"] = successCount;
+	result["failed"] = failureCount;
+	result["results"] = results;
+
+	qInfo() << "MCP: Batch reaction" << emoji << "on" << messageIdsArray.size() << "messages in chat" << chatId << "-" << successCount << "succeeded," << failureCount << "failed";
 
 	return result;
 }
@@ -2186,33 +3335,20 @@ QJsonObject Server::toolScheduleMessage(const QJsonObject &args) {
 
 	if (scheduleType == "once") {
 		QDateTime dateTime = QDateTime::fromString(when, Qt::ISODate);
-		scheduleId = _scheduler->scheduleOnce(chatId, text, dateTime);
+		scheduleId = _scheduler->scheduleMessage(chatId, text, dateTime);
 	} else if (scheduleType == "delayed") {
 		int delaySeconds = when.toInt();
-		scheduleId = _scheduler->scheduleDelayed(chatId, text, delaySeconds);
+		QDateTime dateTime = QDateTime::currentDateTime().addSecs(delaySeconds);
+		scheduleId = _scheduler->scheduleMessage(chatId, text, dateTime);
 	} else if (scheduleType == "recurring") {
 		QDateTime startTime = QDateTime::fromString(when, Qt::ISODate);
-
-		RecurrencePattern recurrence;
-		if (pattern == "hourly") {
-			recurrence = RecurrencePattern::Hourly;
-		} else if (pattern == "daily") {
-			recurrence = RecurrencePattern::Daily;
-		} else if (pattern == "weekly") {
-			recurrence = RecurrencePattern::Weekly;
-		} else if (pattern == "monthly") {
-			recurrence = RecurrencePattern::Monthly;
-		} else {
-			recurrence = RecurrencePattern::Daily;
-		}
-
-		scheduleId = _scheduler->scheduleRecurring(chatId, text, startTime, recurrence);
+		scheduleId = _scheduler->scheduleRecurringMessage(chatId, text, pattern, startTime);
 	}
 
 	QJsonObject result;
 	result["success"] = (scheduleId > 0);
-	result["schedule_id"] = scheduleId;
-	result["chat_id"] = chatId;
+	result["schedule_id"] = QString::number(scheduleId);
+	result["chat_id"] = QString::number(chatId);
 	result["type"] = scheduleType;
 
 	return result;
@@ -2233,36 +3369,39 @@ QJsonObject Server::toolCancelScheduled(const QJsonObject &args) {
 QJsonObject Server::toolListScheduled(const QJsonObject &args) {
 	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
 
-	auto scheduled = _scheduler->getScheduledMessages(chatId);
-
-	QJsonArray schedules;
-	for (const auto &msg : scheduled) {
-		QJsonObject s;
-		s["schedule_id"] = msg.id;
-		s["chat_id"] = msg.chatId;
-		s["text"] = msg.content;
-		s["start_time"] = msg.startTime.toString(Qt::ISODate);
-		s["status"] = msg.isActive ? "active" : "inactive";
-		s["occurrences"] = static_cast<qint64>(msg.occurrencesSent);
-		schedules.append(s);
-	}
+	auto schedules = _scheduler->listScheduledMessages(chatId);
+	// schedules is already a QJsonArray
 
 	QJsonObject result;
 	result["schedules"] = schedules;
 	result["count"] = schedules.size();
+	if (chatId > 0) {
+		result["chat_id"] = QString::number(chatId);
+	}
 
 	return result;
 }
 
 QJsonObject Server::toolUpdateScheduled(const QJsonObject &args) {
 	qint64 scheduleId = args["schedule_id"].toVariant().toLongLong();
-	QString newText = args["new_text"].toString();
 
-	bool success = _scheduler->updateScheduledMessage(scheduleId, newText);
+	// Build updates object from args
+	QJsonObject updates;
+	if (args.contains("new_text")) {
+		updates["text"] = args["new_text"];
+	}
+	if (args.contains("new_time")) {
+		updates["scheduled_time"] = args["new_time"];
+	}
+	if (args.contains("new_pattern")) {
+		updates["recurrence_pattern"] = args["new_pattern"];
+	}
+
+	bool success = _scheduler->updateScheduledMessage(scheduleId, updates);
 
 	QJsonObject result;
 	result["success"] = success;
-	result["schedule_id"] = scheduleId;
+	result["schedule_id"] = QString::number(scheduleId);
 
 	return result;
 }
@@ -2903,6 +4042,54 @@ QJsonObject Server::toolGetBotSuggestions(const QJsonObject &args) {
 
 	result["success"] = true;
 	result["note"] = "Suggestions feature requires database integration";
+
+	return result;
+}
+
+// ===== EPHEMERAL CAPTURE TOOL IMPLEMENTATIONS (Phase B) =====
+
+QJsonObject Server::toolConfigureEphemeralCapture(const QJsonObject &args) {
+	if (!_ephemeralArchiver) {
+		QJsonObject error;
+		error["error"] = "Ephemeral archiver not available";
+		return error;
+	}
+
+	bool selfDestruct = args.value("capture_self_destruct").toBool(true);
+	bool viewOnce = args.value("capture_view_once").toBool(true);
+	bool vanishing = args.value("capture_vanishing").toBool(true);
+
+	_ephemeralArchiver->setCaptureTypes(
+		selfDestruct, viewOnce, vanishing);
+
+	QJsonObject result;
+	result["success"] = true;
+	result["capture_self_destruct"] = selfDestruct;
+	result["capture_view_once"] = viewOnce;
+	result["capture_vanishing"] = vanishing;
+
+	return result;
+}
+
+QJsonObject Server::toolGetEphemeralStats(const QJsonObject &args) {
+	Q_UNUSED(args);
+
+	if (!_ephemeralArchiver) {
+		QJsonObject error;
+		error["error"] = "Ephemeral archiver not available";
+		return error;
+	}
+
+	auto stats = _ephemeralArchiver->getStats();
+
+	QJsonObject result;
+	result["total_captured"] = stats.totalCaptured;
+	result["self_destruct_count"] = stats.selfDestructCount;
+	result["view_once_count"] = stats.viewOnceCount;
+	result["vanishing_count"] = stats.vanishingCount;
+	result["media_saved"] = stats.mediaSaved;
+	result["last_captured"] = stats.lastCaptured.toString(Qt::ISODate);
+	result["success"] = true;
 
 	return result;
 }
