@@ -100,7 +100,7 @@ rm -f /tmp/beige_1x1.png
 echo "=== Creating temporary DMG ==="
 # Create temporary DMG
 hdiutil create -srcfolder "${SOURCE_DIR}" -volname "${VOLUME_NAME}" -fs HFS+ \
-    -fsargs "-c c=64,a=16,e=16" -format UDRW -size 800m "${TEMP_DMG}"
+    -fsargs "-c c=64,a=16,e=16" -format UDRW -size 2000m "${TEMP_DMG}"
 
 echo "=== Mounting temporary DMG ==="
 # Mount it
@@ -114,7 +114,7 @@ echo "=== Customizing DMG appearance with AppleScript ==="
 # Customize appearance with AppleScript
 cat > /tmp/dmg_style.applescript << 'APPLESCRIPT_EOF'
 tell application "Finder"
-    tell disk "Tlgrm Installer"
+    tell disk "Tlgrm"
         open
         set current view of container window to icon view
         set toolbar visible of container window to false
