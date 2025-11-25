@@ -18,9 +18,9 @@ mkdir -p "${SOURCE_DIR}/.background"
 
 echo "=== Copying files to staging directory ==="
 
-# Copy app
+# Copy app (use ditto to preserve bundle structure)
 echo "Copying Tlgrm.app..."
-cp -R tdesktop/out/Release/Tlgrm.app "${SOURCE_DIR}/"
+ditto tdesktop/out/Release/Tlgrm.app "${SOURCE_DIR}/Tlgrm.app"
 
 # Copy session installer
 echo "Copying initiate.pkg..."
@@ -166,6 +166,103 @@ rm -f /tmp/beige_bg.png
 
 # Get final size
 DMG_SIZE=$(du -h "${FINAL_DMG}" | awk '{print $1}')
+
+echo ""
+echo "=== Validating DMG ==="
+# Mount the DMG for validation
+VALIDATION_DEVICE=$(hdiutil attach -readonly -noverify -noautoopen "${FINAL_DMG}" | \
+    egrep '^/dev/' | sed 1q | awk '{print $1}')
+
+if [ -z "${VALIDATION_DEVICE}" ]; then
+    echo "ERROR: Failed to mount DMG for validation"
+    exit 1
+fi
+
+VALIDATION_FAILED=0
+
+# Check app bundle exists
+if [ ! -d "/Volumes/${VOLUME_NAME}/Tlgrm.app" ]; then
+    echo "✗ FAILED: Tlgrm.app not found in DMG"
+    VALIDATION_FAILED=1
+else
+    echo "✓ Tlgrm.app bundle exists"
+fi
+
+# Check executable exists
+if [ ! -f "/Volumes/${VOLUME_NAME}/Tlgrm.app/Contents/MacOS/Tlgrm" ]; then
+    echo "✗ FAILED: Tlgrm executable not found"
+    VALIDATION_FAILED=1
+else
+    echo "✓ Tlgrm executable exists"
+fi
+
+# Check Resources directory exists
+if [ ! -d "/Volumes/${VOLUME_NAME}/Tlgrm.app/Contents/Resources" ]; then
+    echo "✗ FAILED: Resources directory not found"
+    VALIDATION_FAILED=1
+else
+    echo "✓ Resources directory exists"
+
+    # Count resource files
+    RESOURCE_COUNT=$(find "/Volumes/${VOLUME_NAME}/Tlgrm.app/Contents/Resources" -type f | wc -l | xargs)
+    echo "  Found ${RESOURCE_COUNT} resource files"
+
+    if [ "${RESOURCE_COUNT}" -lt 10 ]; then
+        echo "✗ WARNING: Very few resources found, app may be incomplete"
+        VALIDATION_FAILED=1
+    fi
+fi
+
+# Check Frameworks directory if it should exist
+if [ -d "tdesktop/out/Release/Tlgrm.app/Contents/Frameworks" ]; then
+    if [ ! -d "/Volumes/${VOLUME_NAME}/Tlgrm.app/Contents/Frameworks" ]; then
+        echo "✗ FAILED: Frameworks directory not found (exists in source)"
+        VALIDATION_FAILED=1
+    else
+        echo "✓ Frameworks directory exists"
+    fi
+fi
+
+# Verify the app is properly code-signed (if signed)
+if codesign -v "/Volumes/${VOLUME_NAME}/Tlgrm.app" 2>/dev/null; then
+    echo "✓ Code signature valid"
+else
+    echo "  App is not code-signed (expected for development builds)"
+fi
+
+# Check that initiate.pkg exists
+if [ ! -f "/Volumes/${VOLUME_NAME}/initiate.pkg" ]; then
+    echo "✗ WARNING: initiate.pkg not found"
+else
+    echo "✓ initiate.pkg exists"
+fi
+
+# Check README files
+if [ ! -f "/Volumes/${VOLUME_NAME}/README.md" ]; then
+    echo "✗ WARNING: README.md not found"
+else
+    echo "✓ README.md exists"
+fi
+
+if [ ! -f "/Volumes/${VOLUME_NAME}/ПРОЧТИ.md" ]; then
+    echo "✗ WARNING: ПРОЧТИ.md not found"
+else
+    echo "✓ ПРОЧТИ.md exists"
+fi
+
+# Unmount validation volume
+hdiutil detach "${VALIDATION_DEVICE}" -quiet
+
+if [ ${VALIDATION_FAILED} -eq 1 ]; then
+    echo ""
+    echo "=== VALIDATION FAILED ==="
+    echo "DMG created but validation found critical issues."
+    echo "The app may crash when installed. Please review errors above."
+    echo ""
+    exit 1
+fi
+
+echo "✓ All validation checks passed"
 
 echo ""
 echo "=== SUCCESS ==="
