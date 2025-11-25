@@ -111,6 +111,7 @@ class Environment;
 
 namespace MCP {
 class Server;
+class Bridge;
 } // namespace MCP
 
 namespace Core {
@@ -452,6 +453,7 @@ private:
 	const std::unique_ptr<Tray> _tray;
 
 	std::unique_ptr<MCP::Server> _mcpServer;
+	std::unique_ptr<MCP::Bridge> _mcpBridge;
 
 	std::unique_ptr<Media::Player::FloatController> _floatPlayers;
 	rpl::lifetime _floatPlayerDelegateLifetime;

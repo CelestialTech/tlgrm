@@ -5,50 +5,58 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
+#include <QtCore/QJsonObject>
+#include <QtCore/QJsonArray>
 #include <QtCore/QDateTime>
 #include <QtCore/QTimer>
-#include <QtCore/QJsonObject>
-#include <QtSql/QSqlDatabase>
+#include <QtCore/QHash>
+#include <QtCore/QVector>
+#include <memory>
+
+namespace Main {
+class Session;
+} // namespace Main
 
 namespace MCP {
 
-// Schedule type
-enum class ScheduleType {
-	Once,       // Send at specific time
-	Recurring,  // Repeat on pattern
-	Delayed     // Send after X seconds
+// Scheduled message status
+enum class ScheduleStatus {
+	Pending,      // Waiting to be sent
+	Sending,      // Currently being sent
+	Sent,         // Successfully sent
+	Failed,       // Failed to send
+	Cancelled     // Cancelled by user
 };
 
-// Recurrence pattern
-enum class RecurrencePattern {
-	None,
-	Hourly,
-	Daily,
-	Weekly,
-	Monthly,
-	Custom  // Cron-like expression
-};
-
-// Scheduled message
+// Scheduled message data
 struct ScheduledMessage {
-	int id;
-	qint64 chatId;
-	QString content;
-	ScheduleType scheduleType;
-	QDateTime scheduledTime;  // For 'once'
-	int delaySeconds;  // For 'delayed'
-	RecurrencePattern recurrencePattern;
-	QDateTime startTime;  // For recurring
-	int maxOccurrences;  // For recurring
-	int occurrencesSent;
-	QDateTime lastSent;
-	QDateTime nextScheduled;
-	bool isActive;
-	QString createdBy;
-	QDateTime createdAt;
+	qint64 scheduleId = 0;
+	qint64 chatId = 0;
+	QString chatTitle;
+	QString text;
+	QJsonObject media;
+	QDateTime scheduledTime;
+	QDateTime createdTime;
+	ScheduleStatus status = ScheduleStatus::Pending;
+	QString errorMessage;
+	int retryCount = 0;
+	bool recurring = false;
+	QString recurrencePattern; // "daily", "weekly", "monthly", "custom"
+	QJsonObject recurrenceData;
 };
 
-// Message scheduler
+// Scheduler statistics
+struct SchedulerStats {
+	int totalScheduled = 0;
+	int pendingCount = 0;
+	int sentCount = 0;
+	int failedCount = 0;
+	int cancelledCount = 0;
+	QDateTime lastScheduled;
+	QDateTime lastSent;
+};
+
+// Message scheduler class
 class MessageScheduler : public QObject {
 	Q_OBJECT
 
@@ -57,81 +65,115 @@ public:
 	~MessageScheduler();
 
 	// Initialization
-	bool start(QSqlDatabase *db);
+	bool start(Main::Session *session);
 	void stop();
 	[[nodiscard]] bool isRunning() const { return _isRunning; }
 
-	// Schedule messages
-	int scheduleOnce(
+	// Scheduling functions
+	qint64 scheduleMessage(
 		qint64 chatId,
-		const QString &content,
-		const QDateTime &sendTime,
-		const QString &createdBy = QString()
+		const QString &text,
+		const QDateTime &scheduledTime,
+		const QJsonObject &options = QJsonObject()
 	);
 
-	int scheduleRecurring(
+	qint64 scheduleRecurringMessage(
 		qint64 chatId,
-		const QString &content,
+		const QString &text,
+		const QString &pattern,
 		const QDateTime &startTime,
-		RecurrencePattern pattern,
-		int maxOccurrences = -1,  // -1 = infinite
-		const QString &createdBy = QString()
+		const QJsonObject &recurrenceData = QJsonObject()
 	);
 
-	int scheduleDelayed(
-		qint64 chatId,
-		const QString &content,
-		int delaySeconds,
-		const QString &createdBy = QString()
+	bool cancelScheduledMessage(qint64 scheduleId);
+	bool updateScheduledMessage(qint64 scheduleId, const QJsonObject &updates);
+	bool rescheduleMessage(qint64 scheduleId, const QDateTime &newTime);
+
+	// Query functions
+	QJsonArray listScheduledMessages(
+		qint64 chatId = 0,
+		ScheduleStatus status = ScheduleStatus::Pending
 	);
 
-	// Management
-	bool cancelScheduledMessage(int scheduleId);
-	bool updateScheduledMessage(int scheduleId, const QString &newContent);
-	bool pauseScheduledMessage(int scheduleId);
-	bool resumeScheduledMessage(int scheduleId);
+	QJsonObject getScheduledMessage(qint64 scheduleId);
+	
+	QJsonArray getUpcomingMessages(int limit = 10);
+	QJsonArray getFailedMessages();
 
-	// Queries
-	QVector<ScheduledMessage> getScheduledMessages(qint64 chatId = 0, bool activeOnly = true);
-	ScheduledMessage getScheduledMessage(int scheduleId);
-	int getActiveScheduleCount() const;
+	// Statistics
+	SchedulerStats getStats() const;
+	QJsonObject getSchedulerActivity();
 
-	// Export
-	QJsonObject exportScheduledMessage(const ScheduledMessage &msg);
-	QJsonArray exportAllScheduled();
+	// Bulk operations
+	int cancelAllScheduled(qint64 chatId);
+	int rescheduleAll(qint64 chatId, int delayMinutes);
+
+	// Recurrence patterns
+	static bool validateRecurrencePattern(const QString &pattern);
+	static QDateTime getNextOccurrence(
+		const QDateTime &lastTime,
+		const QString &pattern,
+		const QJsonObject &data
+	);
 
 Q_SIGNALS:
-	void messageScheduled(int scheduleId, qint64 chatId, const QDateTime &sendTime);
-	void messageSent(int scheduleId, qint64 chatId, qint64 messageId);
-	void scheduleCancelled(int scheduleId);
-	void error(const QString &errorMessage);
+	void messageScheduled(qint64 scheduleId, qint64 chatId);
+	void messageSent(qint64 scheduleId, qint64 chatId, qint64 messageId);
+	void messageFailed(qint64 scheduleId, const QString &error);
+	void messageCancelled(qint64 scheduleId);
+	void schedulerError(const QString &errorMessage);
 
 private Q_SLOTS:
 	void checkScheduledMessages();
+	void handleSendResult(qint64 scheduleId, bool success, const QString &error);
 
 private:
-	// Execution
-	bool sendScheduledMessage(const ScheduledMessage &msg);
-	void updateNextScheduledTime(const ScheduledMessage &msg);
-	QDateTime calculateNextOccurrence(const ScheduledMessage &msg);
+	// Sending
+	void sendScheduledMessage(ScheduledMessage &message);
+	void retryFailedMessage(ScheduledMessage &message);
+	void handleRecurringMessage(ScheduledMessage &message);
 
-	// Database operations
+	// Persistence
 	bool loadScheduledMessages();
-	bool saveScheduledMessage(const ScheduledMessage &msg);
-	bool updateScheduledMessageInDB(const ScheduledMessage &msg);
-	bool deleteScheduledMessageFromDB(int scheduleId);
+	bool saveScheduledMessage(const ScheduledMessage &message);
+	bool updateScheduleStatus(qint64 scheduleId, ScheduleStatus status);
+	bool deleteScheduledMessage(qint64 scheduleId);
 
-	// Helpers
-	QString scheduleTypeToString(ScheduleType type) const;
-	QString recurrencePatternToString(RecurrencePattern pattern) const;
-	ScheduleType stringToScheduleType(const QString &str) const;
-	RecurrencePattern stringToRecurrencePattern(const QString &str) const;
+	// Conversion
+	QJsonObject scheduledMessageToJson(const ScheduledMessage &message) const;
+	ScheduledMessage jsonToScheduledMessage(const QJsonObject &json) const;
+	QString scheduleStatusToString(ScheduleStatus status) const;
+	ScheduleStatus stringToScheduleStatus(const QString &str) const;
 
-	QSqlDatabase *_db = nullptr;
+	// Time calculations
+	QDateTime parseScheduleTime(const QString &timeStr) const;
+	bool isTimeToSend(const QDateTime &scheduledTime) const;
+	int getSecondsUntilNext() const;
+
+	// Validation
+	bool validateScheduleTime(const QDateTime &time, QString &error) const;
+	bool validateChatId(qint64 chatId, QString &error) const;
+	bool validateMessageText(const QString &text, QString &error) const;
+
+	Main::Session *_session = nullptr;
 	bool _isRunning = false;
+	SchedulerStats _stats;
+
+	// Storage
+	QHash<qint64, ScheduledMessage> _scheduledMessages;
+	qint64 _nextScheduleId = 1;
+
+	// Timer for checking scheduled messages
 	QTimer *_checkTimer = nullptr;
-	QVector<ScheduledMessage> _scheduledMessages;
-	int _nextScheduleId = 1;
+	int _checkIntervalSeconds = 60; // Check every minute
+
+	// Retry configuration
+	int _maxRetries = 3;
+	int _retryDelaySeconds = 300; // 5 minutes
+
+	// Persistence file
+	QString _persistenceFilePath;
+	bool _persistenceEnabled = true;
 };
 
 } // namespace MCP

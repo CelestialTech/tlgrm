@@ -5,142 +5,261 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
-#include <QtCore/QDateTime>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonArray>
-#include <QtSql/QSqlDatabase>
+#include <QtCore/QDateTime>
+#include <QtCore/QHash>
+#include <QtCore/QVector>
+#include <memory>
+
+namespace Data {
+class Session;
+} // namespace Data
 
 namespace MCP {
 
 class ChatArchiver;
 
-// Time series granularity
-enum class TimeGranularity {
-	Hourly,
-	Daily,
-	Weekly,
-	Monthly
+// Analytics time range
+struct AnalyticsTimeRange {
+	QDateTime start;
+	QDateTime end;
+	QString period; // "hour", "day", "week", "month", "year", "all"
 };
 
-// Activity trend direction
-enum class ActivityTrend {
-	Increasing,
-	Decreasing,
-	Stable,
-	Unknown
+// Message statistics
+struct MessageStats {
+	int totalMessages = 0;
+	int textMessages = 0;
+	int mediaMessages = 0;
+	int deletedMessages = 0;
+	int editedMessages = 0;
+	double averageLength = 0.0;
+	double messagesPerDay = 0.0;
+	QDateTime firstMessage;
+	QDateTime lastMessage;
 };
 
-// Analytics manager - provides statistical insights
+// User activity metrics
+struct UserActivity {
+	qint64 userId = 0;
+	QString userName;
+	int messageCount = 0;
+	int replyCount = 0;
+	int mentionCount = 0;
+	double averageMessageLength = 0.0;
+	QDateTime firstSeen;
+	QDateTime lastSeen;
+	QVector<int> hourlyActivity; // 24 hours
+	QVector<int> weeklyActivity; // 7 days
+};
+
+// Chat activity metrics
+struct ChatActivity {
+	qint64 chatId = 0;
+	QString chatTitle;
+	int activeUsers = 0;
+	int totalMessages = 0;
+	double messagesPerDay = 0.0;
+	double messagesPerUser = 0.0;
+	QString activityTrend; // "increasing", "decreasing", "stable"
+	QVector<int> hourlyDistribution;
+	QVector<int> weeklyDistribution;
+};
+
+// Time series data point
+struct TimeSeriesPoint {
+	QDateTime timestamp;
+	int messageCount = 0;
+	int userCount = 0;
+	double averageLength = 0.0;
+	QHash<QString, int> messageTypes;
+};
+
+// Word frequency data
+struct WordFrequency {
+	QString word;
+	int count = 0;
+	double percentage = 0.0;
+};
+
+// Analytics engine class
 class Analytics : public QObject {
 	Q_OBJECT
 
 public:
-	explicit Analytics(ChatArchiver *archiver, QObject *parent = nullptr);
+	explicit Analytics(QObject *parent = nullptr);
 	~Analytics();
 
-	// Message statistics
-	struct MessageStats {
-		int totalMessages = 0;
-		int totalWords = 0;
-		int totalCharacters = 0;
-		int uniqueUsers = 0;
-		double avgMessageLength = 0.0;
-		double messagesPerHour = 0.0;
-		QDateTime firstMessage;
-		QDateTime lastMessage;
-		QMap<QString, int> topWords;  // word -> count
-		QMap<qint64, int> topAuthors;  // user_id -> count
-	};
+	// Initialization
+	bool start(Data::Session *session, ChatArchiver *archiver);
+	void stop();
+	[[nodiscard]] bool isRunning() const { return _isRunning; }
 
-	[[nodiscard]] MessageStats getMessageStatistics(
+	// Core analytics functions
+	QJsonObject getMessageStatistics(
 		qint64 chatId,
-		const QDateTime &start = QDateTime(),
-		const QDateTime &end = QDateTime()
+		const QString &period = "all",
+		const QDateTime &startDate = QDateTime(),
+		const QDateTime &endDate = QDateTime()
 	);
 
-	// User activity analysis
-	struct UserActivity {
-		qint64 userId;
-		QString username;
-		int messageCount = 0;
-		int wordCount = 0;
-		double avgMessageLength = 0.0;
-		int mostActiveHour = -1;  // 0-23
-		QString mostActiveChannel;
-		QDateTime firstMessage;
-		QDateTime lastMessage;
-		int daysActive = 0;
-	};
-
-	[[nodiscard]] UserActivity getUserActivityAnalysis(qint64 userId, qint64 chatId = 0);
-	[[nodiscard]] QVector<UserActivity> getTopUsers(qint64 chatId, int limit = 10);
-
-	// Chat activity analysis
-	struct ChatActivity {
-		qint64 chatId;
-		QString chatTitle;
-		int totalMessages = 0;
-		int uniqueUsers = 0;
-		double messagesPerDay = 0.0;
-		int peakHour = -1;  // 0-23
-		ActivityTrend trend = ActivityTrend::Unknown;
-		QDateTime firstMessage;
-		QDateTime lastMessage;
-	};
-
-	[[nodiscard]] ChatActivity getChatActivityAnalysis(qint64 chatId);
-	[[nodiscard]] ActivityTrend detectActivityTrend(qint64 chatId);
-
-	// Time series data
-	struct TimeSeriesPoint {
-		QDateTime timestamp;
-		int messageCount = 0;
-		int uniqueUsers = 0;
-		double avgLength = 0.0;
-	};
-
-	[[nodiscard]] QVector<TimeSeriesPoint> getTimeSeries(
-		qint64 chatId,
-		TimeGranularity granularity,
-		const QDateTime &start = QDateTime(),
-		const QDateTime &end = QDateTime()
+	QJsonObject getUserActivity(
+		qint64 userId,
+		qint64 chatId = 0,
+		const QString &period = "all"
 	);
 
-	// Export functions
-	QJsonObject exportMessageStats(qint64 chatId);
-	QJsonObject exportUserActivity(qint64 userId, qint64 chatId = 0);
-	QJsonObject exportChatActivity(qint64 chatId);
-	QJsonArray exportTimeSeries(
+	QJsonObject getChatActivity(
 		qint64 chatId,
-		TimeGranularity granularity
+		const QString &period = "all"
 	);
-	QString exportToCSV(qint64 chatId, const QString &outputPath);
 
-	// Word analysis
-	[[nodiscard]] QMap<QString, int> getTopWords(
+	QJsonArray getTimeSeries(
+		qint64 chatId,
+		const QString &granularity = "daily",
+		const QDateTime &startDate = QDateTime(),
+		const QDateTime &endDate = QDateTime()
+	);
+
+	QJsonArray getTopUsers(
+		qint64 chatId,
+		int limit = 10,
+		const QString &metric = "messages"
+	);
+
+	QJsonArray getTopWords(
 		qint64 chatId,
 		int limit = 20,
-		const QStringList &stopWords = QStringList()
+		int minLength = 4
 	);
-	[[nodiscard]] QMap<QString, int> getUserTopWords(qint64 userId, int limit = 20);
 
-	// Sentiment and patterns (placeholder for future AI integration)
-	struct SentimentScore {
-		double positive = 0.0;
-		double negative = 0.0;
-		double neutral = 0.0;
-	};
+	// Export analytics
+	QString exportAnalytics(
+		qint64 chatId,
+		const QString &format = "json",
+		const QString &outputPath = QString()
+	);
+
+	// Trend analysis
+	QJsonObject getTrends(
+		qint64 chatId,
+		const QString &metric = "messages",
+		int daysBack = 30
+	);
+
+	// Comparative analytics
+	QJsonObject compareChats(
+		const QVector<qint64> &chatIds,
+		const QString &metric = "activity"
+	);
+
+	QJsonObject compareUsers(
+		qint64 chatId,
+		const QVector<qint64> &userIds
+	);
+
+	// Real-time analytics
+	QJsonObject getLiveActivity(qint64 chatId = 0);
+	QJsonArray getActiveChats(int limit = 10);
+
+	// Cache management
+	void clearCache();
+	void refreshCache(qint64 chatId = 0);
+
+Q_SIGNALS:
+	void analyticsUpdated(qint64 chatId);
+	void cacheRefreshed();
+	void error(const QString &errorMessage);
 
 private:
-	// Helper functions
-	QStringList extractWords(const QString &text) const;
-	QStringList getDefaultStopWords() const;
-	QString granularityToSQL(TimeGranularity granularity) const;
-	int calculateDaysActive(qint64 userId, qint64 chatId) const;
-	int findMostActiveHour(qint64 userId, qint64 chatId) const;
-	int findPeakHour(qint64 chatId) const;
+	// Data collection
+	MessageStats collectMessageStats(
+		qint64 chatId,
+		const AnalyticsTimeRange &range
+	);
 
-	ChatArchiver *_archiver;
+	UserActivity collectUserActivity(
+		qint64 userId,
+		qint64 chatId,
+		const AnalyticsTimeRange &range
+	);
+
+	ChatActivity collectChatActivity(
+		qint64 chatId,
+		const AnalyticsTimeRange &range
+	);
+
+	// Time series generation
+	QVector<TimeSeriesPoint> generateTimeSeries(
+		qint64 chatId,
+		const QString &granularity,
+		const AnalyticsTimeRange &range
+	);
+
+	// Word analysis
+	QHash<QString, int> analyzeWordFrequency(
+		qint64 chatId,
+		const AnalyticsTimeRange &range
+	);
+
+	QStringList extractWords(const QString &text) const;
+	bool isStopWord(const QString &word) const;
+
+	// Trend detection
+	QString detectTrend(const QVector<double> &data) const;
+	double calculateGrowthRate(const QVector<double> &data) const;
+	QVector<double> smoothData(const QVector<double> &data, int window) const;
+
+	// Statistical helpers
+	double calculateAverage(const QVector<int> &data) const;
+	double calculateStdDev(const QVector<int> &data) const;
+	int calculateMedian(QVector<int> data) const;
+
+	// Time range helpers
+	AnalyticsTimeRange parseTimeRange(
+		const QString &period,
+		const QDateTime &start = QDateTime(),
+		const QDateTime &end = QDateTime()
+	) const;
+
+	QString formatTimestamp(
+		const QDateTime &dt,
+		const QString &granularity
+	) const;
+
+	// Export helpers
+	QString exportToJSON(const QJsonObject &analytics, const QString &path);
+	QString exportToCSV(const QJsonObject &analytics, const QString &path);
+	QString exportToHTML(const QJsonObject &analytics, const QString &path);
+
+	// Conversion helpers
+	QJsonObject messageStatsToJson(const MessageStats &stats) const;
+	QJsonObject userActivityToJson(const UserActivity &activity) const;
+	QJsonObject chatActivityToJson(const ChatActivity &activity) const;
+	QJsonArray timeSeriesPointsToJson(const QVector<TimeSeriesPoint> &points) const;
+	QJsonArray wordFrequenciesToJson(const QVector<WordFrequency> &frequencies) const;
+
+	// Cache
+	struct CachedAnalytics {
+		QDateTime timestamp;
+		QJsonObject data;
+	};
+	QHash<QString, CachedAnalytics> _cache;
+	int _cacheLifetimeSeconds = 300; // 5 minutes
+
+	QString getCacheKey(qint64 chatId, const QString &type) const;
+	bool isCacheValid(const QString &key) const;
+	void setCacheValue(const QString &key, const QJsonObject &data);
+	QJsonObject getCacheValue(const QString &key) const;
+
+	Data::Session *_session = nullptr;
+	ChatArchiver *_archiver = nullptr;
+	bool _isRunning = false;
+
+	// Stop words for word frequency analysis
+	QSet<QString> _stopWords;
+	void initializeStopWords();
 };
 
 } // namespace MCP

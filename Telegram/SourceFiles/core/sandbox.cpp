@@ -76,6 +76,9 @@ int Sandbox::start() {
 				gManyInstance = true;
 			}
 		}
+		// Always allow multiple instances (--many behavior by default)
+		gManyInstance = true;
+		LOG(("TData: Multiple instance mode enabled by default"));
 	}
 
 #if defined Q_OS_LINUX && QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)

@@ -3,207 +3,670 @@
 
 #include "analytics.h"
 #include "chat_archiver.h"
+#include "data/data_session.h"
+#include "history/history.h"
+#include "history/history_item.h"
+#include "data/data_peer.h"
+#include "data/data_user.h"
 
+#include <QtCore/QFile>
+#include <QtCore/QTextStream>
+#include <QtCore/QJsonDocument>
 #include <QtCore/QRegularExpression>
-#include <QtCore/QSet>
-#include <QtSql/QSqlQuery>
+#include <QtCore/QtMath>
 #include <QtSql/QSqlError>
 #include <algorithm>
 
 namespace MCP {
 
-namespace {
-
-// Common English stop words to filter out
-const QStringList kDefaultStopWords = {
-	"a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are",
-	"as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but",
-	"by", "can", "did", "do", "does", "doing", "down", "during", "each", "few", "for", "from",
-	"further", "had", "has", "have", "having", "he", "her", "here", "hers", "herself", "him",
-	"himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself", "just",
-	"me", "might", "more", "most", "must", "my", "myself", "no", "nor", "not", "now", "of",
-	"off", "on", "once", "only", "or", "other", "our", "ours", "ourselves", "out", "over",
-	"own", "s", "same", "she", "should", "so", "some", "such", "t", "than", "that", "the",
-	"their", "theirs", "them", "themselves", "then", "there", "these", "they", "this", "those",
-	"through", "to", "too", "under", "until", "up", "very", "was", "we", "were", "what",
-	"when", "where", "which", "while", "who", "whom", "why", "will", "with", "would", "you",
-	"your", "yours", "yourself", "yourselves"
-};
-
-} // namespace
-
-Analytics::Analytics(ChatArchiver *archiver, QObject *parent)
-	: QObject(parent)
-	, _archiver(archiver) {
-	// Note: static_cast<QSqlDatabase*>(nullptr) access removed as it's private in ChatArchiver
-	// Use archiver's public methods instead
+Analytics::Analytics(QObject *parent)
+: QObject(parent) {
+	initializeStopWords();
 }
 
-Analytics::~Analytics() = default;
+Analytics::~Analytics() {
+	stop();
+}
 
-// Message Statistics Implementation
-Analytics::MessageStats Analytics::getMessageStatistics(
-		qint64 chatId,
-		const QDateTime &start,
-		const QDateTime &end) {
-
-	MessageStats stats;
-
-	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
-		return stats;
+bool Analytics::start(Data::Session *session, ChatArchiver *archiver) {
+	if (_isRunning) {
+		return true;
 	}
 
-	QString sql = R"(
-		SELECT
-			COUNT(*) as total_messages,
-			SUM(LENGTH(content)) as total_chars,
-			SUM(LENGTH(content) - LENGTH(REPLACE(content, ' ', '')) + 1) as total_words,
-			COUNT(DISTINCT user_id) as unique_users,
-			AVG(LENGTH(content)) as avg_length,
-			MIN(timestamp) as first_msg,
-			MAX(timestamp) as last_msg
-		FROM messages
-		WHERE chat_id = :chat_id
-	)";
-
-	QStringList conditions;
-	if (start.isValid()) {
-		conditions << "timestamp >= :start";
-	}
-	if (end.isValid()) {
-		conditions << "timestamp <= :end";
+	if (!session || !archiver) {
+		Q_EMIT error("Invalid session or archiver");
+		return false;
 	}
 
-	if (!conditions.isEmpty()) {
-		sql += " AND " + conditions.join(" AND ");
+	_session = session;
+	_archiver = archiver;
+	_isRunning = true;
+
+	return true;
+}
+
+void Analytics::stop() {
+	if (!_isRunning) {
+		return;
 	}
 
-	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
+	_session = nullptr;
+	_archiver = nullptr;
+	_isRunning = false;
+	clearCache();
+}
+
+QJsonObject Analytics::getMessageStatistics(
+	qint64 chatId,
+	const QString &period,
+	const QDateTime &startDate,
+	const QDateTime &endDate
+) {
+	if (!_isRunning || !_archiver) {
+		QJsonObject error;
+		error["error"] = "Analytics not running";
+		return error;
+	}
+
+	// Check cache
+	QString cacheKey = getCacheKey(chatId, QString("msgstats_%1").arg(period));
+	if (isCacheValid(cacheKey)) {
+		return getCacheValue(cacheKey);
+	}
+
+	// Parse time range
+	auto range = parseTimeRange(period, startDate, endDate);
+
+	// Collect statistics from archiver database
+	auto stats = collectMessageStats(chatId, range);
+
+	// Convert to JSON
+	QJsonObject result = messageStatsToJson(stats);
+
+	// Cache the result
+	setCacheValue(cacheKey, result);
+
+	return result;
+}
+
+QJsonObject Analytics::getUserActivity(
+	qint64 userId,
+	qint64 chatId,
+	const QString &period
+) {
+	if (!_isRunning || !_archiver) {
+		QJsonObject error;
+		error["error"] = "Analytics not running";
+		return error;
+	}
+
+	// Check cache
+	QString cacheKey = getCacheKey(chatId, QString("useract_%1_%2").arg(userId).arg(period));
+	if (isCacheValid(cacheKey)) {
+		return getCacheValue(cacheKey);
+	}
+
+	// Parse time range
+	auto range = parseTimeRange(period);
+
+	// Collect user activity
+	auto activity = collectUserActivity(userId, chatId, range);
+
+	// Convert to JSON
+	QJsonObject result = userActivityToJson(activity);
+
+	// Cache the result
+	setCacheValue(cacheKey, result);
+
+	return result;
+}
+
+QJsonObject Analytics::getChatActivity(
+	qint64 chatId,
+	const QString &period
+) {
+	if (!_isRunning || !_archiver) {
+		QJsonObject error;
+		error["error"] = "Analytics not running";
+		return error;
+	}
+
+	// Check cache
+	QString cacheKey = getCacheKey(chatId, QString("chatact_%1").arg(period));
+	if (isCacheValid(cacheKey)) {
+		return getCacheValue(cacheKey);
+	}
+
+	// Parse time range
+	auto range = parseTimeRange(period);
+
+	// Collect chat activity
+	auto activity = collectChatActivity(chatId, range);
+
+	// Convert to JSON
+	QJsonObject result = chatActivityToJson(activity);
+
+	// Cache the result
+	setCacheValue(cacheKey, result);
+
+	return result;
+}
+
+QJsonArray Analytics::getTimeSeries(
+	qint64 chatId,
+	const QString &granularity,
+	const QDateTime &startDate,
+	const QDateTime &endDate
+) {
+	if (!_isRunning || !_archiver) {
+		return QJsonArray();
+	}
+
+	// Parse time range
+	auto range = parseTimeRange("custom", startDate, endDate);
+
+	// Generate time series
+	auto points = generateTimeSeries(chatId, granularity, range);
+
+	// Convert to JSON
+	return timeSeriesPointsToJson(points);
+}
+
+QJsonArray Analytics::getTopUsers(
+	qint64 chatId,
+	int limit,
+	const QString &metric
+) {
+	if (!_isRunning || !_archiver || !_archiver->isRunning()) {
+		return QJsonArray();
+	}
+
+	// Query archiver database for user statistics
+	auto db = _archiver->database();
+	QSqlQuery query(db);
+
+	QString sql;
+	if (metric == "messages") {
+		sql = "SELECT user_id, user_name, COUNT(*) as count "
+		      "FROM messages WHERE chat_id = ? "
+		      "GROUP BY user_id ORDER BY count DESC LIMIT ?";
+	} else if (metric == "words") {
+		sql = "SELECT user_id, user_name, SUM(word_count) as count "
+		      "FROM messages WHERE chat_id = ? "
+		      "GROUP BY user_id ORDER BY count DESC LIMIT ?";
+	} else {
+		sql = "SELECT user_id, user_name, COUNT(*) as count "
+		      "FROM messages WHERE chat_id = ? "
+		      "GROUP BY user_id ORDER BY count DESC LIMIT ?";
+	}
+
 	query.prepare(sql);
-	query.bindValue(":chat_id", chatId);
-	if (start.isValid()) {
-		query.bindValue(":start", start.toSecsSinceEpoch());
-	}
-	if (end.isValid()) {
-		query.bindValue(":end", end.toSecsSinceEpoch());
-	}
+	query.addBindValue(chatId);
+	query.addBindValue(limit);
 
-	if (query.exec() && query.next()) {
-		stats.totalMessages = query.value("total_messages").toInt();
-		stats.totalCharacters = query.value("total_chars").toLongLong();
-		stats.totalWords = query.value("total_words").toInt();
-		stats.uniqueUsers = query.value("unique_users").toInt();
-		stats.avgMessageLength = query.value("avg_length").toDouble();
-		stats.firstMessage = QDateTime::fromSecsSinceEpoch(query.value("first_msg").toLongLong());
-		stats.lastMessage = QDateTime::fromSecsSinceEpoch(query.value("last_msg").toLongLong());
-
-		// Calculate messages per hour
-		qint64 duration = stats.lastMessage.toSecsSinceEpoch() - stats.firstMessage.toSecsSinceEpoch();
-		if (duration > 0) {
-			stats.messagesPerHour = (stats.totalMessages * 3600.0) / duration;
+	QJsonArray result;
+	if (query.exec()) {
+		while (query.next()) {
+			QJsonObject user;
+			user["userId"] = QString::number(query.value(0).toLongLong());
+			user["userName"] = query.value(1).toString();
+			user["count"] = query.value(2).toInt();
+			result.append(user);
 		}
 	}
 
-	// Get top words
-	stats.topWords = getTopWords(chatId, 20);
+	return result;
+}
 
-	// Get top authors
-	QSqlQuery authorsQuery(*static_cast<QSqlDatabase*>(nullptr));
-	authorsQuery.prepare(R"(
-		SELECT user_id, COUNT(*) as count
-		FROM messages
-		WHERE chat_id = :chat_id AND user_id IS NOT NULL
-		GROUP BY user_id
-		ORDER BY count DESC
-		LIMIT 10
-	)");
-	authorsQuery.bindValue(":chat_id", chatId);
+QJsonArray Analytics::getTopWords(
+	qint64 chatId,
+	int limit,
+	int minLength
+) {
+	if (!_isRunning || !_archiver) {
+		return QJsonArray();
+	}
 
-	if (authorsQuery.exec()) {
-		while (authorsQuery.next()) {
-			stats.topAuthors[authorsQuery.value("user_id").toLongLong()] =
-				authorsQuery.value("count").toInt();
+	// Parse time range (all time)
+	auto range = parseTimeRange("all");
+
+	// Analyze word frequency
+	auto wordFreq = analyzeWordFrequency(chatId, range);
+
+	// Filter by minimum length and convert to sorted vector
+	QVector<WordFrequency> frequencies;
+	int totalWords = 0;
+	for (auto it = wordFreq.constBegin(); it != wordFreq.constEnd(); ++it) {
+		if (it.key().length() >= minLength && !isStopWord(it.key())) {
+			WordFrequency wf;
+			wf.word = it.key();
+			wf.count = it.value();
+			frequencies.append(wf);
+			totalWords += it.value();
+		}
+	}
+
+	// Sort by frequency
+	std::sort(frequencies.begin(), frequencies.end(), [](const WordFrequency &a, const WordFrequency &b) {
+		return a.count > b.count;
+	});
+
+	// Take top N and calculate percentages
+	QVector<WordFrequency> topWords;
+	for (int i = 0; i < qMin(limit, frequencies.size()); ++i) {
+		frequencies[i].percentage = totalWords > 0 ? (100.0 * frequencies[i].count / totalWords) : 0.0;
+		topWords.append(frequencies[i]);
+	}
+
+	return wordFrequenciesToJson(topWords);
+}
+
+QString Analytics::exportAnalytics(
+	qint64 chatId,
+	const QString &format,
+	const QString &outputPath
+) {
+	if (!_isRunning) {
+		return QString();
+	}
+
+	// Collect comprehensive analytics
+	QJsonObject analytics;
+	analytics["chatId"] = QString::number(chatId);
+	analytics["exportDate"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+	analytics["messageStats"] = getMessageStatistics(chatId);
+	analytics["chatActivity"] = getChatActivity(chatId);
+	analytics["topUsers"] = getTopUsers(chatId, 10);
+	analytics["topWords"] = getTopWords(chatId, 20);
+	analytics["trends"] = getTrends(chatId);
+
+	// Determine output path
+	QString path = outputPath;
+	if (path.isEmpty()) {
+		path = QString("analytics_%1_%2.%3")
+			.arg(chatId)
+			.arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"))
+			.arg(format.toLower());
+	}
+
+	// Export based on format
+	if (format.toLower() == "json") {
+		return exportToJSON(analytics, path);
+	} else if (format.toLower() == "csv") {
+		return exportToCSV(analytics, path);
+	} else if (format.toLower() == "html") {
+		return exportToHTML(analytics, path);
+	}
+
+	return QString();
+}
+
+QJsonObject Analytics::getTrends(
+	qint64 chatId,
+	const QString &metric,
+	int daysBack
+) {
+	if (!_isRunning || !_archiver) {
+		QJsonObject error;
+		error["error"] = "Analytics not running";
+		return error;
+	}
+
+	// Get time series data
+	QDateTime endDate = QDateTime::currentDateTime();
+	QDateTime startDate = endDate.addDays(-daysBack);
+	auto timeSeries = getTimeSeries(chatId, "daily", startDate, endDate);
+
+	// Extract values for trend analysis
+	QVector<double> values;
+	for (int i = 0; i < timeSeries.size(); ++i) {
+		auto point = timeSeries[i].toObject();
+		if (metric == "messages") {
+			values.append(point["messageCount"].toInt());
+		} else if (metric == "users") {
+			values.append(point["userCount"].toInt());
+		}
+	}
+
+	// Detect trend
+	QString trend = detectTrend(values);
+	double growthRate = calculateGrowthRate(values);
+
+	QJsonObject result;
+	result["metric"] = metric;
+	result["period"] = QString("%1 days").arg(daysBack);
+	result["trend"] = trend;
+	result["growthRate"] = growthRate;
+	result["dataPoints"] = timeSeries;
+
+	return result;
+}
+
+QJsonObject Analytics::compareChats(
+	const QVector<qint64> &chatIds,
+	const QString &metric
+) {
+	if (!_isRunning) {
+		QJsonObject error;
+		error["error"] = "Analytics not running";
+		return error;
+	}
+
+	QJsonArray comparisons;
+	for (qint64 chatId : chatIds) {
+		QJsonObject chatData;
+		chatData["chatId"] = QString::number(chatId);
+		
+		if (metric == "activity") {
+			chatData["data"] = getChatActivity(chatId);
+		} else if (metric == "messages") {
+			chatData["data"] = getMessageStatistics(chatId);
+		}
+		
+		comparisons.append(chatData);
+	}
+
+	QJsonObject result;
+	result["metric"] = metric;
+	result["chats"] = comparisons;
+
+	return result;
+}
+
+QJsonObject Analytics::compareUsers(
+	qint64 chatId,
+	const QVector<qint64> &userIds
+) {
+	if (!_isRunning) {
+		QJsonObject error;
+		error["error"] = "Analytics not running";
+		return error;
+	}
+
+	QJsonArray comparisons;
+	for (qint64 userId : userIds) {
+		QJsonObject userData;
+		userData["userId"] = QString::number(userId);
+		userData["data"] = getUserActivity(userId, chatId);
+		comparisons.append(userData);
+	}
+
+	QJsonObject result;
+	result["chatId"] = QString::number(chatId);
+	result["users"] = comparisons;
+
+	return result;
+}
+
+QJsonObject Analytics::getLiveActivity(qint64 chatId) {
+	// Stub implementation - would need real-time monitoring
+	QJsonObject result;
+	result["chatId"] = QString::number(chatId);
+	result["timestamp"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+	result["activeUsers"] = 0;
+	result["messagesLastHour"] = 0;
+	return result;
+}
+
+QJsonArray Analytics::getActiveChats(int limit) {
+	// Stub implementation - would query recent activity
+	return QJsonArray();
+}
+
+void Analytics::clearCache() {
+	_cache.clear();
+}
+
+void Analytics::refreshCache(qint64 chatId) {
+	// Remove cached entries for this chat
+	QStringList keysToRemove;
+	for (auto it = _cache.constBegin(); it != _cache.constEnd(); ++it) {
+		if (it.key().contains(QString::number(chatId))) {
+			keysToRemove.append(it.key());
+		}
+	}
+	
+	for (const QString &key : keysToRemove) {
+		_cache.remove(key);
+	}
+
+	Q_EMIT cacheRefreshed();
+}
+
+// Private methods implementation
+
+MessageStats Analytics::collectMessageStats(
+	qint64 chatId,
+	const AnalyticsTimeRange &range
+) {
+	MessageStats stats;
+
+	if (!_archiver || !_archiver->isRunning()) {
+		qWarning() << "Analytics: Archiver not running";
+		return stats;
+	}
+
+	auto db = _archiver->database();
+	if (!db.isOpen()) {
+		qWarning() << "Analytics: Database not open";
+		return stats;
+	}
+
+	QSqlQuery query(db);
+
+	// Build WHERE clause for time range
+	QString whereClause = "chat_id = ?";
+	QVector<QVariant> bindings = {chatId};
+
+	if (!range.start.isNull()) {
+		whereClause += " AND timestamp >= ?";
+		bindings.append(range.start.toSecsSinceEpoch());
+	}
+	if (!range.end.isNull()) {
+		whereClause += " AND timestamp <= ?";
+		bindings.append(range.end.toSecsSinceEpoch());
+	}
+
+	// Query message statistics with proper column names from schema
+	QString sql = QString(
+		"SELECT COUNT(*) as total, "
+		"SUM(CASE WHEN message_type = 'text' THEN 1 ELSE 0 END) as text_count, "
+		"SUM(CASE WHEN has_media = 1 THEN 1 ELSE 0 END) as media_count, "
+		"SUM(CASE WHEN edit_date IS NOT NULL THEN 1 ELSE 0 END) as edited_count, "
+		"AVG(LENGTH(content)) as avg_length, "
+		"MIN(timestamp) as first_ts, "
+		"MAX(timestamp) as last_ts "
+		"FROM messages WHERE %1"
+	).arg(whereClause);
+
+	query.prepare(sql);
+	for (const auto &binding : bindings) {
+		query.addBindValue(binding);
+	}
+
+	if (!query.exec()) {
+		qWarning() << "Analytics: Failed to execute query:" << query.lastError().text();
+		return stats;
+	}
+
+	if (query.next()) {
+		stats.totalMessages = query.value(0).toInt();
+		stats.textMessages = query.value(1).toInt();
+		stats.mediaMessages = query.value(2).toInt();
+		stats.editedMessages = query.value(3).toInt();
+		stats.averageLength = query.value(4).toDouble();
+
+		qint64 firstTs = query.value(5).toLongLong();
+		qint64 lastTs = query.value(6).toLongLong();
+
+		if (firstTs > 0) {
+			stats.firstMessage = QDateTime::fromSecsSinceEpoch(firstTs);
+		}
+		if (lastTs > 0) {
+			stats.lastMessage = QDateTime::fromSecsSinceEpoch(lastTs);
+		}
+
+		// Calculate messages per day
+		if (stats.firstMessage.isValid() && stats.lastMessage.isValid()) {
+			qint64 daysDiff = stats.firstMessage.daysTo(stats.lastMessage);
+			if (daysDiff > 0) {
+				stats.messagesPerDay = static_cast<double>(stats.totalMessages) / daysDiff;
+			} else if (stats.totalMessages > 0) {
+				stats.messagesPerDay = static_cast<double>(stats.totalMessages);
+			}
 		}
 	}
 
 	return stats;
 }
 
-// User Activity Analysis
-Analytics::UserActivity Analytics::getUserActivityAnalysis(qint64 userId, qint64 chatId) {
+UserActivity Analytics::collectUserActivity(
+	qint64 userId,
+	qint64 chatId,
+	const AnalyticsTimeRange &range
+) {
 	UserActivity activity;
 	activity.userId = userId;
 
-	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
+	if (!_archiver || !_archiver->isRunning()) {
+		qWarning() << "Analytics: Archiver not running";
 		return activity;
 	}
 
-	QString sql = R"(
-		SELECT
-			COUNT(*) as message_count,
-			SUM(LENGTH(content) - LENGTH(REPLACE(content, ' ', '')) + 1) as word_count,
-			AVG(LENGTH(content)) as avg_length,
-			MIN(timestamp) as first_msg,
-			MAX(timestamp) as last_msg
-		FROM messages
-		WHERE user_id = :user_id
-	)";
-
-	if (chatId > 0) {
-		sql += " AND chat_id = :chat_id";
+	auto db = _archiver->database();
+	if (!db.isOpen()) {
+		qWarning() << "Analytics: Database not open";
+		return activity;
 	}
 
-	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
-	query.prepare(sql);
-	query.bindValue(":user_id", userId);
-	if (chatId > 0) {
-		query.bindValue(":chat_id", chatId);
+	QSqlQuery query(db);
+
+	// First try user_activity_summary table for efficient stats
+	if (chatId != 0 && range.period == "all") {
+		QString sql = "SELECT message_count, word_count, avg_message_length, "
+		              "most_active_hour, first_message_date, last_message_date, days_active "
+		              "FROM user_activity_summary WHERE user_id = ? AND chat_id = ?";
+		query.prepare(sql);
+		query.addBindValue(userId);
+		query.addBindValue(chatId);
+
+		if (query.exec() && query.next()) {
+			activity.messageCount = query.value(0).toInt();
+			// word_count could be used for additional metrics
+			activity.averageMessageLength = query.value(2).toDouble();
+			activity.firstSeen = QDateTime::fromSecsSinceEpoch(query.value(4).toLongLong());
+			activity.lastSeen = QDateTime::fromSecsSinceEpoch(query.value(5).toLongLong());
+		}
 	}
 
-	if (query.exec() && query.next()) {
-		activity.messageCount = query.value("message_count").toInt();
-		activity.wordCount = query.value("word_count").toInt();
-		activity.avgMessageLength = query.value("avg_length").toDouble();
-		activity.firstMessage = QDateTime::fromSecsSinceEpoch(query.value("first_msg").toLongLong());
-		activity.lastMessage = QDateTime::fromSecsSinceEpoch(query.value("last_msg").toLongLong());
+	// If not found in summary or need filtered data, query messages table
+	if (activity.messageCount == 0) {
+		QString whereClause = "user_id = ?";
+		QVector<QVariant> bindings = {userId};
+
+		if (chatId != 0) {
+			whereClause += " AND chat_id = ?";
+			bindings.append(chatId);
+		}
+
+		if (!range.start.isNull()) {
+			whereClause += " AND timestamp >= ?";
+			bindings.append(range.start.toSecsSinceEpoch());
+		}
+		if (!range.end.isNull()) {
+			whereClause += " AND timestamp <= ?";
+			bindings.append(range.end.toSecsSinceEpoch());
+		}
+
+		// Query user statistics from messages table
+		QString sql = QString(
+			"SELECT "
+			"COALESCE(first_name, username, 'Unknown') as name, "
+			"COUNT(*) as msg_count, "
+			"AVG(LENGTH(content)) as avg_len, "
+			"MIN(timestamp) as first_ts, "
+			"MAX(timestamp) as last_ts, "
+			"SUM(CASE WHEN reply_to_message_id IS NOT NULL THEN 1 ELSE 0 END) as reply_count "
+			"FROM messages WHERE %1"
+		).arg(whereClause);
+
+		query.prepare(sql);
+		for (const auto &binding : bindings) {
+			query.addBindValue(binding);
+		}
+
+		if (!query.exec()) {
+			qWarning() << "Analytics: Failed to query user activity:" << query.lastError().text();
+			return activity;
+		}
+
+		if (query.next()) {
+			activity.userName = query.value(0).toString();
+			activity.messageCount = query.value(1).toInt();
+			activity.averageMessageLength = query.value(2).toDouble();
+			activity.firstSeen = QDateTime::fromSecsSinceEpoch(query.value(3).toLongLong());
+			activity.lastSeen = QDateTime::fromSecsSinceEpoch(query.value(4).toLongLong());
+			activity.replyCount = query.value(5).toInt();
+		}
 	}
 
-	// Get username
-	QSqlQuery userQuery(*static_cast<QSqlDatabase*>(nullptr));
-	userQuery.prepare("SELECT username FROM users WHERE user_id = :user_id");
-	userQuery.bindValue(":user_id", userId);
-	if (userQuery.exec() && userQuery.next()) {
-		activity.username = userQuery.value("username").toString();
+	// Get hourly and weekly distribution
+	activity.hourlyActivity = QVector<int>(24, 0);
+	activity.weeklyActivity = QVector<int>(7, 0);
+
+	QString whereClause = "user_id = ?";
+	QVector<QVariant> bindings = {userId};
+	if (chatId != 0) {
+		whereClause += " AND chat_id = ?";
+		bindings.append(chatId);
+	}
+	if (!range.start.isNull()) {
+		whereClause += " AND timestamp >= ?";
+		bindings.append(range.start.toSecsSinceEpoch());
+	}
+	if (!range.end.isNull()) {
+		whereClause += " AND timestamp <= ?";
+		bindings.append(range.end.toSecsSinceEpoch());
 	}
 
-	// Calculate most active hour
-	activity.mostActiveHour = findMostActiveHour(userId, chatId);
+	// Hourly activity
+	QString sqlHourly = QString(
+		"SELECT strftime('%%H', datetime(timestamp, 'unixepoch')) as hour, COUNT(*) "
+		"FROM messages WHERE %1 GROUP BY hour"
+	).arg(whereClause);
 
-	// Calculate days active
-	activity.daysActive = calculateDaysActive(userId, chatId);
+	query.prepare(sqlHourly);
+	for (const auto &binding : bindings) {
+		query.addBindValue(binding);
+	}
 
-	// Find most active channel (if chatId not specified)
-	if (chatId == 0) {
-		QSqlQuery channelQuery(*static_cast<QSqlDatabase*>(nullptr));
-		channelQuery.prepare(R"(
-			SELECT chat_id, COUNT(*) as count
-			FROM messages
-			WHERE user_id = :user_id
-			GROUP BY chat_id
-			ORDER BY count DESC
-			LIMIT 1
-		)");
-		channelQuery.bindValue(":user_id", userId);
+	if (query.exec()) {
+		while (query.next()) {
+			int hour = query.value(0).toInt();
+			int count = query.value(1).toInt();
+			if (hour >= 0 && hour < 24) {
+				activity.hourlyActivity[hour] = count;
+			}
+		}
+	}
 
-		if (channelQuery.exec() && channelQuery.next()) {
-			qint64 topChatId = channelQuery.value("chat_id").toLongLong();
+	// Weekly activity (0 = Sunday)
+	QString sqlWeekly = QString(
+		"SELECT strftime('%%w', datetime(timestamp, 'unixepoch')) as dow, COUNT(*) "
+		"FROM messages WHERE %1 GROUP BY dow"
+	).arg(whereClause);
 
-			// Get chat title
-			QSqlQuery chatQuery(*static_cast<QSqlDatabase*>(nullptr));
-			chatQuery.prepare("SELECT title FROM chats WHERE chat_id = :chat_id");
-			chatQuery.bindValue(":chat_id", topChatId);
-			if (chatQuery.exec() && chatQuery.next()) {
-				activity.mostActiveChannel = chatQuery.value("title").toString();
+	query.prepare(sqlWeekly);
+	for (const auto &binding : bindings) {
+		query.addBindValue(binding);
+	}
+
+	if (query.exec()) {
+		while (query.next()) {
+			int dow = query.value(0).toInt();
+			int count = query.value(1).toInt();
+			if (dow >= 0 && dow < 7) {
+				activity.weeklyActivity[dow] = count;
 			}
 		}
 	}
@@ -211,574 +674,703 @@ Analytics::UserActivity Analytics::getUserActivityAnalysis(qint64 userId, qint64
 	return activity;
 }
 
-// Get top users
-QVector<Analytics::UserActivity> Analytics::getTopUsers(qint64 chatId, int limit) {
-	QVector<UserActivity> topUsers;
-
-	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
-		return topUsers;
-	}
-
-	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
-	query.prepare(R"(
-		SELECT user_id, COUNT(*) as count
-		FROM messages
-		WHERE chat_id = :chat_id AND user_id IS NOT NULL
-		GROUP BY user_id
-		ORDER BY count DESC
-		LIMIT :limit
-	)");
-	query.bindValue(":chat_id", chatId);
-	query.bindValue(":limit", limit);
-
-	if (query.exec()) {
-		while (query.next()) {
-			qint64 userId = query.value("user_id").toLongLong();
-			auto activity = getUserActivityAnalysis(userId, chatId);
-			topUsers.append(activity);
-		}
-	}
-
-	return topUsers;
-}
-
-// Chat Activity Analysis
-Analytics::ChatActivity Analytics::getChatActivityAnalysis(qint64 chatId) {
+ChatActivity Analytics::collectChatActivity(
+	qint64 chatId,
+	const AnalyticsTimeRange &range
+) {
 	ChatActivity activity;
 	activity.chatId = chatId;
 
-	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
+	if (!_archiver || !_archiver->isRunning()) {
+		qWarning() << "Analytics: Archiver not running";
 		return activity;
 	}
 
-	// Check if summary exists
-	QSqlQuery summaryQuery(*static_cast<QSqlDatabase*>(nullptr));
-	summaryQuery.prepare("SELECT * FROM chat_activity_summary WHERE chat_id = :chat_id");
-	summaryQuery.bindValue(":chat_id", chatId);
+	auto db = _archiver->database();
+	if (!db.isOpen()) {
+		qWarning() << "Analytics: Database not open";
+		return activity;
+	}
 
-	if (summaryQuery.exec() && summaryQuery.next()) {
-		activity.totalMessages = summaryQuery.value("total_messages").toInt();
-		activity.uniqueUsers = summaryQuery.value("unique_users").toInt();
-		activity.messagesPerDay = summaryQuery.value("messages_per_day").toDouble();
-		activity.peakHour = summaryQuery.value("peak_hour").toInt();
-		activity.firstMessage = QDateTime::fromSecsSinceEpoch(
-			summaryQuery.value("first_message_date").toLongLong());
-		activity.lastMessage = QDateTime::fromSecsSinceEpoch(
-			summaryQuery.value("last_message_date").toLongLong());
+	QSqlQuery query(db);
 
-		QString trendStr = summaryQuery.value("activity_trend").toString();
-		if (trendStr == "increasing") {
-			activity.trend = ActivityTrend::Increasing;
-		} else if (trendStr == "decreasing") {
-			activity.trend = ActivityTrend::Decreasing;
-		} else if (trendStr == "stable") {
-			activity.trend = ActivityTrend::Stable;
-		}
-	} else {
-		// Calculate from scratch
-		QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
-		query.prepare(R"(
-			SELECT
-				COUNT(*) as total_messages,
-				COUNT(DISTINCT user_id) as unique_users,
-				MIN(timestamp) as first_msg,
-				MAX(timestamp) as last_msg
-			FROM messages
-			WHERE chat_id = :chat_id
-		)");
-		query.bindValue(":chat_id", chatId);
+	// First try chat_activity_summary table for efficient stats
+	if (range.period == "all") {
+		QString sql = "SELECT total_messages, unique_users, messages_per_day, peak_hour, "
+		              "first_message_date, last_message_date, activity_trend "
+		              "FROM chat_activity_summary WHERE chat_id = ?";
+		query.prepare(sql);
+		query.addBindValue(chatId);
 
 		if (query.exec() && query.next()) {
-			activity.totalMessages = query.value("total_messages").toInt();
-			activity.uniqueUsers = query.value("unique_users").toInt();
-			activity.firstMessage = QDateTime::fromSecsSinceEpoch(query.value("first_msg").toLongLong());
-			activity.lastMessage = QDateTime::fromSecsSinceEpoch(query.value("last_msg").toLongLong());
+			activity.totalMessages = query.value(0).toInt();
+			activity.activeUsers = query.value(1).toInt();
+			activity.messagesPerDay = query.value(2).toDouble();
+			// peak_hour could be used
+			activity.activityTrend = query.value(6).toString();
 
-			// Calculate messages per day
-			qint64 days = activity.firstMessage.daysTo(activity.lastMessage);
-			if (days > 0) {
-				activity.messagesPerDay = static_cast<double>(activity.totalMessages) / days;
+			if (activity.activeUsers > 0) {
+				activity.messagesPerUser = static_cast<double>(activity.totalMessages) / activity.activeUsers;
+			}
+		}
+	}
+
+	// If not found or need filtered data, query messages table
+	if (activity.totalMessages == 0) {
+		QString whereClause = "chat_id = ?";
+		QVector<QVariant> bindings = {chatId};
+
+		if (!range.start.isNull()) {
+			whereClause += " AND timestamp >= ?";
+			bindings.append(range.start.toSecsSinceEpoch());
+		}
+		if (!range.end.isNull()) {
+			whereClause += " AND timestamp <= ?";
+			bindings.append(range.end.toSecsSinceEpoch());
+		}
+
+		// Query chat statistics
+		QString sql = QString(
+			"SELECT COUNT(*) as msg_count, "
+			"COUNT(DISTINCT user_id) as user_count, "
+			"MIN(timestamp) as first_ts, "
+			"MAX(timestamp) as last_ts "
+			"FROM messages WHERE %1"
+		).arg(whereClause);
+
+		query.prepare(sql);
+		for (const auto &binding : bindings) {
+			query.addBindValue(binding);
+		}
+
+		if (!query.exec()) {
+			qWarning() << "Analytics: Failed to query chat activity:" << query.lastError().text();
+			return activity;
+		}
+
+		if (query.next()) {
+			activity.totalMessages = query.value(0).toInt();
+			activity.activeUsers = query.value(1).toInt();
+
+			if (activity.activeUsers > 0) {
+				activity.messagesPerUser = static_cast<double>(activity.totalMessages) / activity.activeUsers;
+			}
+
+			qint64 firstTs = query.value(2).toLongLong();
+			qint64 lastTs = query.value(3).toLongLong();
+
+			if (firstTs > 0 && lastTs > 0) {
+				QDateTime first = QDateTime::fromSecsSinceEpoch(firstTs);
+				QDateTime last = QDateTime::fromSecsSinceEpoch(lastTs);
+				qint64 daysDiff = first.daysTo(last);
+				if (daysDiff > 0) {
+					activity.messagesPerDay = static_cast<double>(activity.totalMessages) / daysDiff;
+				}
 			}
 		}
 
-		activity.peakHour = findPeakHour(chatId);
-		activity.trend = detectActivityTrend(chatId);
+		// Detect trend by comparing recent vs older activity
+		activity.activityTrend = detectTrend(QVector<double>()); // Simplified for now
+		if (activity.activityTrend.isEmpty()) {
+			activity.activityTrend = "stable";
+		}
 	}
 
-	// Get chat title
-	QSqlQuery chatQuery(*static_cast<QSqlDatabase*>(nullptr));
-	chatQuery.prepare("SELECT title FROM chats WHERE chat_id = :chat_id");
-	chatQuery.bindValue(":chat_id", chatId);
-	if (chatQuery.exec() && chatQuery.next()) {
-		activity.chatTitle = chatQuery.value("title").toString();
+	// Get hourly and weekly distributions
+	activity.hourlyDistribution = QVector<int>(24, 0);
+	activity.weeklyDistribution = QVector<int>(7, 0);
+
+	QString whereClause = "chat_id = ?";
+	QVector<QVariant> bindings = {chatId};
+	if (!range.start.isNull()) {
+		whereClause += " AND timestamp >= ?";
+		bindings.append(range.start.toSecsSinceEpoch());
+	}
+	if (!range.end.isNull()) {
+		whereClause += " AND timestamp <= ?";
+		bindings.append(range.end.toSecsSinceEpoch());
+	}
+
+	// Hourly distribution
+	QString sqlHourly = QString(
+		"SELECT strftime('%%H', datetime(timestamp, 'unixepoch')) as hour, COUNT(*) "
+		"FROM messages WHERE %1 GROUP BY hour"
+	).arg(whereClause);
+
+	query.prepare(sqlHourly);
+	for (const auto &binding : bindings) {
+		query.addBindValue(binding);
+	}
+
+	if (query.exec()) {
+		while (query.next()) {
+			int hour = query.value(0).toInt();
+			int count = query.value(1).toInt();
+			if (hour >= 0 && hour < 24) {
+				activity.hourlyDistribution[hour] = count;
+			}
+		}
+	}
+
+	// Weekly distribution
+	QString sqlWeekly = QString(
+		"SELECT strftime('%%w', datetime(timestamp, 'unixepoch')) as dow, COUNT(*) "
+		"FROM messages WHERE %1 GROUP BY dow"
+	).arg(whereClause);
+
+	query.prepare(sqlWeekly);
+	for (const auto &binding : bindings) {
+		query.addBindValue(binding);
+	}
+
+	if (query.exec()) {
+		while (query.next()) {
+			int dow = query.value(0).toInt();
+			int count = query.value(1).toInt();
+			if (dow >= 0 && dow < 7) {
+				activity.weeklyDistribution[dow] = count;
+			}
+		}
+	}
+
+	// Get chat title from chats table
+	QString sqlChat = "SELECT title FROM chats WHERE chat_id = ?";
+	query.prepare(sqlChat);
+	query.addBindValue(chatId);
+	if (query.exec() && query.next()) {
+		activity.chatTitle = query.value(0).toString();
 	}
 
 	return activity;
 }
 
-// Activity trend detection
-ActivityTrend Analytics::detectActivityTrend(qint64 chatId) {
-	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
-		return ActivityTrend::Unknown;
+QVector<TimeSeriesPoint> Analytics::generateTimeSeries(
+	qint64 chatId,
+	const QString &granularity,
+	const AnalyticsTimeRange &range
+) {
+	QVector<TimeSeriesPoint> points;
+
+	if (!_archiver || !_archiver->isRunning()) {
+		qWarning() << "Analytics: Archiver not running";
+		return points;
 	}
 
-	// Get total message count
-	QSqlQuery totalQuery(*static_cast<QSqlDatabase*>(nullptr));
-	totalQuery.prepare("SELECT COUNT(*) FROM messages WHERE chat_id = :chat_id");
-	totalQuery.bindValue(":chat_id", chatId);
-
-	if (!totalQuery.exec() || !totalQuery.next()) {
-		return ActivityTrend::Unknown;
+	auto db = _archiver->database();
+	if (!db.isOpen()) {
+		qWarning() << "Analytics: Database not open";
+		return points;
 	}
 
-	int totalMessages = totalQuery.value(0).toInt();
-	if (totalMessages < 100) {
-		return ActivityTrend::Unknown; // Not enough data
+	QSqlQuery query(db);
+
+	// Build WHERE clause
+	QString whereClause = "chat_id = ?";
+	QVector<QVariant> bindings = {chatId};
+
+	if (!range.start.isNull()) {
+		whereClause += " AND timestamp >= ?";
+		bindings.append(range.start.toSecsSinceEpoch());
+	}
+	if (!range.end.isNull()) {
+		whereClause += " AND timestamp <= ?";
+		bindings.append(range.end.toSecsSinceEpoch());
 	}
 
-	// Split into two halves and compare
-	int halfPoint = totalMessages / 2;
-
-	QSqlQuery firstHalfQuery(*static_cast<QSqlDatabase*>(nullptr));
-	firstHalfQuery.prepare(R"(
-		SELECT COUNT(*) as count,
-		       MAX(timestamp) - MIN(timestamp) as duration
-		FROM (
-			SELECT timestamp FROM messages
-			WHERE chat_id = :chat_id
-			ORDER BY timestamp ASC
-			LIMIT :half
-		)
-	)");
-	firstHalfQuery.bindValue(":chat_id", chatId);
-	firstHalfQuery.bindValue(":half", halfPoint);
-
-	QSqlQuery secondHalfQuery(*static_cast<QSqlDatabase*>(nullptr));
-	secondHalfQuery.prepare(R"(
-		SELECT COUNT(*) as count,
-		       MAX(timestamp) - MIN(timestamp) as duration
-		FROM (
-			SELECT timestamp FROM messages
-			WHERE chat_id = :chat_id
-			ORDER BY timestamp DESC
-			LIMIT :half
-		)
-	)");
-	secondHalfQuery.bindValue(":chat_id", chatId);
-	secondHalfQuery.bindValue(":half", halfPoint);
-
-	if (!firstHalfQuery.exec() || !firstHalfQuery.next() ||
-	    !secondHalfQuery.exec() || !secondHalfQuery.next()) {
-		return ActivityTrend::Unknown;
-	}
-
-	double firstRate = firstHalfQuery.value("count").toDouble() /
-	                   std::max(1LL, firstHalfQuery.value("duration").toLongLong());
-	double secondRate = secondHalfQuery.value("count").toDouble() /
-	                    std::max(1LL, secondHalfQuery.value("duration").toLongLong());
-
-	// 20% threshold for trend detection
-	double threshold = 0.20;
-	double change = (secondRate - firstRate) / firstRate;
-
-	if (change > threshold) {
-		return ActivityTrend::Increasing;
-	} else if (change < -threshold) {
-		return ActivityTrend::Decreasing;
+	// Determine time grouping format based on granularity
+	QString timeFormat;
+	if (granularity == "hourly") {
+		timeFormat = "%Y-%m-%d %H:00:00";
+	} else if (granularity == "daily") {
+		timeFormat = "%Y-%m-%d";
+	} else if (granularity == "weekly") {
+		timeFormat = "%Y-W%W";
+	} else if (granularity == "monthly") {
+		timeFormat = "%Y-%m";
+	} else if (granularity == "yearly") {
+		timeFormat = "%Y";
 	} else {
-		return ActivityTrend::Stable;
-	}
-}
-
-// Time Series Implementation
-QVector<Analytics::TimeSeriesPoint> Analytics::getTimeSeries(
-		qint64 chatId,
-		TimeGranularity granularity,
-		const QDateTime &start,
-		const QDateTime &end) {
-
-	QVector<TimeSeriesPoint> series;
-
-	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
-		return series;
+		timeFormat = "%Y-%m-%d"; // default to daily
 	}
 
-	QString dateFormat = granularityToSQL(granularity);
+	// Query time series data
+	QString sql = QString(
+		"SELECT "
+		"strftime('%1', datetime(timestamp, 'unixepoch')) as time_bucket, "
+		"COUNT(*) as msg_count, "
+		"COUNT(DISTINCT user_id) as user_count, "
+		"AVG(LENGTH(content)) as avg_len "
+		"FROM messages WHERE %2 "
+		"GROUP BY time_bucket "
+		"ORDER BY time_bucket"
+	).arg(timeFormat).arg(whereClause);
 
-	QString sql = QString(R"(
-		SELECT
-			strftime('%1', datetime(timestamp, 'unixepoch')) as time_bucket,
-			timestamp,
-			COUNT(*) as message_count,
-			COUNT(DISTINCT user_id) as unique_users,
-			AVG(LENGTH(content)) as avg_length
-		FROM messages
-		WHERE chat_id = :chat_id
-	)").arg(dateFormat);
-
-	QStringList conditions;
-	if (start.isValid()) {
-		conditions << "timestamp >= :start";
-	}
-	if (end.isValid()) {
-		conditions << "timestamp <= :end";
-	}
-
-	if (!conditions.isEmpty()) {
-		sql += " AND " + conditions.join(" AND ");
-	}
-
-	sql += " GROUP BY time_bucket ORDER BY timestamp ASC";
-
-	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
 	query.prepare(sql);
-	query.bindValue(":chat_id", chatId);
-	if (start.isValid()) {
-		query.bindValue(":start", start.toSecsSinceEpoch());
-	}
-	if (end.isValid()) {
-		query.bindValue(":end", end.toSecsSinceEpoch());
+	for (const auto &binding : bindings) {
+		query.addBindValue(binding);
 	}
 
-	if (query.exec()) {
-		while (query.next()) {
-			TimeSeriesPoint point;
-			point.timestamp = QDateTime::fromSecsSinceEpoch(query.value("timestamp").toLongLong());
-			point.messageCount = query.value("message_count").toInt();
-			point.uniqueUsers = query.value("unique_users").toInt();
-			point.avgLength = query.value("avg_length").toDouble();
-			series.append(point);
+	if (!query.exec()) {
+		qWarning() << "Analytics: Failed to generate time series:" << query.lastError().text();
+		return points;
+	}
+
+	while (query.next()) {
+		TimeSeriesPoint point;
+		QString timeBucket = query.value(0).toString();
+
+		// Parse time bucket based on granularity
+		if (granularity == "hourly") {
+			point.timestamp = QDateTime::fromString(timeBucket, "yyyy-MM-dd HH:00:00");
+		} else if (granularity == "daily") {
+			point.timestamp = QDateTime::fromString(timeBucket, "yyyy-MM-dd");
+		} else if (granularity == "monthly") {
+			point.timestamp = QDateTime::fromString(timeBucket + "-01", "yyyy-MM-dd");
+		} else if (granularity == "yearly") {
+			point.timestamp = QDateTime::fromString(timeBucket + "-01-01", "yyyy-MM-dd");
+		} else {
+			point.timestamp = QDateTime::fromString(timeBucket, "yyyy-MM-dd");
 		}
-	}
 
-	return series;
-}
+		point.messageCount = query.value(1).toInt();
+		point.userCount = query.value(2).toInt();
+		point.averageLength = query.value(3).toDouble();
 
-// Top Words Analysis
-QMap<QString, int> Analytics::getTopWords(qint64 chatId, int limit, const QStringList &stopWords) {
-	QMap<QString, int> wordCounts;
+		// Get message type distribution for this time bucket
+		QString sqlTypes = QString(
+			"SELECT message_type, COUNT(*) "
+			"FROM messages WHERE %1 AND strftime('%2', datetime(timestamp, 'unixepoch')) = ? "
+			"GROUP BY message_type"
+		).arg(whereClause).arg(timeFormat);
 
-	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
-		return wordCounts;
-	}
+		QSqlQuery typeQuery(db);
+		typeQuery.prepare(sqlTypes);
+		for (const auto &binding : bindings) {
+			typeQuery.addBindValue(binding);
+		}
+		typeQuery.addBindValue(timeBucket);
 
-	QStringList stopWordList = stopWords.isEmpty() ? getDefaultStopWords() : stopWords;
-	QSet<QString> stopWordSet(stopWordList.begin(), stopWordList.end());
-
-	// Get all message content
-	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
-	query.prepare("SELECT content FROM messages WHERE chat_id = :chat_id AND content IS NOT NULL");
-	query.bindValue(":chat_id", chatId);
-
-	if (query.exec()) {
-		while (query.next()) {
-			QString content = query.value("content").toString();
-			QStringList words = extractWords(content);
-
-			for (const QString &word : words) {
-				QString lowerWord = word.toLower();
-				if (!stopWordSet.contains(lowerWord) && lowerWord.length() > 2) {
-					wordCounts[lowerWord]++;
-				}
+		if (typeQuery.exec()) {
+			while (typeQuery.next()) {
+				QString type = typeQuery.value(0).toString();
+				int count = typeQuery.value(1).toInt();
+				point.messageTypes[type] = count;
 			}
 		}
+
+		points.append(point);
 	}
 
-	// Sort by count and return top N
-	QList<QPair<QString, int>> sortedWords;
-	for (auto it = wordCounts.begin(); it != wordCounts.end(); ++it) {
-		sortedWords.append(qMakePair(it.key(), it.value()));
-	}
-
-	std::sort(sortedWords.begin(), sortedWords.end(),
-	          [](const auto &a, const auto &b) { return a.second > b.second; });
-
-	QMap<QString, int> topWords;
-	const int maxCount = qMin(limit, sortedWords.size());
-	for (int i = 0; i < maxCount; ++i) {
-		topWords[sortedWords[i].first] = sortedWords[i].second;
-	}
-
-	return topWords;
+	return points;
 }
 
-QMap<QString, int> Analytics::getUserTopWords(qint64 userId, int limit) {
-	// Similar to getTopWords but filtered by user_id
-	QMap<QString, int> wordCounts;
+QHash<QString, int> Analytics::analyzeWordFrequency(
+	qint64 chatId,
+	const AnalyticsTimeRange &range
+) {
+	QHash<QString, int> wordFreq;
 
-	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
-		return wordCounts;
+	if (!_archiver || !_archiver->isRunning()) {
+		qWarning() << "Analytics: Archiver not running";
+		return wordFreq;
 	}
 
-	QSet<QString> stopWordSet(kDefaultStopWords.begin(), kDefaultStopWords.end());
+	auto db = _archiver->database();
+	if (!db.isOpen()) {
+		qWarning() << "Analytics: Database not open";
+		return wordFreq;
+	}
 
-	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
-	query.prepare("SELECT content FROM messages WHERE user_id = :user_id AND content IS NOT NULL");
-	query.bindValue(":user_id", userId);
+	QSqlQuery query(db);
 
-	if (query.exec()) {
-		while (query.next()) {
-			QString content = query.value("content").toString();
-			QStringList words = extractWords(content);
+	// Query messages - use 'content' column from schema
+	QString whereClause = "chat_id = ? AND content IS NOT NULL";
+	QVector<QVariant> bindings = {chatId};
 
-			for (const QString &word : words) {
-				QString lowerWord = word.toLower();
-				if (!stopWordSet.contains(lowerWord) && lowerWord.length() > 2) {
-					wordCounts[lowerWord]++;
-				}
+	if (!range.start.isNull()) {
+		whereClause += " AND timestamp >= ?";
+		bindings.append(range.start.toSecsSinceEpoch());
+	}
+	if (!range.end.isNull()) {
+		whereClause += " AND timestamp <= ?";
+		bindings.append(range.end.toSecsSinceEpoch());
+	}
+
+	// Limit to text messages or messages with content
+	QString sql = QString(
+		"SELECT content FROM messages WHERE %1 AND LENGTH(content) > 0 LIMIT 10000"
+	).arg(whereClause);
+
+	query.prepare(sql);
+	for (const auto &binding : bindings) {
+		query.addBindValue(binding);
+	}
+
+	if (!query.exec()) {
+		qWarning() << "Analytics: Failed to query messages for word frequency:" << query.lastError().text();
+		return wordFreq;
+	}
+
+	int messagesProcessed = 0;
+	while (query.next()) {
+		QString text = query.value(0).toString();
+		if (text.isEmpty()) {
+			continue;
+		}
+
+		QStringList words = extractWords(text);
+		for (const QString &word : words) {
+			QString lowercaseWord = word.toLower();
+			// Filter out short words and stop words
+			if (lowercaseWord.length() >= 3 && !isStopWord(lowercaseWord)) {
+				wordFreq[lowercaseWord]++;
 			}
+		}
+
+		messagesProcessed++;
+		// Process in batches to avoid memory issues
+		if (messagesProcessed % 1000 == 0) {
+			qDebug() << "Analytics: Processed" << messagesProcessed << "messages for word frequency";
 		}
 	}
 
-	// Sort and return top N
-	QList<QPair<QString, int>> sortedWords;
-	for (auto it = wordCounts.begin(); it != wordCounts.end(); ++it) {
-		sortedWords.append(qMakePair(it.key(), it.value()));
-	}
+	qDebug() << "Analytics: Word frequency analysis complete." << wordFreq.size() << "unique words from" << messagesProcessed << "messages";
 
-	std::sort(sortedWords.begin(), sortedWords.end(),
-	          [](const auto &a, const auto &b) { return a.second > b.second; });
-
-	QMap<QString, int> topWords;
-	const int maxCount = qMin(limit, sortedWords.size());
-	for (int i = 0; i < maxCount; ++i) {
-		topWords[sortedWords[i].first] = sortedWords[i].second;
-	}
-
-	return topWords;
+	return wordFreq;
 }
 
-// Export functions
-QJsonObject Analytics::exportMessageStats(qint64 chatId) {
-	auto stats = getMessageStatistics(chatId);
-
-	QJsonObject json;
-	json["chat_id"] = chatId;
-	json["total_messages"] = stats.totalMessages;
-	json["total_words"] = stats.totalWords;
-	json["total_characters"] = static_cast<qint64>(stats.totalCharacters);
-	json["unique_users"] = stats.uniqueUsers;
-	json["avg_message_length"] = stats.avgMessageLength;
-	json["messages_per_hour"] = stats.messagesPerHour;
-	json["first_message"] = stats.firstMessage.toString(Qt::ISODate);
-	json["last_message"] = stats.lastMessage.toString(Qt::ISODate);
-
-	// Top words
-	QJsonObject topWordsObj;
-	for (auto it = stats.topWords.begin(); it != stats.topWords.end(); ++it) {
-		topWordsObj[it.key()] = it.value();
-	}
-	json["top_words"] = topWordsObj;
-
-	// Top authors
-	QJsonObject topAuthorsObj;
-	for (auto it = stats.topAuthors.begin(); it != stats.topAuthors.end(); ++it) {
-		topAuthorsObj[QString::number(it.key())] = it.value();
-	}
-	json["top_authors"] = topAuthorsObj;
-
-	return json;
-}
-
-QJsonObject Analytics::exportUserActivity(qint64 userId, qint64 chatId) {
-	auto activity = getUserActivityAnalysis(userId, chatId);
-
-	QJsonObject json;
-	json["user_id"] = userId;
-	json["username"] = activity.username;
-	json["message_count"] = activity.messageCount;
-	json["word_count"] = activity.wordCount;
-	json["avg_message_length"] = activity.avgMessageLength;
-	json["most_active_hour"] = activity.mostActiveHour;
-	json["most_active_channel"] = activity.mostActiveChannel;
-	json["first_message"] = activity.firstMessage.toString(Qt::ISODate);
-	json["last_message"] = activity.lastMessage.toString(Qt::ISODate);
-	json["days_active"] = activity.daysActive;
-
-	return json;
-}
-
-QJsonObject Analytics::exportChatActivity(qint64 chatId) {
-	auto activity = getChatActivityAnalysis(chatId);
-
-	QJsonObject json;
-	json["chat_id"] = chatId;
-	json["chat_title"] = activity.chatTitle;
-	json["total_messages"] = activity.totalMessages;
-	json["unique_users"] = activity.uniqueUsers;
-	json["messages_per_day"] = activity.messagesPerDay;
-	json["peak_hour"] = activity.peakHour;
-	json["first_message"] = activity.firstMessage.toString(Qt::ISODate);
-	json["last_message"] = activity.lastMessage.toString(Qt::ISODate);
-
-	QString trendStr;
-	switch (activity.trend) {
-	case ActivityTrend::Increasing: trendStr = "increasing"; break;
-	case ActivityTrend::Decreasing: trendStr = "decreasing"; break;
-	case ActivityTrend::Stable: trendStr = "stable"; break;
-	default: trendStr = "unknown"; break;
-	}
-	json["activity_trend"] = trendStr;
-
-	return json;
-}
-
-QJsonArray Analytics::exportTimeSeries(qint64 chatId, TimeGranularity granularity) {
-	auto series = getTimeSeries(chatId, granularity);
-
-	QJsonArray array;
-	for (const auto &point : series) {
-		QJsonObject obj;
-		obj["timestamp"] = point.timestamp.toString(Qt::ISODate);
-		obj["message_count"] = point.messageCount;
-		obj["unique_users"] = point.uniqueUsers;
-		obj["avg_length"] = point.avgLength;
-		array.append(obj);
-	}
-
-	return array;
-}
-
-QString Analytics::exportToCSV(qint64 chatId, const QString &outputPath) {
-	// Export time series to CSV format
-	auto series = getTimeSeries(chatId, TimeGranularity::Daily);
-
-	QFile file(outputPath);
-	if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-		return QString();
-	}
-
-	QTextStream out(&file);
-	out << "timestamp,message_count,unique_users,avg_length\n";
-
-	for (const auto &point : series) {
-		out << point.timestamp.toString(Qt::ISODate) << ","
-		    << point.messageCount << ","
-		    << point.uniqueUsers << ","
-		    << point.avgLength << "\n";
-	}
-
-	file.close();
-	return outputPath;
-}
-
-// Helper implementations
 QStringList Analytics::extractWords(const QString &text) const {
-	// Split on whitespace and punctuation
-	QRegularExpression wordRegex(R"(\b\w+\b)");
+	// Split by non-word characters and convert to lowercase
+	QRegularExpression wordRegex("\\b\\w+\\b");
 	QRegularExpressionMatchIterator it = wordRegex.globalMatch(text);
-
+	
 	QStringList words;
 	while (it.hasNext()) {
 		QRegularExpressionMatch match = it.next();
-		words.append(match.captured(0));
+		words.append(match.captured(0).toLower());
 	}
-
+	
 	return words;
 }
 
-QStringList Analytics::getDefaultStopWords() const {
-	return kDefaultStopWords;
+bool Analytics::isStopWord(const QString &word) const {
+	return _stopWords.contains(word.toLower());
 }
 
-QString Analytics::granularityToSQL(TimeGranularity granularity) const {
-	switch (granularity) {
-	case TimeGranularity::Hourly:
-		return "%Y-%m-%d %H:00:00";
-	case TimeGranularity::Daily:
-		return "%Y-%m-%d";
-	case TimeGranularity::Weekly:
-		return "%Y-W%W";
-	case TimeGranularity::Monthly:
-		return "%Y-%m";
-	default:
-		return "%Y-%m-%d";
+QString Analytics::detectTrend(const QVector<double> &data) const {
+	if (data.size() < 2) {
+		return "insufficient_data";
+	}
+
+	double growthRate = calculateGrowthRate(data);
+
+	if (growthRate > 0.1) {
+		return "increasing";
+	} else if (growthRate < -0.1) {
+		return "decreasing";
+	} else {
+		return "stable";
 	}
 }
 
-int Analytics::calculateDaysActive(qint64 userId, qint64 chatId) const {
-	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
+double Analytics::calculateGrowthRate(const QVector<double> &data) const {
+	if (data.size() < 2) {
+		return 0.0;
+	}
+
+	// Simple linear regression slope
+	double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+	int n = data.size();
+
+	for (int i = 0; i < n; ++i) {
+		sumX += i;
+		sumY += data[i];
+		sumXY += i * data[i];
+		sumX2 += i * i;
+	}
+
+	double slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+	double avgY = sumY / n;
+
+	return avgY > 0 ? (slope / avgY) : 0.0;
+}
+
+QVector<double> Analytics::smoothData(const QVector<double> &data, int window) const {
+	QVector<double> smoothed;
+	if (data.isEmpty() || window < 1) {
+		return smoothed;
+	}
+
+	for (int i = 0; i < data.size(); ++i) {
+		int start = qMax(0, i - window / 2);
+		int end = qMin(data.size() - 1, i + window / 2);
+		
+		double sum = 0.0;
+		int count = 0;
+		for (int j = start; j <= end; ++j) {
+			sum += data[j];
+			count++;
+		}
+		
+		smoothed.append(sum / count);
+	}
+
+	return smoothed;
+}
+
+double Analytics::calculateAverage(const QVector<int> &data) const {
+	if (data.isEmpty()) {
+		return 0.0;
+	}
+
+	qint64 sum = 0;
+	for (int value : data) {
+		sum += value;
+	}
+
+	return static_cast<double>(sum) / data.size();
+}
+
+double Analytics::calculateStdDev(const QVector<int> &data) const {
+	if (data.size() < 2) {
+		return 0.0;
+	}
+
+	double avg = calculateAverage(data);
+	double sumSquares = 0.0;
+
+	for (int value : data) {
+		double diff = value - avg;
+		sumSquares += diff * diff;
+	}
+
+	return qSqrt(sumSquares / (data.size() - 1));
+}
+
+int Analytics::calculateMedian(QVector<int> data) const {
+	if (data.isEmpty()) {
 		return 0;
 	}
 
-	QString sql = R"(
-		SELECT COUNT(DISTINCT DATE(datetime(timestamp, 'unixepoch'))) as days
-		FROM messages
-		WHERE user_id = :user_id
-	)";
+	std::sort(data.begin(), data.end());
 
-	if (chatId > 0) {
-		sql += " AND chat_id = :chat_id";
+	int middle = data.size() / 2;
+	if (data.size() % 2 == 0) {
+		return (data[middle - 1] + data[middle]) / 2;
+	} else {
+		return data[middle];
 	}
-
-	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
-	query.prepare(sql);
-	query.bindValue(":user_id", userId);
-	if (chatId > 0) {
-		query.bindValue(":chat_id", chatId);
-	}
-
-	if (query.exec() && query.next()) {
-		return query.value("days").toInt();
-	}
-
-	return 0;
 }
 
-int Analytics::findMostActiveHour(qint64 userId, qint64 chatId) const {
-	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
-		return -1;
+AnalyticsTimeRange Analytics::parseTimeRange(
+	const QString &period,
+	const QDateTime &start,
+	const QDateTime &end
+) const {
+	AnalyticsTimeRange range;
+	range.period = period;
+
+	if (period == "custom") {
+		range.start = start;
+		range.end = end;
+	} else if (period == "hour") {
+		range.end = QDateTime::currentDateTime();
+		range.start = range.end.addSecs(-3600);
+	} else if (period == "day") {
+		range.end = QDateTime::currentDateTime();
+		range.start = range.end.addDays(-1);
+	} else if (period == "week") {
+		range.end = QDateTime::currentDateTime();
+		range.start = range.end.addDays(-7);
+	} else if (period == "month") {
+		range.end = QDateTime::currentDateTime();
+		range.start = range.end.addMonths(-1);
+	} else if (period == "year") {
+		range.end = QDateTime::currentDateTime();
+		range.start = range.end.addYears(-1);
+	} else { // "all"
+		// No time constraints
+		range.start = QDateTime();
+		range.end = QDateTime();
 	}
 
-	QString sql = R"(
-		SELECT CAST(strftime('%H', datetime(timestamp, 'unixepoch')) AS INTEGER) as hour,
-		       COUNT(*) as count
-		FROM messages
-		WHERE user_id = :user_id
-	)";
-
-	if (chatId > 0) {
-		sql += " AND chat_id = :chat_id";
-	}
-
-	sql += " GROUP BY hour ORDER BY count DESC LIMIT 1";
-
-	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
-	query.prepare(sql);
-	query.bindValue(":user_id", userId);
-	if (chatId > 0) {
-		query.bindValue(":chat_id", chatId);
-	}
-
-	if (query.exec() && query.next()) {
-		return query.value("hour").toInt();
-	}
-
-	return -1;
+	return range;
 }
 
-int Analytics::findPeakHour(qint64 chatId) const {
-	if (!static_cast<QSqlDatabase*>(nullptr) || !static_cast<QSqlDatabase*>(nullptr)->isOpen()) {
-		return -1;
+QString Analytics::formatTimestamp(
+	const QDateTime &dt,
+	const QString &granularity
+) const {
+	if (granularity == "hourly") {
+		return dt.toString("yyyy-MM-dd HH:00");
+	} else if (granularity == "daily") {
+		return dt.toString("yyyy-MM-dd");
+	} else if (granularity == "weekly") {
+		return dt.toString("yyyy-'W'ww");
+	} else if (granularity == "monthly") {
+		return dt.toString("yyyy-MM");
+	} else if (granularity == "yearly") {
+		return dt.toString("yyyy");
 	}
 
-	QSqlQuery query(*static_cast<QSqlDatabase*>(nullptr));
-	query.prepare(R"(
-		SELECT CAST(strftime('%H', datetime(timestamp, 'unixepoch')) AS INTEGER) as hour,
-		       COUNT(*) as count
-		FROM messages
-		WHERE chat_id = :chat_id
-		GROUP BY hour
-		ORDER BY count DESC
-		LIMIT 1
-	)");
-	query.bindValue(":chat_id", chatId);
+	return dt.toString(Qt::ISODate);
+}
 
-	if (query.exec() && query.next()) {
-		return query.value("hour").toInt();
+QString Analytics::exportToJSON(const QJsonObject &analytics, const QString &path) {
+	QFile file(path);
+	if (!file.open(QIODevice::WriteOnly)) {
+		return QString();
 	}
 
-	return -1;
+	QJsonDocument doc(analytics);
+	file.write(doc.toJson(QJsonDocument::Indented));
+	file.close();
+
+	return path;
+}
+
+QString Analytics::exportToCSV(const QJsonObject &analytics, const QString &path) {
+	QFile file(path);
+	if (!file.open(QIODevice::WriteOnly)) {
+		return QString();
+	}
+
+	QTextStream stream(&file);
+	
+	// Simple CSV export of message statistics
+	stream << "Metric,Value\n";
+	
+	QJsonObject msgStats = analytics["messageStats"].toObject();
+	for (auto it = msgStats.constBegin(); it != msgStats.constEnd(); ++it) {
+		stream << it.key() << "," << it.value().toVariant().toString() << "\n";
+	}
+
+	file.close();
+
+	return path;
+}
+
+QString Analytics::exportToHTML(const QJsonObject &analytics, const QString &path) {
+	QFile file(path);
+	if (!file.open(QIODevice::WriteOnly)) {
+		return QString();
+	}
+
+	QTextStream stream(&file);
+	
+	stream << "<!DOCTYPE html>\n<html>\n<head>\n";
+	stream << "<title>Analytics Report</title>\n";
+	stream << "<style>body{font-family:Arial,sans-serif;margin:20px;}</style>\n";
+	stream << "</head>\n<body>\n";
+	stream << "<h1>Analytics Report</h1>\n";
+	stream << "<pre>" << QJsonDocument(analytics).toJson(QJsonDocument::Indented) << "</pre>\n";
+	stream << "</body>\n</html>\n";
+
+	file.close();
+
+	return path;
+}
+
+QJsonObject Analytics::messageStatsToJson(const MessageStats &stats) const {
+	QJsonObject json;
+	json["totalMessages"] = stats.totalMessages;
+	json["textMessages"] = stats.textMessages;
+	json["mediaMessages"] = stats.mediaMessages;
+	json["deletedMessages"] = stats.deletedMessages;
+	json["editedMessages"] = stats.editedMessages;
+	json["averageLength"] = stats.averageLength;
+	json["messagesPerDay"] = stats.messagesPerDay;
+	json["firstMessage"] = stats.firstMessage.toString(Qt::ISODate);
+	json["lastMessage"] = stats.lastMessage.toString(Qt::ISODate);
+	return json;
+}
+
+QJsonObject Analytics::userActivityToJson(const UserActivity &activity) const {
+	QJsonObject json;
+	json["userId"] = QString::number(activity.userId);
+	json["userName"] = activity.userName;
+	json["messageCount"] = activity.messageCount;
+	json["replyCount"] = activity.replyCount;
+	json["mentionCount"] = activity.mentionCount;
+	json["averageMessageLength"] = activity.averageMessageLength;
+	json["firstSeen"] = activity.firstSeen.toString(Qt::ISODate);
+	json["lastSeen"] = activity.lastSeen.toString(Qt::ISODate);
+	return json;
+}
+
+QJsonObject Analytics::chatActivityToJson(const ChatActivity &activity) const {
+	QJsonObject json;
+	json["chatId"] = QString::number(activity.chatId);
+	json["chatTitle"] = activity.chatTitle;
+	json["activeUsers"] = activity.activeUsers;
+	json["totalMessages"] = activity.totalMessages;
+	json["messagesPerDay"] = activity.messagesPerDay;
+	json["messagesPerUser"] = activity.messagesPerUser;
+	json["activityTrend"] = activity.activityTrend;
+	return json;
+}
+
+QJsonArray Analytics::timeSeriesPointsToJson(const QVector<TimeSeriesPoint> &points) const {
+	QJsonArray array;
+	for (const auto &point : points) {
+		QJsonObject json;
+		json["timestamp"] = point.timestamp.toString(Qt::ISODate);
+		json["messageCount"] = point.messageCount;
+		json["userCount"] = point.userCount;
+		json["averageLength"] = point.averageLength;
+		array.append(json);
+	}
+	return array;
+}
+
+QJsonArray Analytics::wordFrequenciesToJson(const QVector<WordFrequency> &frequencies) const {
+	QJsonArray array;
+	for (const auto &wf : frequencies) {
+		QJsonObject json;
+		json["word"] = wf.word;
+		json["count"] = wf.count;
+		json["percentage"] = wf.percentage;
+		array.append(json);
+	}
+	return array;
+}
+
+QString Analytics::getCacheKey(qint64 chatId, const QString &type) const {
+	return QString("%1_%2").arg(chatId).arg(type);
+}
+
+bool Analytics::isCacheValid(const QString &key) const {
+	if (!_cache.contains(key)) {
+		return false;
+	}
+
+	const auto &cached = _cache[key];
+	QDateTime now = QDateTime::currentDateTime();
+	return cached.timestamp.secsTo(now) < _cacheLifetimeSeconds;
+}
+
+void Analytics::setCacheValue(const QString &key, const QJsonObject &data) {
+	CachedAnalytics cached;
+	cached.timestamp = QDateTime::currentDateTime();
+	cached.data = data;
+	_cache[key] = cached;
+}
+
+QJsonObject Analytics::getCacheValue(const QString &key) const {
+	if (_cache.contains(key)) {
+		return _cache[key].data;
+	}
+	return QJsonObject();
+}
+
+void Analytics::initializeStopWords() {
+	// Common English stop words
+	_stopWords = {
+		"a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
+		"has", "he", "in", "is", "it", "its", "of", "on", "that", "the",
+		"to", "was", "will", "with", "the", "this", "but", "they", "have",
+		"had", "what", "when", "where", "who", "which", "why", "how"
+	};
 }
 
 } // namespace MCP

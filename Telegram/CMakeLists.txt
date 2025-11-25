@@ -1240,6 +1240,8 @@ PRIVATE
     mcp/bot_command_handler.h
     mcp/voice_transcription.cpp
     mcp/voice_transcription.h
+    mcp/cache_manager.cpp
+    mcp/cache_manager.h
     media/audio/media_audio.cpp
     media/audio/media_audio.h
     media/audio/media_audio_capture.cpp

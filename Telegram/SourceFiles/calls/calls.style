@@ -1727,9 +1727,14 @@ groupCallTopReactorBadge: RoundCheckbox(defaultRoundCheckbox) {
 	border: groupCallMembersBg;
 }
 
-groupCallLinkMenu: IconButton(boxTitleMenu) {
+groupCallLinkMenu: IconButton {
+	width: 44px;
+	height: 44px;
 	icon: icon {{ "title_menu_dots", groupCallMemberInactiveIcon }};
 	iconOver: icon {{ "title_menu_dots", groupCallMemberInactiveIcon }};
+	iconPosition: point(14px, 14px);
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 44px;
 	ripple: RippleAnimation(defaultRippleAnimation) {
 		color: groupCallMembersBgOver;
 	}

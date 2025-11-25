@@ -61,6 +61,16 @@ FilteredCommandLineArguments::FilteredCommandLineArguments(
 		pushArgument(argv[i]);
 	}
 
+	// Preserve --mcp flag if present (for MCP server integration)
+	for (auto i = 1; i < argc; ++i) {
+		if (std::strcmp(argv[i], "--mcp") == 0) {
+			pushArgument("--mcp");
+			fprintf(stderr, "[MCP] FilteredCommandLineArguments: Preserved --mcp flag\n");
+			fflush(stderr);
+			break;
+		}
+	}
+
 #if defined Q_OS_WIN || defined Q_OS_MAC
 	if (OptionFreeType.value()) {
 		pushArgument("-platform");
@@ -595,7 +605,16 @@ void Launcher::processArguments() {
 		_customWorkingDir = QDir(_customWorkingDir).absolutePath() + '/';
 		LOG(("TData: Custom working directory (absolute): %1").arg(_customWorkingDir));
 	} else {
-		LOG(("TData: Using default working directory"));
+		// Auto-detect tdata directory in home directory
+		const auto homeDir = QDir::homePath();
+		const auto homeTdataPath = homeDir + "/tdata";
+		if (QDir(homeTdataPath).exists()) {
+			LOG(("TData: Auto-detected tdata directory at: %1").arg(homeTdataPath));
+			_customWorkingDir = homeDir + '/';
+			LOG(("TData: Auto-setting working directory to home: %1").arg(_customWorkingDir));
+		} else {
+			LOG(("TData: No tdata found in home directory, using default working directory"));
+		}
 	}
 
 	const auto startUrls = parseResult.value("--", {});

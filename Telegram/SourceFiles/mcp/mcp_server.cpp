@@ -116,6 +116,122 @@ void Server::registerTools() {
 				{"required", QJsonArray{"query"}},
 			}
 		},
+		Tool{
+			"get_user_info",
+			"Get information about a Telegram user",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"user_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Telegram user ID"}
+					}}
+				}},
+				{"required", QJsonArray{"user_id"}},
+			}
+		},
+		Tool{
+			"delete_message",
+			"Delete a message from a chat",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Message ID to delete"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id"}},
+			}
+		},
+		Tool{
+			"edit_message",
+			"Edit a message in a chat",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Message ID to edit"}
+					}},
+					{"new_text", QJsonObject{
+						{"type", "string"},
+						{"description", "New message text"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id", "new_text"}},
+			}
+		},
+		Tool{
+			"forward_message",
+			"Forward a message to another chat",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"from_chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Source chat ID"}
+					}},
+					{"to_chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Destination chat ID"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Message ID to forward"}
+					}}
+				}},
+				{"required", QJsonArray{"from_chat_id", "to_chat_id", "message_id"}},
+			}
+		},
+		Tool{
+			"pin_message",
+			"Pin a message in a chat",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Message ID to pin"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id"}},
+			}
+		},
+		Tool{
+			"add_reaction",
+			"Add a reaction to a message",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Message ID to react to"}
+					}},
+					{"reaction", QJsonObject{
+						{"type", "string"},
+						{"description", "Reaction emoji"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id", "reaction"}},
+			}
+		},
 	};
 }
 
@@ -199,6 +315,10 @@ void Server::stop() {
 
 	_initialized = false;
 	qInfo() << "MCP Server stopped";
+}
+
+void Server::setSession(Main::Session *session) {
+	_session = session;
 }
 
 void Server::startStdioTransport() {

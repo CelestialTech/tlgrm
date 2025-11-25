@@ -5,47 +5,85 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
-#include <QtCore/QVector>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonArray>
-#include <QtCore/QDateTime>
-#include <functional>
+#include <QtCore/QVector>
+#include <QtCore/QHash>
+#include <memory>
+
+namespace Main {
+class Session;
+} // namespace Main
 
 namespace MCP {
 
-// Operation status
-enum class OperationStatus {
+// Batch operation type
+enum class BatchOperationType {
+	Delete,
+	Forward,
+	Export,
+	MarkAsRead,
+	Search
+};
+
+// Batch operation status
+enum class BatchStatus {
 	Pending,
 	Running,
 	Completed,
 	Failed,
-	Partial  // Some operations succeeded, some failed
-};
-
-// Operation result for a single item
-struct OperationResult {
-	int index;
-	bool success;
-	QString error;
-	double duration;  // milliseconds
-	QJsonObject data;  // Operation-specific result data
+	Cancelled
 };
 
 // Batch operation result
-struct BatchResult {
-	QString operationType;
-	OperationStatus status;
-	int total;
-	int successful;
-	int failed;
-	double totalDuration;  // milliseconds
-	QVector<OperationResult> results;
-	QStringList errors;
-	QDateTime startedAt;
-	QDateTime completedAt;
+struct BatchOperationResult {
+	qint64 operationId = 0;
+	BatchOperationType type;
+	BatchStatus status = BatchStatus::Pending;
+	int totalItems = 0;
+	int processedItems = 0;
+	int successfulItems = 0;
+	int failedItems = 0;
+	QDateTime startTime;
+	QDateTime endTime;
+	QString errorMessage;
+	QJsonObject details;
 };
 
-// Batch operations manager
+// Batch delete parameters
+struct BatchDeleteParams {
+	qint64 chatId = 0;
+	QVector<qint64> messageIds;
+	bool deleteForAll = false;
+	bool revoke = true;
+};
+
+// Batch forward parameters
+struct BatchForwardParams {
+	qint64 sourceChatId = 0;
+	qint64 targetChatId = 0;
+	QVector<qint64> messageIds;
+	bool silent = false;
+	bool dropAuthor = false;
+	bool dropCaption = false;
+};
+
+// Batch export parameters
+struct BatchExportParams {
+	qint64 chatId = 0;
+	QVector<qint64> messageIds;
+	QString format = "json"; // "json", "txt", "html"
+	QString outputPath;
+	bool includeMedia = false;
+};
+
+// Batch mark read parameters
+struct BatchMarkReadParams {
+	QVector<qint64> chatIds;
+	bool markAsRead = true; // false = mark as unread
+};
+
+// Batch operations class
 class BatchOperations : public QObject {
 	Q_OBJECT
 
@@ -53,92 +91,122 @@ public:
 	explicit BatchOperations(QObject *parent = nullptr);
 	~BatchOperations();
 
-	// Configuration
-	void setConcurrencyLimit(int limit) { _concurrencyLimit = limit; }
-	void setRateLimitDelay(int delayMs) { _rateLimitDelay = delayMs; }
-	[[nodiscard]] int concurrencyLimit() const { return _concurrencyLimit; }
+	// Initialization
+	bool start(Main::Session *session);
+	void stop();
+	[[nodiscard]] bool isRunning() const { return _isRunning; }
 
-	// Batch send messages
-	BatchResult sendMessages(
-		const QVector<qint64> &chatIds,
-		const QString &message,
-		bool silent = false
-	);
-
-	BatchResult sendMessagesToChat(
+	// Batch delete operations
+	qint64 batchDeleteMessages(const BatchDeleteParams &params);
+	qint64 deleteMessageRange(
 		qint64 chatId,
-		const QVector<QString> &messages,
-		int delayMs = 100
+		qint64 startMessageId,
+		qint64 endMessageId,
+		bool deleteForAll = false
 	);
-
-	// Batch delete messages
-	BatchResult deleteMessages(
+	qint64 deleteMessagesByFilter(
 		qint64 chatId,
-		const QVector<qint64> &messageIds
+		const QString &filter, // "date", "user", "type"
+		const QJsonObject &filterParams
 	);
 
-	BatchResult deleteMessagesInChats(
-		const QVector<qint64> &chatIds,
-		const QVector<qint64> &messageIds
+	// Batch forward operations
+	qint64 batchForwardMessages(const BatchForwardParams &params);
+	qint64 forwardAllMessages(
+		qint64 sourceChatId,
+		qint64 targetChatId,
+		int limit = 1000
 	);
 
-	// Batch forward messages
-	BatchResult forwardMessages(
-		qint64 fromChatId,
-		qint64 toChatId,
-		const QVector<qint64> &messageIds
-	);
-
-	// Batch pin/unpin
-	BatchResult pinMessages(
+	// Batch export operations
+	qint64 batchExportMessages(const BatchExportParams &params);
+	qint64 exportChatMessages(
 		qint64 chatId,
-		const QVector<qint64> &messageIds,
-		bool notify = false
+		const QString &format,
+		const QString &outputPath,
+		int limit = -1 // -1 = all
 	);
 
-	BatchResult unpinMessages(
-		qint64 chatId,
-		const QVector<qint64> &messageIds
-	);
+	// Batch mark as read/unread
+	qint64 batchMarkAsRead(const BatchMarkReadParams &params);
+	qint64 markAllChatsRead();
 
-	// Batch reactions
-	BatchResult addReactions(
-		qint64 chatId,
-		const QVector<qint64> &messageIds,
-		const QString &emoji
-	);
+	// Operation management
+	bool cancelOperation(qint64 operationId);
+	bool pauseOperation(qint64 operationId);
+	bool resumeOperation(qint64 operationId);
 
-	// Generic batch operation
-	BatchResult executeBatch(
-		const QString &operationType,
-		const QVector<QJsonObject> &operations,
-		std::function<bool(const QJsonObject&, OperationResult&)> executor
-	);
+	// Query operations
+	QJsonObject getOperationStatus(qint64 operationId);
+	QJsonArray listOperations(BatchStatus status = BatchStatus::Running);
+	QJsonArray getRecentOperations(int limit = 10);
 
-	// Export batch result
-	QJsonObject exportBatchResult(const BatchResult &result);
-	QString exportBatchResultToCSV(const BatchResult &result, const QString &outputPath);
+	// Batch statistics
+	QJsonObject getOperationStatistics();
 
 Q_SIGNALS:
-	void batchStarted(const QString &operationType, int total);
-	void batchProgress(int current, int total);
-	void batchCompleted(const QString &operationType, int successful, int failed);
-	void error(const QString &errorMessage);
+	void operationStarted(qint64 operationId, const QString &type);
+	void operationProgress(qint64 operationId, int processed, int total);
+	void operationCompleted(qint64 operationId);
+	void operationFailed(qint64 operationId, const QString &error);
+	void operationCancelled(qint64 operationId);
+
+private Q_SLOTS:
+	void processOperationQueue();
 
 private:
-	// Execution helpers
-	template<typename T>
-	BatchResult executeOperations(
-		const QString &operationType,
-		const QVector<T> &items,
-		std::function<bool(const T&, OperationResult&)> executor
+	// Operation execution
+	void executeDeleteOperation(qint64 operationId, const BatchDeleteParams &params);
+	void executeForwardOperation(qint64 operationId, const BatchForwardParams &params);
+	void executeExportOperation(qint64 operationId, const BatchExportParams &params);
+	void executeMarkReadOperation(qint64 operationId, const BatchMarkReadParams &params);
+
+	// Helper methods
+	bool deleteMessage(qint64 chatId, qint64 messageId, bool deleteForAll);
+	bool forwardMessage(
+		qint64 sourceChatId,
+		qint64 targetChatId,
+		qint64 messageId,
+		const BatchForwardParams &params
 	);
+	bool exportMessage(qint64 chatId, qint64 messageId, const QString &format, QTextStream &stream);
+	bool markChatAsRead(qint64 chatId);
 
-	void applyRateLimit();
-	bool shouldContinueOnError() const { return true; }  // Configurable
+	// Message filtering
+	QVector<qint64> filterMessagesByDate(
+		qint64 chatId,
+		const QDateTime &startDate,
+		const QDateTime &endDate
+	);
+	QVector<qint64> filterMessagesByUser(qint64 chatId, qint64 userId);
+	QVector<qint64> filterMessagesByType(qint64 chatId, const QString &messageType);
 
-	int _concurrencyLimit = 5;  // Max concurrent operations
-	int _rateLimitDelay = 100;  // Delay between batches (ms)
+	// Operation management
+	qint64 createOperation(BatchOperationType type);
+	void updateOperationStatus(qint64 operationId, BatchStatus status);
+	void updateOperationProgress(qint64 operationId, int processed, int successful, int failed);
+	void completeOperation(qint64 operationId, bool success, const QString &error = QString());
+
+	// Conversion
+	QJsonObject operationResultToJson(const BatchOperationResult &result) const;
+	QString batchOperationTypeToString(BatchOperationType type) const;
+	QString batchStatusToString(BatchStatus status) const;
+
+	Main::Session *_session = nullptr;
+	bool _isRunning = false;
+
+	// Operation tracking
+	QHash<qint64, BatchOperationResult> _operations;
+	qint64 _nextOperationId = 1;
+
+	// Queue management
+	QTimer *_queueTimer = nullptr;
+	int _queueProcessIntervalMs = 100;
+	int _maxConcurrentOperations = 3;
+	int _currentConcurrentOperations = 0;
+
+	// Rate limiting
+	int _operationsPerSecond = 10;
 	QDateTime _lastOperationTime;
 };
 

@@ -7,6 +7,7 @@
 // https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mcp_bridge.h"
+#include "mcp_server.h"
 
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonValue>
@@ -58,6 +59,11 @@ void Bridge::stop() {
 
 bool Bridge::isRunning() const {
 	return _server && _server->isListening();
+}
+
+void Bridge::setServer(Server *server) {
+	_mcpServer = server;
+	qInfo() << "MCP Bridge: MCP server connected";
 }
 
 void Bridge::onNewConnection() {
@@ -173,70 +179,67 @@ QJsonObject Bridge::handlePing(const QJsonObject &params) {
 }
 
 QJsonObject Bridge::handleGetMessages(const QJsonObject &params) {
-	// TODO: Implement local database access
-	// This will query tdesktop's SQLite database directly
-	// For now, return stub data
+	if (!_mcpServer) {
+		QJsonObject error;
+		error["error"] = "MCP server not connected";
+		return error;
+	}
 
 	qint64 chatId = params["chat_id"].toVariant().toLongLong();
 	int limit = params["limit"].toInt(50);
-	int offset = params["offset"].toInt(0);
 
-	qDebug() << "MCP Bridge: get_messages"
+	qDebug() << "MCP Bridge: get_messages (delegating to MCP server)"
 		<< "chat_id=" << chatId
-		<< "limit=" << limit
-		<< "offset=" << offset;
+		<< "limit=" << limit;
 
-	QJsonObject result;
-	result["chat_id"] = chatId;
-	result["messages"] = QJsonArray{}; // TODO: Populate from database
-	result["total"] = 0;
-	result["source"] = "local_database";
-	result["note"] = "Implementation pending - will access local SQLite";
+	// Delegate to MCP server's read_messages tool
+	QJsonObject args;
+	args["chat_id"] = chatId;
+	args["limit"] = limit;
 
-	return result;
+	return _mcpServer->toolReadMessages(args);
 }
 
 QJsonObject Bridge::handleSearchLocal(const QJsonObject &params) {
-	// TODO: Implement local search
-	// This will search tdesktop's local message cache
+	if (!_mcpServer) {
+		QJsonObject error;
+		error["error"] = "MCP server not connected";
+		return error;
+	}
 
 	QString query = params["query"].toString();
 	qint64 chatId = params["chat_id"].toVariant().toLongLong();
 	int limit = params["limit"].toInt(50);
 
-	qDebug() << "MCP Bridge: search_local"
+	qDebug() << "MCP Bridge: search_local (delegating to MCP server)"
 		<< "query=" << query
 		<< "chat_id=" << chatId
 		<< "limit=" << limit;
 
-	QJsonObject result;
-	result["query"] = query;
-	result["results"] = QJsonArray{}; // TODO: Populate from search
-	result["total"] = 0;
-	result["source"] = "local_cache";
-	result["note"] = "Implementation pending - will search local database";
+	// Delegate to MCP server's search_messages tool
+	QJsonObject args;
+	args["query"] = query;
+	if (chatId != 0) {
+		args["chat_id"] = chatId;
+	}
+	args["limit"] = limit;
 
-	return result;
+	return _mcpServer->toolSearchMessages(args);
 }
 
 QJsonObject Bridge::handleGetDialogs(const QJsonObject &params) {
-	// TODO: Implement dialog list access
-	// This will return all chats/dialogs from tdesktop
+	if (!_mcpServer) {
+		QJsonObject error;
+		error["error"] = "MCP server not connected";
+		return error;
+	}
 
-	int limit = params["limit"].toInt(100);
-	int offset = params["offset"].toInt(0);
+	qDebug() << "MCP Bridge: get_dialogs (delegating to MCP server)";
 
-	qDebug() << "MCP Bridge: get_dialogs"
-		<< "limit=" << limit
-		<< "offset=" << offset;
+	// Delegate to MCP server's list_chats tool
+	QJsonObject args;  // list_chats doesn't need parameters
 
-	QJsonObject result;
-	result["dialogs"] = QJsonArray{}; // TODO: Populate from tdesktop
-	result["total"] = 0;
-	result["source"] = "local_cache";
-	result["note"] = "Implementation pending - will access tdesktop's dialog list";
-
-	return result;
+	return _mcpServer->toolListChats(args);
 }
 
 } // namespace MCP

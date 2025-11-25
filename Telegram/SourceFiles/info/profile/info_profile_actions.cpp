@@ -1360,7 +1360,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 	const auto result = wrap->entity();
 	auto tracker = Ui::MultiSlideTracker();
 	add(CreateSlideSkipWidget(wrap))->toggleOn(
-		tracker.atLeastOneShownValueLater());
+		tracker.atLeastOneShownValue());
 
 	// Fill context for a mention / hashtag / bot command link.
 	const auto infoClickFilter = [=,
@@ -2209,7 +2209,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::fill() {
 		add(setupPersonalChannel(user));
 	}
 	// add(CreateSlideSkipWidget(_wrap))->toggleOn(
-	// 	_mainTracker.atLeastOneShownValueLater());
+	// 	_mainTracker.atLeastOneShownValue());
 	add(setupInfo());
 	auto lastButtonTracker = Ui::MultiSlideTracker();
 	if (const auto user = _peer->asUser()) {
@@ -2251,7 +2251,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::fill() {
 		}
 	}
 	add(CreateSlideSkipWidget(_wrap))->toggleOn(
-		lastButtonTracker.atLeastOneShownValueLater());
+		lastButtonTracker.atLeastOneShownValue());
 
 	return std::move(_wrap);
 }
