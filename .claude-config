@@ -1,0 +1,68 @@
+# Claude Configuration for Tlgrm Project
+# This file documents project-specific git configuration and workflow
+
+## Project Architecture: Hybrid Approach (Fork + Rebase Strategy)
+
+### Repository Structure
+- **Parent repository**: `/Users/pasha/xCode/tlgrm`
+  - Remote: https://github.com/jmpnop/tlgrm.git
+  - Purpose: Integration repo tracking both tdesktop and pythonMCP
+
+- **tdesktop subdirectory**: `/Users/pasha/xCode/tlgrm/tdesktop`
+  - Fork remote (origin): https://github.com/jmpnop/tdesktop.git
+  - Upstream remote: https://github.com/telegramdesktop/tdesktop.git
+  - Branch: `tlgrm` (DO NOT use master/dev directly)
+  - Purpose: Tlgrm - Custom Telegram Desktop with MCP integration + tdata handling
+
+- **pythonMCP directory**: `/Users/pasha/xCode/tlgrm/pythonMCP`
+  - Fully custom code, managed in parent repo
+  - Purpose: Complementary Python MCP server with AI/ML features
+
+## Hybrid Approach Workflow
+
+### Making Changes to tdesktop
+1. Work in `/Users/pasha/xCode/tlgrm/tdesktop` on `tlgrm` branch
+2. Commit changes locally in tdesktop directory
+3. Push to YOUR fork: `git push origin tlgrm`
+4. Update parent repo to track the new tdesktop state:
+   ```
+   cd /Users/pasha/xCode/tlgrm
+   git add tdesktop
+   git commit -m "Update tdesktop: <description>"
+   git push origin master
+   ```
+
+### Updating from Upstream Telegram
+When new Telegram Desktop version is released:
+```bash
+cd /Users/pasha/xCode/tlgrm/tdesktop
+git fetch upstream
+git rebase upstream/dev
+# Fix any conflicts in MCP files
+git push origin tlgrm --force-with-lease
+```
+
+## CRITICAL Rules
+1. ✅ **DO** push from tdesktop to https://github.com/jmpnop/tdesktop.git (your fork)
+2. ❌ **NEVER** push to upstream (https://github.com/telegramdesktop/tdesktop.git)
+3. ✅ **DO** work on `tlgrm` branch (NOT master/dev)
+4. ✅ **DO** update parent repo after tdesktop changes
+5. ✅ **DO** verify remotes before pushing: `git remote -v`
+
+## Patches as Documentation
+Patches in `tdesktop/patches/` serve as:
+- Reference documentation of MCP integration
+- Portable format for applying to new Telegram versions
+- Backup in case rebase gets complex
+
+Update patches after major changes:
+```bash
+cd /Users/pasha/xCode/tlgrm/tdesktop
+git format-patch upstream/dev --output-directory patches/
+```
+
+## Current Setup (as of 2025-11-26)
+- Fork created: ✅ https://github.com/jmpnop/tdesktop
+- Remotes configured: ✅ origin (fork) + upstream (official)
+- Branch created: ✅ tlgrm
+- Workflow: Hybrid Approach (Fork + Rebase)
