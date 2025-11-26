@@ -742,7 +742,7 @@ void AuctionBidBox(not_null<GenericBox*> box, AuctionBidBoxArgs &&args) {
 		[=] { box->closeBox(); });
 	if (const auto now = state->value.current(); !now.finished()) {
 		box->addTopButton(
-			st::boxTitleMenu,
+			st::infoTopBarMenu,
 			MakeAuctionMenuCallback(box, show, now));
 	}
 
@@ -1245,7 +1245,7 @@ void AuctionInfoBox(
 
 	const auto menu = CreateChild<IconButton>(
 		box->verticalLayout(),
-		st::boxTitleMenu);
+		st::infoTopBarMenu);
 	menu->setClickedCallback(MakeAuctionMenuCallback(menu, show, now));
 	const auto weakMenu = base::make_weak(menu);
 
