@@ -1,5 +1,7 @@
 # Telegram MCP: Complete AI Integration
 
+<img width="2912" height="1632" alt="image" src="https://github.com/user-attachments/assets/e9fe3bfe-0f47-409c-a91f-acacc865a0ee" />
+
 A comprehensive **Model Context Protocol (MCP)** integration for Telegram, featuring a **high-performance C++ MCP server** embedded directly into a modified Telegram Desktop with **complementary Python AI/ML capabilities**.
 
 [![MCP](https://img.shields.io/badge/MCP-1.0-green.svg)](https://modelcontextprotocol.io/)
