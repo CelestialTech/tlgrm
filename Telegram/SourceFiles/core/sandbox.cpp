@@ -124,8 +124,24 @@ int Sandbox::start() {
 		manager.setRestartHint(QSessionManager::RestartNever);
 	});
 
-	LOG(("Connecting local socket to %1...").arg(_localServerName));
-	_localSocket.connectToServer(_localServerName);
+	// Check for MCP mode - skip socket dance and launch immediately
+	const auto args = QCoreApplication::arguments();
+	const bool mcpMode = args.contains(u"--mcp"_q);
+
+	if (mcpMode) {
+		LOG(("MCP mode detected - launching application directly"));
+		fprintf(stderr, "[MCP] Sandbox: MCP mode detected, skipping socket check\n");
+		fflush(stderr);
+
+		// For MCP mode, skip single instance check and launch immediately
+		// This ensures the application starts even when stdin is piped
+		crl::on_main(this, [=] {
+			singleInstanceChecked();
+		});
+	} else {
+		LOG(("Connecting local socket to %1...").arg(_localServerName));
+		_localSocket.connectToServer(_localServerName);
+	}
 
 	if (QuitOnStartRequested) {
 		closeApplication();
@@ -339,6 +355,11 @@ void Sandbox::singleInstanceChecked() {
 		new NotStartedWindow();
 		return;
 	}
+
+	// Check for MCP mode - skip crash report window entirely
+	const auto args = QCoreApplication::arguments();
+	const bool mcpMode = args.contains(u"--mcp"_q);
+
 	const auto result = CrashReports::Start();
 	v::match(result, [&](CrashReports::Status status) {
 		if (status == CrashReports::CantOpen) {
@@ -355,6 +376,15 @@ void Sandbox::singleInstanceChecked() {
 			} else {
 				launchApplication();
 			}
+			return;
+		}
+		// In MCP mode, skip crash report window and launch directly
+		if (mcpMode) {
+			LOG(("MCP mode - skipping crash report dialog"));
+			fprintf(stderr, "[MCP] Skipping crash report dialog\n");
+			fflush(stderr);
+			CrashReports::Restart();
+			launchApplication();
 			return;
 		}
 		_lastCrashDump = crashdump;
