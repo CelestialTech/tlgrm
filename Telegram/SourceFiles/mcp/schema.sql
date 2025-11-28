@@ -432,6 +432,361 @@ VALUES (
 );
 
 -- ===================================
+-- 14. PREMIUM EQUIVALENT FEATURES
+-- ===================================
+
+-- Message tags (user can tag any message)
+CREATE TABLE IF NOT EXISTS message_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    tag TEXT NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    UNIQUE(chat_id, message_id, tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tags_tag ON message_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_tags_chat ON message_tags(chat_id);
+
+-- Translation cache
+CREATE TABLE IF NOT EXISTS translation_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    target_lang TEXT NOT NULL,
+    original_text TEXT,
+    translated_text TEXT NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    UNIQUE(chat_id, message_id, target_lang)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trans_msg ON translation_cache(chat_id, message_id);
+
+-- Auto-translate configuration per chat
+CREATE TABLE IF NOT EXISTS auto_translate_config (
+    chat_id INTEGER PRIMARY KEY,
+    target_lang TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+-- Chat rules engine (auto-management)
+CREATE TABLE IF NOT EXISTS chat_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    conditions TEXT NOT NULL,  -- JSON: {"days_inactive": 30, "is_contact": false}
+    actions TEXT NOT NULL,     -- JSON: {"archive": true, "mute": true}
+    enabled INTEGER DEFAULT 1,
+    priority INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+-- Tasks/checklists
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    status TEXT DEFAULT 'pending',  -- pending, in_progress, completed
+    chat_id INTEGER DEFAULT 0,
+    message_id INTEGER DEFAULT 0,
+    assigned_to INTEGER DEFAULT 0,
+    due_date INTEGER,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    completed_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_chat ON tasks(chat_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
+
+-- Ad filter configuration
+CREATE TABLE IF NOT EXISTS ad_filter_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    hide_sponsored INTEGER DEFAULT 1,
+    hide_promoted INTEGER DEFAULT 1
+);
+
+-- Filtered ads log
+CREATE TABLE IF NOT EXISTS filtered_ads_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    ad_type TEXT,
+    filtered_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+-- ===================================
+-- 15. BUSINESS EQUIVALENT FEATURES
+-- ===================================
+
+-- Quick replies
+CREATE TABLE IF NOT EXISTS quick_replies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shortcut TEXT UNIQUE NOT NULL,
+    text TEXT NOT NULL,
+    category TEXT,
+    usage_count INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_qr_shortcut ON quick_replies(shortcut);
+CREATE INDEX IF NOT EXISTS idx_qr_category ON quick_replies(category);
+
+-- Greeting configuration
+CREATE TABLE IF NOT EXISTS greeting_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled INTEGER DEFAULT 0,
+    message TEXT,
+    delay_seconds INTEGER DEFAULT 0,
+    only_first_message INTEGER DEFAULT 1
+);
+
+-- Greeting log
+CREATE TABLE IF NOT EXISTS greeting_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    sent_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_greet_user ON greeting_log(user_id);
+
+-- Away configuration
+CREATE TABLE IF NOT EXISTS away_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled INTEGER DEFAULT 0,
+    message TEXT,
+    start_time INTEGER DEFAULT 0,
+    end_time INTEGER DEFAULT 0
+);
+
+-- Away log
+CREATE TABLE IF NOT EXISTS away_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    sent_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+-- Business hours
+CREATE TABLE IF NOT EXISTS business_hours (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    schedule TEXT,  -- JSON: [{"day": 1, "open_hour": 9, "close_hour": 17}, ...]
+    timezone TEXT DEFAULT 'UTC'
+);
+
+-- Business location
+CREATE TABLE IF NOT EXISTS business_location (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    address TEXT,
+    latitude REAL DEFAULT 0,
+    longitude REAL DEFAULT 0
+);
+
+-- AI Chatbot configuration
+CREATE TABLE IF NOT EXISTS chatbot_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled INTEGER DEFAULT 0,
+    paused INTEGER DEFAULT 0,
+    system_prompt TEXT,
+    model TEXT DEFAULT 'claude',
+    max_tokens INTEGER DEFAULT 1000,
+    temperature REAL DEFAULT 0.7
+);
+
+-- Chatbot interaction log
+CREATE TABLE IF NOT EXISTS chatbot_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    user_message TEXT,
+    bot_response TEXT,
+    tokens_used INTEGER,
+    latency_ms INTEGER,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_chatbot_chat ON chatbot_log(chat_id);
+CREATE INDEX IF NOT EXISTS idx_chatbot_user ON chatbot_log(user_id);
+
+-- Voice persona (TTS)
+CREATE TABLE IF NOT EXISTS voice_persona (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    name TEXT,
+    provider TEXT,  -- elevenlabs, coqui, whisper
+    voice_id TEXT,
+    settings TEXT   -- JSON blob
+);
+
+-- Voice presets
+CREATE TABLE IF NOT EXISTS voice_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    provider TEXT,
+    voice_id TEXT,
+    settings TEXT
+);
+
+-- Video avatar (TTV)
+CREATE TABLE IF NOT EXISTS video_avatar (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    name TEXT,
+    provider TEXT,  -- heygen, d-id, sadtalker
+    avatar_path TEXT,
+    settings TEXT   -- JSON blob
+);
+
+-- Avatar presets
+CREATE TABLE IF NOT EXISTS avatar_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    provider TEXT,
+    avatar_path TEXT,
+    settings TEXT
+);
+
+-- ===================================
+-- 16. WALLET FEATURES
+-- ===================================
+
+-- Wallet budget configuration
+CREATE TABLE IF NOT EXISTS wallet_budgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT UNIQUE NOT NULL,  -- gifts, subscriptions, miniapps, etc.
+    amount REAL NOT NULL,
+    period TEXT DEFAULT 'monthly',  -- daily, weekly, monthly
+    alert_threshold REAL DEFAULT 0.8,  -- Alert at 80% spent
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+-- Wallet spending log
+CREATE TABLE IF NOT EXISTS wallet_spending (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT NOT NULL,
+    amount REAL NOT NULL,
+    description TEXT,
+    recipient_id INTEGER,
+    spent_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_spending_cat ON wallet_spending(category);
+CREATE INDEX IF NOT EXISTS idx_spending_time ON wallet_spending(spent_at);
+
+-- Miniapp budgets
+CREATE TABLE IF NOT EXISTS miniapp_budgets (
+    app_id TEXT PRIMARY KEY,
+    app_name TEXT,
+    daily_limit REAL NOT NULL,
+    monthly_limit REAL NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+-- Miniapp spending
+CREATE TABLE IF NOT EXISTS miniapp_spending (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    description TEXT,
+    spent_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_miniapp_app ON miniapp_spending(app_id);
+
+-- ===================================
+-- 17. STARS FEATURES
+-- ===================================
+
+-- Portfolio tracking (owned collectibles)
+CREATE TABLE IF NOT EXISTS portfolio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gift_id INTEGER UNIQUE NOT NULL,
+    gift_type TEXT,  -- regular, unique, limited
+    purchase_price REAL NOT NULL,
+    purchase_date INTEGER NOT NULL,
+    rarity_score REAL DEFAULT 0,
+    metadata TEXT,   -- JSON blob with gift details
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_type ON portfolio(gift_type);
+
+-- Price history for collectibles
+CREATE TABLE IF NOT EXISTS price_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gift_id INTEGER NOT NULL,
+    price REAL NOT NULL,
+    source TEXT,  -- marketplace, auction, resale
+    recorded_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_gift ON price_history(gift_id);
+CREATE INDEX IF NOT EXISTS idx_price_time ON price_history(recorded_at);
+
+-- Price alerts
+CREATE TABLE IF NOT EXISTS price_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gift_id INTEGER NOT NULL,
+    target_price REAL NOT NULL,
+    direction TEXT DEFAULT 'below',  -- below, above
+    triggered INTEGER DEFAULT 0,
+    notified INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_alerts_gift ON price_alerts(gift_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_active ON price_alerts(triggered);
+
+-- Auction alerts
+CREATE TABLE IF NOT EXISTS auction_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gift_id INTEGER NOT NULL,
+    max_bid REAL NOT NULL,
+    minutes_before INTEGER DEFAULT 5,
+    triggered INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+-- Star reactions tracking
+CREATE TABLE IF NOT EXISTS star_reactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    from_user_id INTEGER,
+    to_user_id INTEGER NOT NULL,
+    stars INTEGER NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_reactions_to ON star_reactions(to_user_id);
+CREATE INDEX IF NOT EXISTS idx_reactions_from ON star_reactions(from_user_id);
+
+-- Paid content tracking
+CREATE TABLE IF NOT EXISTS paid_content (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    content_type TEXT,  -- message, media, post
+    price INTEGER NOT NULL,
+    unlocks INTEGER DEFAULT 0,
+    revenue INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_paid_chat ON paid_content(chat_id);
+
+-- Gift collections metadata
+CREATE TABLE IF NOT EXISTS gift_collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id INTEGER UNIQUE NOT NULL,
+    name TEXT,
+    total_items INTEGER,
+    owned_items INTEGER DEFAULT 0,
+    completion_percentage REAL DEFAULT 0,
+    updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+-- ===================================
 -- DATABASE VERSION
 -- ===================================
 
@@ -440,4 +795,4 @@ CREATE TABLE IF NOT EXISTS schema_version (
     applied_at INTEGER DEFAULT (strftime('%s', 'now'))
 );
 
-INSERT OR REPLACE INTO schema_version (version) VALUES (1);
+INSERT OR REPLACE INTO schema_version (version) VALUES (2);
