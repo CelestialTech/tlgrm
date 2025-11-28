@@ -100,9 +100,149 @@ bool ChatArchiver::initializeDatabase() {
 		return true;
 	}
 
-	// Execute schema.sql file
-	QString schemaPath = QDir::current().filePath("mcp/schema.sql");
-	return executeSQLFile(schemaPath);
+	// Create essential tables directly (embedded schema)
+	const QStringList statements = {
+		// Main message archive table
+		R"(CREATE TABLE IF NOT EXISTS messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			message_id INTEGER NOT NULL,
+			chat_id INTEGER NOT NULL,
+			user_id INTEGER,
+			username TEXT,
+			first_name TEXT,
+			last_name TEXT,
+			content TEXT,
+			timestamp INTEGER NOT NULL,
+			date TEXT,
+			message_type TEXT DEFAULT 'text',
+			reply_to_message_id INTEGER,
+			forward_from_chat_id INTEGER,
+			forward_from_message_id INTEGER,
+			edit_date INTEGER,
+			media_path TEXT,
+			media_url TEXT,
+			media_size INTEGER,
+			media_mime_type TEXT,
+			has_media BOOLEAN DEFAULT 0,
+			is_forwarded BOOLEAN DEFAULT 0,
+			is_reply BOOLEAN DEFAULT 0,
+			metadata TEXT,
+			created_at INTEGER DEFAULT (strftime('%s', 'now')),
+			UNIQUE(chat_id, message_id)
+		))",
+
+		// Indexes for messages
+		R"(CREATE INDEX IF NOT EXISTS idx_messages_chat_timestamp ON messages(chat_id, timestamp DESC))",
+		R"(CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id, timestamp DESC))",
+
+		// Ephemeral messages table
+		R"(CREATE TABLE IF NOT EXISTS ephemeral_messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			message_id INTEGER NOT NULL,
+			chat_id INTEGER NOT NULL,
+			user_id INTEGER,
+			username TEXT,
+			ephemeral_type TEXT NOT NULL,
+			ttl_seconds INTEGER,
+			content TEXT,
+			media_type TEXT,
+			media_path TEXT,
+			captured_at INTEGER NOT NULL,
+			scheduled_deletion INTEGER,
+			views_count INTEGER DEFAULT 0,
+			metadata TEXT,
+			UNIQUE(chat_id, message_id)
+		))",
+
+		// Chats metadata table
+		R"(CREATE TABLE IF NOT EXISTS chats (
+			chat_id INTEGER PRIMARY KEY,
+			chat_type TEXT NOT NULL,
+			title TEXT,
+			username TEXT,
+			description TEXT,
+			member_count INTEGER,
+			photo_path TEXT,
+			is_archived BOOLEAN DEFAULT 0,
+			first_seen INTEGER,
+			last_updated INTEGER,
+			metadata TEXT
+		))",
+
+		// Chat activity summary
+		R"(CREATE TABLE IF NOT EXISTS chat_activity_summary (
+			chat_id INTEGER PRIMARY KEY,
+			total_messages INTEGER DEFAULT 0,
+			unique_users INTEGER DEFAULT 0,
+			messages_per_day REAL DEFAULT 0,
+			peak_hour INTEGER,
+			first_message_date INTEGER,
+			last_message_date INTEGER,
+			activity_trend TEXT,
+			updated_at INTEGER
+		))",
+
+		// Daily stats table
+		R"(CREATE TABLE IF NOT EXISTS message_stats_daily (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			date TEXT NOT NULL,
+			chat_id INTEGER NOT NULL,
+			message_count INTEGER DEFAULT 0,
+			unique_users INTEGER DEFAULT 0,
+			avg_message_length REAL DEFAULT 0,
+			total_words INTEGER DEFAULT 0,
+			media_count INTEGER DEFAULT 0,
+			UNIQUE(date, chat_id)
+		))",
+
+		// User activity summary
+		R"(CREATE TABLE IF NOT EXISTS user_activity_summary (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			chat_id INTEGER NOT NULL,
+			message_count INTEGER DEFAULT 0,
+			word_count INTEGER DEFAULT 0,
+			avg_message_length REAL DEFAULT 0,
+			most_active_hour INTEGER,
+			first_message_date INTEGER,
+			last_message_date INTEGER,
+			days_active INTEGER DEFAULT 0,
+			updated_at INTEGER,
+			UNIQUE(user_id, chat_id)
+		))",
+
+		// Schema version
+		R"(CREATE TABLE IF NOT EXISTS schema_version (
+			version INTEGER PRIMARY KEY,
+			applied_at INTEGER DEFAULT (strftime('%s', 'now'))
+		))",
+
+		// Trigger to update chat stats
+		R"(CREATE TRIGGER IF NOT EXISTS update_chat_stats_on_insert
+		AFTER INSERT ON messages
+		BEGIN
+			INSERT OR REPLACE INTO chat_activity_summary (
+				chat_id, total_messages, unique_users,
+				first_message_date, last_message_date, updated_at
+			)
+			SELECT NEW.chat_id, COUNT(*), COUNT(DISTINCT user_id),
+				MIN(timestamp), MAX(timestamp), strftime('%s', 'now')
+			FROM messages WHERE chat_id = NEW.chat_id;
+		END)",
+
+		// Set schema version
+		R"(INSERT OR REPLACE INTO schema_version (version) VALUES (2))"
+	};
+
+	for (const QString &statement : statements) {
+		if (!query.exec(statement)) {
+			qWarning() << "SQL Error:" << query.lastError().text();
+			qWarning() << "Statement:" << statement.left(100);
+			return false;
+		}
+	}
+
+	return true;
 }
 
 bool ChatArchiver::executeSQLFile(const QString &filePath) {
