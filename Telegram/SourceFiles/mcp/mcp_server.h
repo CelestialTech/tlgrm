@@ -190,6 +190,31 @@ private:
 	QJsonObject toolSendBotCommand(const QJsonObject &args);
 	QJsonObject toolGetBotSuggestions(const QJsonObject &args);
 
+	// Profile settings tools (5 tools)
+	QJsonObject toolGetProfileSettings(const QJsonObject &args);
+	QJsonObject toolUpdateProfileName(const QJsonObject &args);
+	QJsonObject toolUpdateProfileBio(const QJsonObject &args);
+	QJsonObject toolUpdateProfileUsername(const QJsonObject &args);
+	QJsonObject toolUpdateProfilePhone(const QJsonObject &args);
+
+	// Privacy settings tools (8 tools)
+	QJsonObject toolGetPrivacySettings(const QJsonObject &args);
+	QJsonObject toolUpdateLastSeenPrivacy(const QJsonObject &args);
+	QJsonObject toolUpdateProfilePhotoPrivacy(const QJsonObject &args);
+	QJsonObject toolUpdatePhoneNumberPrivacy(const QJsonObject &args);
+	QJsonObject toolUpdateForwardsPrivacy(const QJsonObject &args);
+	QJsonObject toolUpdateBirthdayPrivacy(const QJsonObject &args);
+	QJsonObject toolUpdateAboutPrivacy(const QJsonObject &args);
+	QJsonObject toolGetBlockedUsers(const QJsonObject &args);
+
+	// Security settings tools (6 tools)
+	QJsonObject toolGetSecuritySettings(const QJsonObject &args);
+	QJsonObject toolGetActiveSessions(const QJsonObject &args);
+	QJsonObject toolTerminateSession(const QJsonObject &args);
+	QJsonObject toolBlockUser(const QJsonObject &args);
+	QJsonObject toolUnblockUser(const QJsonObject &args);
+	QJsonObject toolUpdateAutoDeletePeriod(const QJsonObject &args);
+
 	// Stdio transport
 	void startStdioTransport();
 	void handleStdioInput();
