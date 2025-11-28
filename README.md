@@ -297,11 +297,8 @@ See [LEGAL](https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL) for d
 
 ## Support
 
-For issues specific to MCP integration:
+For issues related to this MCP integration:
 - Open an issue in this repository
-
-For general Telegram Desktop issues:
-- See official tdesktop repository
 
 ---
 
