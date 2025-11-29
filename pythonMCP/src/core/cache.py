@@ -3,7 +3,7 @@ Message caching for Telegram MCP Server.
 
 Provides:
 - In-memory message cache with LRU eviction
-- Optional SQLite persistent cache
+- Optional SQLite persistent cache for durability across restarts
 - Thread-safe operations
 - TTL-based expiration
 """
@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 import structlog
 
 from .config import CacheConfig
+from .sqlite_cache import SQLiteCache
 
 logger = structlog.get_logger()
 
@@ -53,8 +54,18 @@ class MessageCache:
         self.config = config
         self.max_messages = config.max_messages
         self.ttl = config.ttl_seconds
+        self.use_sqlite = config.use_sqlite
 
-        # Per-chat caches (chat_id -> OrderedDict of messages)
+        # SQLite backend (if enabled)
+        self._sqlite: Optional[SQLiteCache] = None
+        if self.use_sqlite:
+            self._sqlite = SQLiteCache(
+                db_path=config.db_path,
+                max_messages_per_chat=config.max_messages,
+                ttl_seconds=config.ttl_seconds,
+            )
+
+        # Per-chat caches (chat_id -> OrderedDict of messages) - only for in-memory mode
         self._cache: Dict[str, OrderedDict[str, CachedMessage]] = {}
         self._lock = asyncio.Lock()
 
@@ -63,6 +74,7 @@ class MessageCache:
             max_messages=self.max_messages,
             ttl_seconds=self.ttl,
             use_sqlite=config.use_sqlite,
+            backend="sqlite" if config.use_sqlite else "memory",
         )
 
     async def get_messages(
@@ -80,6 +92,11 @@ class MessageCache:
         Returns:
             List of message dictionaries
         """
+        # Delegate to SQLite if enabled
+        if self._sqlite:
+            return await self._sqlite.get_messages(chat_id, limit)
+
+        # In-memory implementation
         async with self._lock:
             if chat_id not in self._cache:
                 return []
@@ -114,6 +131,12 @@ class MessageCache:
             message_id: Message ID
             message_data: Message data dictionary
         """
+        # Delegate to SQLite if enabled
+        if self._sqlite:
+            await self._sqlite.add_message(chat_id, message_id, message_data)
+            return
+
+        # In-memory implementation
         async with self._lock:
             # Create chat cache if not exists
             if chat_id not in self._cache:
@@ -149,6 +172,13 @@ class MessageCache:
         Args:
             chat_id: Chat ID
         """
+        # Delegate to SQLite if enabled
+        if self._sqlite:
+            await self._sqlite.clear_chat(chat_id)
+            logger.debug("message_cache.cleared", chat_id=chat_id)
+            return
+
+        # In-memory implementation
         async with self._lock:
             if chat_id in self._cache:
                 del self._cache[chat_id]
@@ -157,6 +187,13 @@ class MessageCache:
 
     async def clear_all(self) -> None:
         """Clear entire cache."""
+        # Delegate to SQLite if enabled
+        if self._sqlite:
+            await self._sqlite.clear_all()
+            logger.info("message_cache.cleared_all")
+            return
+
+        # In-memory implementation
         async with self._lock:
             self._cache.clear()
 
@@ -172,6 +209,11 @@ class MessageCache:
         if self.ttl == 0:
             return 0
 
+        # Delegate to SQLite if enabled
+        if self._sqlite:
+            return await self._sqlite.cleanup_expired()
+
+        # In-memory implementation
         removed_count = 0
         current_time = time.time()
 
@@ -203,13 +245,18 @@ class MessageCache:
 
         return removed_count
 
-    def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> Dict[str, Any]:
         """
         Get cache statistics.
 
         Returns:
             Statistics dictionary
         """
+        # Delegate to SQLite if enabled
+        if self._sqlite:
+            return await self._sqlite.get_stats()
+
+        # In-memory implementation
         total_messages = sum(len(chat_cache) for chat_cache in self._cache.values())
 
         return {

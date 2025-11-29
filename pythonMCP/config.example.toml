@@ -1,0 +1,53 @@
+# Example Configuration for pythonMCP
+# Copy to config.toml and customize for your environment
+
+[telegram]
+# Get credentials from https://my.telegram.org
+api_id_env_var = "TELEGRAM_API_ID"
+api_hash_env_var = "TELEGRAM_API_HASH"
+bot_token_env_var = "TELEGRAM_BOT_TOKEN"  # Optional, for bot mode
+session_name = "telegram_mcp"
+
+# Whitelists (optional)
+allowed_chats = []
+allowed_users = []
+
+[mcp]
+server_name = "Telegram MCP Server"
+server_version = "0.1.0"
+transport = "stdio"
+port = 8000
+log_level = "INFO"
+
+[cache]
+max_messages = 50
+ttl_seconds = 300
+use_sqlite = false
+db_path = "telegram_cache.db"
+
+[limits]
+default_message_limit = 20
+max_message_limit = 100
+
+[features]
+enable_ai_features = true
+enable_translation = true
+enable_sentiment = true
+enable_webhooks = false
+enable_voice_info = true
+
+[monitoring]
+# Enable Prometheus metrics collection
+enable_metrics = true
+enable_prometheus = true
+metrics_port = 9090  # Prometheus metrics endpoint at http://localhost:9090/metrics
+
+# Enable health check endpoint
+enable_health_check = true
+health_check_port = 8080  # Health check at http://localhost:8080/health/ready
+
+[retry]
+max_retries = 3
+initial_backoff = 1.0
+max_backoff = 30.0
+backoff_multiplier = 2.0

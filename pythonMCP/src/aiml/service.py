@@ -11,7 +11,6 @@ Provides semantic understanding capabilities:
 Optimized for Apple Silicon (MPS acceleration).
 """
 
-import asyncio
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -186,11 +185,49 @@ class AIMLService:
         messages: List[str],
         max_length: int = 150
     ) -> str:
-        """Generate a summary of a conversation"""
-        # Placeholder for summarization
-        # Could use BART, T5, or GPT-based summarization
-        conversation_text = "\n".join(messages[-20:])  # Last 20 messages
-        return f"Summary: {conversation_text[:max_length]}..."
+        """Generate a summary of a conversation using BART"""
+        if not messages:
+            return "No messages to summarize."
+
+        try:
+            # Use last 20 messages to avoid overwhelming the model
+            recent_messages = messages[-20:]
+            conversation_text = "\n".join(recent_messages)
+
+            # Truncate if too long (BART has 1024 token limit)
+            if len(conversation_text) > 3000:
+                conversation_text = conversation_text[:3000] + "..."
+
+            # Initialize summarization pipeline
+            device = self.config.get("device", "mps" if torch.backends.mps.is_available() else "cpu")
+            device_id = 0 if device == "mps" else -1
+
+            summarizer = pipeline(
+                "summarization",
+                model="facebook/bart-large-cnn",
+                device=device_id
+            )
+
+            # Generate summary
+            summary_result = summarizer(
+                conversation_text,
+                max_length=max_length,
+                min_length=30,
+                do_sample=False
+            )
+
+            summary_text = summary_result[0]['summary_text']
+            logger.info("aiml.summarization_success",
+                       message_count=len(messages),
+                       summary_length=len(summary_text))
+
+            return summary_text
+
+        except Exception as e:
+            logger.error("aiml.summarization_failed", error=str(e))
+            # Fallback to simple truncation
+            fallback_text = " ".join(messages[-10:])
+            return f"Summary: {fallback_text[:max_length]}..."
 
 
 # Global service instance

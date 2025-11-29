@@ -1,0 +1,156 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+
+    - name: Install dependencies (minimal)
+      run: |
+        uv venv
+        uv pip install -r requirements-minimal.txt
+
+    - name: Install test dependencies
+      run: |
+        uv pip install pytest pytest-cov pytest-asyncio
+
+    - name: Run tests with coverage
+      run: |
+        source .venv/bin/activate
+        pytest tests/ --cov=src --cov-report=xml --cov-report=term -v -k "not aiml"
+
+    - name: Upload coverage to Codecov
+      if: matrix.python-version == '3.12'
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  test-full:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        python-version: ['3.12']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+
+    - name: Install full dependencies
+      run: |
+        uv venv
+        uv pip install -r requirements.txt
+        uv pip install pytest pytest-cov pytest-asyncio
+
+    - name: Download spaCy model
+      run: |
+        source .venv/bin/activate
+        python -m spacy download en_core_web_sm
+
+    - name: Run full test suite (including AI/ML)
+      run: |
+        source .venv/bin/activate
+        pytest tests/ --cov=src --cov-report=xml --cov-report=term -v
+
+    - name: Upload full coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        flags: full-test-suite
+        name: codecov-full
+        fail_ci_if_error: false
+
+  lint:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+
+    - name: Install linting tools
+      run: |
+        uv venv
+        uv pip install ruff mypy
+
+    - name: Run ruff (linter)
+      run: |
+        source .venv/bin/activate
+        ruff check src/ tests/
+      continue-on-error: true
+
+    - name: Run mypy (type checker)
+      run: |
+        source .venv/bin/activate
+        mypy src/ --ignore-missing-imports
+      continue-on-error: true
+
+  security:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+
+    - name: Install security tools
+      run: |
+        uv venv
+        uv pip install safety bandit
+
+    - name: Check dependencies for known security vulnerabilities
+      run: |
+        source .venv/bin/activate
+        safety check --json || true
+      continue-on-error: true
+
+    - name: Run bandit security linter
+      run: |
+        source .venv/bin/activate
+        bandit -r src/ -f json || true
+      continue-on-error: true

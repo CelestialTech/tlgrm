@@ -1,0 +1,90 @@
+{
+  "timestamp": "2025-11-27T04:32:42.713595",
+  "iterations": 100,
+  "results": {
+    "health_liveness": {
+      "name": "health_check_liveness",
+      "count": 100,
+      "errors": 0,
+      "min_ms": 0.31113624572753906,
+      "max_ms": 9.353876113891602,
+      "mean_ms": 0.501549243927002,
+      "median_ms": 0.38683414459228516,
+      "p95_ms": 0.6011486053466797,
+      "p99_ms": 9.267575740814209,
+      "stddev_ms": 0.8976370898125742,
+      "total_time_s": 0.05018210411071777,
+      "status": "success"
+    },
+    "health_readiness": {
+      "name": "health_check_readiness",
+      "count": 100,
+      "errors": 0,
+      "min_ms": 0.2918243408203125,
+      "max_ms": 0.5130767822265625,
+      "mean_ms": 0.3304743766784668,
+      "median_ms": 0.3273487091064453,
+      "p95_ms": 0.3600955009460449,
+      "p99_ms": 0.5119752883911133,
+      "stddev_ms": 0.02617504599377854,
+      "total_time_s": 0.03307223320007324,
+      "status": "success"
+    },
+    "health_components": {
+      "name": "health_check_components",
+      "count": 100,
+      "errors": 0,
+      "min_ms": 0.2779960632324219,
+      "max_ms": 0.5548000335693359,
+      "mean_ms": 0.3098893165588379,
+      "median_ms": 0.3058910369873047,
+      "p95_ms": 0.33774375915527344,
+      "p99_ms": 0.5531144142150879,
+      "stddev_ms": 0.029199246488738007,
+      "total_time_s": 0.031018972396850586,
+      "status": "success"
+    },
+    "prometheus_metrics": {
+      "name": "prometheus_metrics_scrape",
+      "count": 100,
+      "errors": 0,
+      "min_ms": 0.34999847412109375,
+      "max_ms": 0.5600452423095703,
+      "mean_ms": 0.38599729537963867,
+      "median_ms": 0.38039684295654297,
+      "p95_ms": 0.43479204177856445,
+      "p99_ms": 0.5595850944519043,
+      "stddev_ms": 0.029849948685877335,
+      "total_time_s": 0.03862500190734863,
+      "status": "success"
+    },
+    "component_health_check": {
+      "name": "component_health_check",
+      "count": 100,
+      "errors": 0,
+      "min_ms": 0.0,
+      "max_ms": 0.0057220458984375,
+      "mean_ms": 0.0008559226989746094,
+      "median_ms": 0.00095367431640625,
+      "p95_ms": 0.0011920928955078125,
+      "p99_ms": 0.005676746368408203,
+      "stddev_ms": 0.0006403676446898776,
+      "total_time_s": 9.894371032714844e-05,
+      "status": "success"
+    },
+    "metrics_recording": {
+      "name": "metrics_record_operation",
+      "count": 100,
+      "errors": 0,
+      "min_ms": 0.012636184692382812,
+      "max_ms": 0.06318092346191406,
+      "mean_ms": 0.014290809631347656,
+      "median_ms": 0.013113021850585938,
+      "p95_ms": 0.01806020736694336,
+      "p99_ms": 0.06278753280639648,
+      "stddev_ms": 0.005168438362363425,
+      "total_time_s": 0.0014371871948242188,
+      "status": "success"
+    }
+  }
+}

@@ -1,0 +1,87 @@
+Example Configuration Validation Error Output
+==============================================
+
+This shows what users will see when configuration validation fails.
+
+Example 1: Missing Environment Variables
+-----------------------------------------
+
+Configuration validation failed:
+
+  1. Missing required environment variable: TELEGRAM_API_ID
+     Fix: Set TELEGRAM_API_ID in your .env file or environment.
+     Obtain from: https://my.telegram.org/apps
+
+  2. Missing required environment variable: TELEGRAM_API_HASH
+     Fix: Set TELEGRAM_API_HASH in your .env file or environment.
+     Obtain from: https://my.telegram.org/apps
+
+
+Example 2: Invalid API ID
+--------------------------
+
+Configuration validation failed:
+
+  1. Invalid TELEGRAM_API_ID: must be numeric (got: 'not_a_number')
+     Fix: Set TELEGRAM_API_ID to a valid numeric API ID.
+     Obtain from: https://my.telegram.org/apps
+
+
+Example 3: Port Issues
+----------------------
+
+Configuration validation failed:
+
+  1. Invalid health_check_port: 100
+     Fix: Set health_check_port to a value between 1024 and 65535
+
+  2. Invalid metrics_port: 70000
+     Fix: Set metrics_port to a value between 1024 and 65535
+
+
+Example 4: Port Conflicts
+--------------------------
+
+Configuration validation failed:
+
+  1. Port conflict: metrics_port and health_check_port cannot be the same (8080)
+     Fix: Set metrics_port and health_check_port to different values
+
+
+Example 5: Invalid Cache Path
+------------------------------
+
+Configuration validation failed:
+
+  1. Cache database parent directory does not exist: /nonexistent/directory
+     Fix: Create the directory: mkdir -p /nonexistent/directory
+
+
+Example 6: Multiple Issues
+---------------------------
+
+Configuration validation failed:
+
+  1. Missing required environment variable: TELEGRAM_API_ID
+     Fix: Set TELEGRAM_API_ID in your .env file or environment.
+     Obtain from: https://my.telegram.org/apps
+
+  2. Invalid TELEGRAM_API_HASH: cannot be empty or whitespace only
+     Fix: Set TELEGRAM_API_HASH to a valid API hash.
+     Obtain from: https://my.telegram.org/apps
+
+  3. Invalid health_check_port: 500
+     Fix: Set health_check_port to a value between 1024 and 65535
+
+  4. Cache database parent directory does not exist: /tmp/nonexistent
+     Fix: Create the directory: mkdir -p /tmp/nonexistent
+
+
+Successful Validation
+---------------------
+
+When configuration is valid, you'll see:
+
+2025-11-26 16:00:00 [info     ] config.loaded              environment=prod server_name=Telegram MCP Server version=0.1.0
+
+No errors are displayed, and the server starts normally.

@@ -114,6 +114,7 @@ class MonitoringConfig:
     metrics_port: int = 9090
     enable_prometheus: bool = True
     enable_health_check: bool = True
+    health_check_port: int = 8080
 
 
 @dataclass
@@ -138,6 +139,20 @@ class Config:
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     retry: RetryConfig = field(default_factory=RetryConfig)
 
+    @classmethod
+    def from_file(cls, config_path: Path, environment: str = "default") -> "Config":
+        """
+        Load configuration from TOML file.
+
+        Args:
+            config_path: Path to configuration file
+            environment: Environment name (default, dev, prod)
+
+        Returns:
+            Config instance
+        """
+        return load_config(str(config_path), environment)
+
 
 def load_config(
     config_path: Optional[str] = None,
@@ -152,7 +167,13 @@ def load_config(
 
     Returns:
         Config instance
+
+    Raises:
+        ConfigurationError: If configuration validation fails
     """
+    # Import here to avoid circular dependency
+    from .validation import ConfigurationError, validate_config
+
     # Determine config file path
     if config_path is None:
         if environment == "dev":
@@ -211,6 +232,19 @@ def load_config(
         monitoring=monitoring_config,
         retry=retry_config,
     )
+
+    # Validate configuration
+    validation_errors = validate_config(config)
+    if validation_errors:
+        error_message = "\n\nConfiguration validation failed:\n\n" + "\n\n".join(
+            f"  {i+1}. {error}" for i, error in enumerate(validation_errors)
+        )
+        logger.error(
+            "config.validation_failed",
+            error_count=len(validation_errors),
+            errors=validation_errors,
+        )
+        raise ConfigurationError(error_message)
 
     logger.info(
         "config.loaded",

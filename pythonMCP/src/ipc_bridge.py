@@ -11,7 +11,6 @@ to access advanced features:
 This provides much faster access than API calls and works offline.
 """
 
-import asyncio
 import json
 import socket
 from typing import Dict, Any, List, Optional
@@ -295,6 +294,365 @@ class TDesktopBridge:
             "socket_path": self.socket_path,
             "request_count": self._request_id,
         }
+
+    # ==================== Batch Operations ====================
+
+    async def batch_operation(
+        self,
+        operation: str,
+        targets: List[int],
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Execute a batch operation on multiple targets.
+
+        Args:
+            operation: Operation type (mark_read, archive, mute, delete, etc.)
+            targets: List of chat IDs to apply operation to
+            options: Additional options for the operation
+
+        Returns:
+            Results with success/failure per target
+        """
+        params = {
+            "operation": operation,
+            "targets": targets,
+        }
+        if options:
+            params["options"] = options
+
+        return await self.call_method("batch_operation", params)
+
+    async def batch_forward_messages(
+        self,
+        source_chat_id: int,
+        message_ids: List[int],
+        target_chat_ids: List[int],
+    ) -> Dict[str, Any]:
+        """
+        Forward multiple messages to multiple chats.
+
+        Args:
+            source_chat_id: Source chat ID
+            message_ids: List of message IDs to forward
+            target_chat_ids: List of target chat IDs
+
+        Returns:
+            Forward results per target
+        """
+        return await self.call_method("batch_forward_messages", {
+            "source_chat_id": source_chat_id,
+            "message_ids": message_ids,
+            "target_chat_ids": target_chat_ids,
+        })
+
+    async def batch_delete_messages(
+        self,
+        chat_id: int,
+        message_ids: List[int],
+        revoke: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Delete multiple messages at once.
+
+        Args:
+            chat_id: Chat ID containing the messages
+            message_ids: List of message IDs to delete
+            revoke: Whether to delete for everyone
+
+        Returns:
+            Deletion results
+        """
+        return await self.call_method("batch_delete_messages", {
+            "chat_id": chat_id,
+            "message_ids": message_ids,
+            "revoke": revoke,
+        })
+
+    # ==================== Message Scheduler ====================
+
+    async def schedule_message(
+        self,
+        chat_id: int,
+        text: str,
+        send_at: int,
+    ) -> Dict[str, Any]:
+        """
+        Schedule a message for later delivery.
+
+        Args:
+            chat_id: Target chat ID
+            text: Message text
+            send_at: Unix timestamp for delivery
+
+        Returns:
+            Scheduled message info
+        """
+        return await self.call_method("schedule_message", {
+            "chat_id": chat_id,
+            "text": text,
+            "send_at": send_at,
+        })
+
+    async def list_scheduled_messages(
+        self,
+        chat_id: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        List all scheduled messages for a chat.
+
+        Args:
+            chat_id: Chat ID to list scheduled messages for
+
+        Returns:
+            List of scheduled messages
+        """
+        result = await self.call_method("list_scheduled_messages", {
+            "chat_id": chat_id,
+        })
+        return result.get("scheduled_messages", [])
+
+    async def cancel_scheduled_message(
+        self,
+        chat_id: int,
+        message_id: int,
+    ) -> Dict[str, Any]:
+        """
+        Cancel a scheduled message.
+
+        Args:
+            chat_id: Chat ID
+            message_id: Scheduled message ID
+
+        Returns:
+            Cancellation result
+        """
+        return await self.call_method("cancel_scheduled_message", {
+            "chat_id": chat_id,
+            "message_id": message_id,
+        })
+
+    # ==================== Message Tags ====================
+
+    async def tag_message(
+        self,
+        chat_id: int,
+        message_id: int,
+        tag: str,
+    ) -> Dict[str, Any]:
+        """
+        Add a tag to a message.
+
+        Args:
+            chat_id: Chat ID
+            message_id: Message ID
+            tag: Tag name to add
+
+        Returns:
+            Tagging result
+        """
+        return await self.call_method("tag_message", {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "tag": tag,
+        })
+
+    async def get_message_tags(
+        self,
+        chat_id: int,
+        message_id: int,
+    ) -> List[str]:
+        """
+        Get all tags for a message.
+
+        Args:
+            chat_id: Chat ID
+            message_id: Message ID
+
+        Returns:
+            List of tag names
+        """
+        result = await self.call_method("get_message_tags", {
+            "chat_id": chat_id,
+            "message_id": message_id,
+        })
+        return result.get("tags", [])
+
+    async def remove_message_tag(
+        self,
+        chat_id: int,
+        message_id: int,
+        tag: str,
+    ) -> Dict[str, Any]:
+        """
+        Remove a tag from a message.
+
+        Args:
+            chat_id: Chat ID
+            message_id: Message ID
+            tag: Tag name to remove
+
+        Returns:
+            Removal result
+        """
+        return await self.call_method("remove_message_tag", {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "tag": tag,
+        })
+
+    async def list_tags(self) -> List[Dict[str, Any]]:
+        """
+        List all available tags.
+
+        Returns:
+            List of tags with name, color, count
+        """
+        result = await self.call_method("list_tags", {})
+        return result.get("tags", [])
+
+    async def get_tagged_messages(
+        self,
+        tag: str,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all messages with a specific tag.
+
+        Args:
+            tag: Tag name to search for
+            limit: Maximum number of results
+
+        Returns:
+            List of tagged messages
+        """
+        result = await self.call_method("get_tagged_messages", {
+            "tag": tag,
+            "limit": limit,
+        })
+        return result.get("messages", [])
+
+    # ==================== Translation ====================
+
+    async def translate_message(
+        self,
+        chat_id: int,
+        message_id: int,
+        target_language: str,
+    ) -> Dict[str, Any]:
+        """
+        Translate a message to another language.
+
+        Args:
+            chat_id: Chat ID
+            message_id: Message ID
+            target_language: Target language code (e.g., 'en', 'es', 'ru')
+
+        Returns:
+            Translation result with original and translated text
+        """
+        return await self.call_method("translate_message", {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "target_language": target_language,
+        })
+
+    async def get_translation_languages(self) -> List[Dict[str, str]]:
+        """
+        Get list of supported translation languages.
+
+        Returns:
+            List of languages with code and name
+        """
+        result = await self.call_method("get_translation_languages", {})
+        return result.get("languages", [])
+
+    async def configure_auto_translate(
+        self,
+        chat_id: int,
+        enabled: bool,
+        target_language: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Configure auto-translation for a chat.
+
+        Args:
+            chat_id: Chat ID
+            enabled: Whether to enable auto-translation
+            target_language: Target language for auto-translation
+
+        Returns:
+            Configuration result
+        """
+        params = {
+            "chat_id": chat_id,
+            "enabled": enabled,
+        }
+        if target_language:
+            params["target_language"] = target_language
+
+        return await self.call_method("configure_auto_translate", params)
+
+    # ==================== Voice Transcription ====================
+
+    async def transcribe_voice_message(
+        self,
+        chat_id: int,
+        message_id: int,
+    ) -> Dict[str, Any]:
+        """
+        Transcribe a voice message.
+
+        Args:
+            chat_id: Chat ID
+            message_id: Voice message ID
+
+        Returns:
+            Transcription result with text and confidence
+        """
+        return await self.call_method("transcribe_voice_message", {
+            "chat_id": chat_id,
+            "message_id": message_id,
+        })
+
+    async def get_transcription_status(
+        self,
+        task_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Get status of a transcription task.
+
+        Args:
+            task_id: Transcription task ID
+
+        Returns:
+            Task status and result if complete
+        """
+        return await self.call_method("get_transcription_status", {
+            "task_id": task_id,
+        })
+
+    async def get_transcription_history(
+        self,
+        chat_id: Optional[int] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get history of transcribed messages.
+
+        Args:
+            chat_id: Optional chat ID to filter by
+            limit: Maximum number of results
+
+        Returns:
+            List of transcription records
+        """
+        params = {"limit": limit}
+        if chat_id:
+            params["chat_id"] = chat_id
+
+        result = await self.call_method("get_transcription_history", params)
+        return result.get("transcriptions", [])
 
 
 # Global instance (optional)

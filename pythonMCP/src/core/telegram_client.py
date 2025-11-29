@@ -10,7 +10,6 @@ This provides FULL Telegram access (not limited Bot API):
 """
 
 import asyncio
-from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 import structlog
