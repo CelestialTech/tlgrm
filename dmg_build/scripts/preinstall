@@ -1,0 +1,46 @@
+#!/bin/bash
+# Preinstall script for initiate.pkg
+# Cleans up staging directory and existing ~/tdata if present
+
+echo "Preparing for tdata installation..."
+
+# Staging location (must match create_beautiful_dmg.sh and postinstall)
+STAGING_DIR="/private/tmp/tlgrm_tdata_staging"
+
+# Clean up any leftover staging directory from previous failed installs
+if [ -d "$STAGING_DIR" ]; then
+    echo "Cleaning up leftover staging directory..."
+    rm -rf "$STAGING_DIR"
+fi
+
+# Get the actual user's home directory
+if [ -n "$USER" ] && [ "$USER" != "root" ]; then
+    ACTUAL_USER="$USER"
+elif [ -n "$SUDO_USER" ]; then
+    ACTUAL_USER="$SUDO_USER"
+else
+    ACTUAL_USER=$(stat -f '%Su' /dev/console)
+fi
+
+USER_HOME=$(eval echo "~$ACTUAL_USER")
+EXISTING_TDATA="$USER_HOME/tdata"
+
+echo "Installing user: $ACTUAL_USER"
+echo "Checking for existing tdata at: $EXISTING_TDATA"
+
+# Remove existing tdata directory if present
+if [ -d "$EXISTING_TDATA" ]; then
+    echo "Found existing tdata directory"
+    echo "Removing it to ensure clean installation..."
+    rm -rf "$EXISTING_TDATA"
+    if [ $? -eq 0 ]; then
+        echo "Successfully removed existing tdata directory"
+    else
+        echo "WARNING: Failed to remove existing tdata directory"
+        # Don't fail - postinstall will try to handle this
+    fi
+else
+    echo "No existing tdata directory found. Proceeding with installation."
+fi
+
+exit 0

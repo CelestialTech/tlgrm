@@ -1,279 +1,197 @@
 #!/bin/bash
-# Create a beautiful DMG installer for Tlgrm
+# Beautiful DMG creation script for Tlgrm with README files and beige background
 
 set -e
 
-echo "Creating enhanced Tlgrm DMG installer..."
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+BUILD_DIR="$SCRIPT_DIR/tdesktop/out/Release"
+APP_NAME="Tlgrm"
+APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
+DMG_OUTPUT_DIR="$SCRIPT_DIR/dmg_build"
+DMG_STAGING="$SCRIPT_DIR/dmg_build/staging"
+VERSION=$(date +"%Y.%m.%d")
+DMG_NAME="${APP_NAME}_${VERSION}.dmg"
+DMG_PATH="$DMG_OUTPUT_DIR/$DMG_NAME"
+BACKGROUND="$DMG_OUTPUT_DIR/dmg_background.png"
+README_EN="$DMG_OUTPUT_DIR/README_EN.txt"
+README_RU="$DMG_OUTPUT_DIR/README_RU.txt"
+PKG_FILE="$DMG_OUTPUT_DIR/initiate.pkg"
 
-# Configuration
-DMG_NAME="Tlgrm"
-VOLUME_NAME="Tlgrm"
-SOURCE_DIR="dmg_build"
-FINAL_DMG="${DMG_NAME}.dmg"
-TEMP_DMG="${DMG_NAME}-temp.dmg"
-
-# Clean up any existing build
-rm -rf "${SOURCE_DIR}"
-mkdir -p "${SOURCE_DIR}/.background"
-
-echo "=== Copying files to staging directory ==="
-
-# Copy app (use ditto to preserve bundle structure)
-echo "Copying Tlgrm.app..."
-ditto tdesktop/out/Release/Tlgrm.app "${SOURCE_DIR}/Tlgrm.app"
-
-# Copy session installer
-echo "Copying initiate.pkg..."
-cp initiate.pkg "${SOURCE_DIR}/"
-
-# Copy README files
-echo "Copying README files..."
-cp DMG_README.md "${SOURCE_DIR}/README.md"
-cp ПРОЧТИ.md "${SOURCE_DIR}/ПРОЧТИ.md"
-
-# Create Applications symlink
-echo "Creating Applications symlink..."
-ln -s /Applications "${SOURCE_DIR}/Applications"
-
-# Create background with arrow and instructions
-echo "Creating background with installation arrow..."
-
-python3 << 'PYTHON_EOF'
-from PIL import Image, ImageDraw, ImageFont
-
-# Create beige background
-width, height = 880, 540
-bg_color = (245, 245, 220)  # Beige
-img = Image.new('RGB', (width, height), bg_color)
-draw = ImageDraw.Draw(img)
-
-# Draw arrow from app position (160, 200) to Applications (480, 200)
-arrow_color = (100, 100, 100)  # Gray
-arrow_y = 180
-arrow_start_x = 220
-arrow_end_x = 420
-
-# Draw arrow line
-draw.line([(arrow_start_x, arrow_y), (arrow_end_x, arrow_y)], fill=arrow_color, width=3)
-
-# Draw arrowhead
-arrow_head = [
-    (arrow_end_x, arrow_y),
-    (arrow_end_x - 15, arrow_y - 10),
-    (arrow_end_x - 15, arrow_y + 10)
-]
-draw.polygon(arrow_head, fill=arrow_color)
-
-# Add text "Drag to install"
-try:
-    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 16)
-except:
-    font = ImageFont.load_default()
-
-text = "Drag to install"
-# Get text bbox for centering
-bbox = draw.textbbox((0, 0), text, font=font)
-text_width = bbox[2] - bbox[0]
-text_x = (arrow_start_x + arrow_end_x - text_width) // 2
-text_y = arrow_y - 30
-
-draw.text((text_x, text_y), text, fill=arrow_color, font=font)
-
-# Save
-img.save('/tmp/beige_bg.png')
-print("Created background with arrow")
-PYTHON_EOF
-
-# Move the background to the DMG staging area
-if [ -f /tmp/beige_bg.png ]; then
-    mv /tmp/beige_bg.png "${SOURCE_DIR}/.background/background.png"
-    echo "Created beige background with arrow (880x540)"
-else
-    echo "Warning: Python failed, using simple beige background"
-    # Fallback: simple beige
-    printf '\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90\x77\x53\xde\x00\x00\x00\x0c\x49\x44\x41\x54\x08\xd7\x63\xf8\xcf\xc0\xf0\x9f\x01\x00\x04\x84\x01\xfe\x0e\xb4\x96\xef\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82' > /tmp/beige_1x1.png
-    sips -z 540 880 /tmp/beige_1x1.png --out "${SOURCE_DIR}/.background/background.png" >/dev/null 2>&1
-fi
-
-rm -f /tmp/beige_1x1.png
-
-echo "=== Creating temporary DMG ==="
-# Create temporary DMG
-hdiutil create -srcfolder "${SOURCE_DIR}" -volname "${VOLUME_NAME}" -fs HFS+ \
-    -fsargs "-c c=64,a=16,e=16" -format UDRW -size 2000m "${TEMP_DMG}"
-
-echo "=== Mounting temporary DMG ==="
-# Mount it
-DEVICE=$(hdiutil attach -readwrite -noverify -noautoopen "${TEMP_DMG}" | \
-    egrep '^/dev/' | sed 1q | awk '{print $1}')
-
-echo "Device: ${DEVICE}"
-sleep 2
-
-echo "=== Customizing DMG appearance with AppleScript ==="
-# Customize appearance with AppleScript
-cat > /tmp/dmg_style.applescript << 'APPLESCRIPT_EOF'
-tell application "Finder"
-    tell disk "Tlgrm"
-        open
-        set current view of container window to icon view
-        set toolbar visible of container window to false
-        set statusbar visible of container window to false
-        set the bounds of container window to {100, 100, 980, 640}
-        set viewOptions to the icon view options of container window
-        set arrangement of viewOptions to not arranged
-        set icon size of viewOptions to 128
-        set background picture of viewOptions to file ".background:background.png"
-
-        -- Position icons
-        set position of item "Tlgrm.app" of container window to {160, 200}
-        set position of item "Applications" of container window to {480, 200}
-        set position of item "initiate.pkg" of container window to {320, 350}
-        set position of item "README.md" of container window to {580, 420}
-        set position of item "ПРОЧТИ.md" of container window to {740, 420}
-
-        close
-        open
-        update without registering applications
-        delay 2
-    end tell
-end tell
-APPLESCRIPT_EOF
-
-# Run AppleScript
-osascript /tmp/dmg_style.applescript || {
-    echo "Warning: AppleScript customization failed, DMG will have default appearance"
-}
-
-sleep 2
-
-# Make sure everything is synced
-sync
-
-echo "=== Unmounting DMG ==="
-hdiutil detach "${DEVICE}"
-sleep 1
-
-echo "=== Converting to compressed DMG ==="
-# Convert to compressed, read-only image
-rm -f "${FINAL_DMG}"
-hdiutil convert "${TEMP_DMG}" -format UDZO -imagekey zlib-level=9 -o "${FINAL_DMG}"
-
-# Clean up
-rm -f "${TEMP_DMG}"
-rm -f /tmp/dmg_style.applescript
-rm -f /tmp/beige_bg.png
-
-# Get final size
-DMG_SIZE=$(du -h "${FINAL_DMG}" | awk '{print $1}')
-
+echo "========================================="
+echo "Tlgrm Beautiful DMG Creation"
+echo "========================================="
 echo ""
-echo "=== Validating DMG ==="
-# Mount the DMG for validation
-VALIDATION_DEVICE=$(hdiutil attach -readonly -noverify -noautoopen "${FINAL_DMG}" | \
-    egrep '^/dev/' | sed 1q | awk '{print $1}')
 
-if [ -z "${VALIDATION_DEVICE}" ]; then
-    echo "ERROR: Failed to mount DMG for validation"
+# Check if app bundle exists
+if [ ! -d "$APP_BUNDLE" ]; then
+    echo "Error: App bundle not found at $APP_BUNDLE"
     exit 1
 fi
 
-VALIDATION_FAILED=0
-
-# Check app bundle exists
-if [ ! -d "/Volumes/${VOLUME_NAME}/Tlgrm.app" ]; then
-    echo "✗ FAILED: Tlgrm.app not found in DMG"
-    VALIDATION_FAILED=1
-else
-    echo "✓ Tlgrm.app bundle exists"
+# Check if background exists
+if [ ! -f "$BACKGROUND" ]; then
+    echo "Error: Background image not found at $BACKGROUND"
+    exit 1
 fi
 
-# Check executable exists
-if [ ! -f "/Volumes/${VOLUME_NAME}/Tlgrm.app/Contents/MacOS/Tlgrm" ]; then
-    echo "✗ FAILED: Tlgrm executable not found"
-    VALIDATION_FAILED=1
-else
-    echo "✓ Tlgrm executable exists"
-fi
-
-# Check Resources directory exists
-if [ ! -d "/Volumes/${VOLUME_NAME}/Tlgrm.app/Contents/Resources" ]; then
-    echo "✗ FAILED: Resources directory not found"
-    VALIDATION_FAILED=1
-else
-    echo "✓ Resources directory exists"
-
-    # Count resource files
-    RESOURCE_COUNT=$(find "/Volumes/${VOLUME_NAME}/Tlgrm.app/Contents/Resources" -type f | wc -l | xargs)
-    echo "  Found ${RESOURCE_COUNT} resource files"
-
-    if [ "${RESOURCE_COUNT}" -lt 10 ]; then
-        echo "✗ WARNING: Very few resources found, app may be incomplete"
-        VALIDATION_FAILED=1
+# Get app version from Info.plist
+if [ -f "$APP_BUNDLE/Contents/Info.plist" ]; then
+    PLIST_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || echo "")
+    if [ -n "$PLIST_VERSION" ]; then
+        VERSION="$PLIST_VERSION"
+        DMG_NAME="${APP_NAME}_${VERSION}.dmg"
+        DMG_PATH="$DMG_OUTPUT_DIR/$DMG_NAME"
     fi
 fi
 
-# Check Frameworks directory if it should exist
-if [ -d "tdesktop/out/Release/Tlgrm.app/Contents/Frameworks" ]; then
-    if [ ! -d "/Volumes/${VOLUME_NAME}/Tlgrm.app/Contents/Frameworks" ]; then
-        echo "✗ FAILED: Frameworks directory not found (exists in source)"
-        VALIDATION_FAILED=1
+# Create output directory
+mkdir -p "$DMG_OUTPUT_DIR"
+
+# ========================================
+# Create initiate.pkg from ~/tdata.zip
+# ========================================
+TDATA_ZIP="$HOME/tdata.zip"
+TDATA_TEMP="$DMG_OUTPUT_DIR/tdata_temp"
+
+if [ -f "$TDATA_ZIP" ]; then
+    echo "========================================="
+    echo "Creating initiate.pkg from tdata.zip"
+    echo "========================================="
+
+    # Clean up any existing temp directory
+    rm -rf "$TDATA_TEMP"
+    mkdir -p "$TDATA_TEMP"
+
+    # Extract tdata.zip to temp directory
+    echo "Extracting $TDATA_ZIP..."
+    unzip -q "$TDATA_ZIP" -d "$TDATA_TEMP"
+
+    # Verify tdata directory exists in extracted files
+    if [ ! -d "$TDATA_TEMP/tdata" ]; then
+        echo "Error: tdata directory not found in $TDATA_ZIP"
+        echo "Expected structure: tdata.zip containing tdata/ folder"
+        rm -rf "$TDATA_TEMP"
+        exit 1
+    fi
+
+    # Remove old pkg if exists
+    [ -f "$PKG_FILE" ] && rm -f "$PKG_FILE"
+
+    # Create package using pkgbuild with scripts
+    # IMPORTANT: Use a fixed staging location, NOT $HOME (which is evaluated at build time)
+    # The postinstall script will move files from staging to the actual user's home directory
+    STAGING_LOCATION="/private/tmp/tlgrm_tdata_staging"
+    echo "Building initiate.pkg with pre/postinstall scripts..."
+    echo "  (Using staging location: $STAGING_LOCATION)"
+    pkgbuild \
+        --root "$TDATA_TEMP" \
+        --identifier "com.telegram.tlgrm.session" \
+        --version "1.0" \
+        --install-location "$STAGING_LOCATION" \
+        --scripts "$DMG_OUTPUT_DIR/scripts" \
+        "$PKG_FILE"
+
+    if [ $? -eq 0 ]; then
+        PKG_SIZE=$(du -h "$PKG_FILE" | cut -f1)
+        echo "✓ Package created: initiate.pkg ($PKG_SIZE)"
     else
-        echo "✓ Frameworks directory exists"
+        echo "Error: Package creation failed"
+        rm -rf "$TDATA_TEMP"
+        exit 1
     fi
-fi
 
-# Verify the app is properly code-signed (if signed)
-if codesign -v "/Volumes/${VOLUME_NAME}/Tlgrm.app" 2>/dev/null; then
-    echo "✓ Code signature valid"
-else
-    echo "  App is not code-signed (expected for development builds)"
-fi
-
-# Check that initiate.pkg exists
-if [ ! -f "/Volumes/${VOLUME_NAME}/initiate.pkg" ]; then
-    echo "✗ WARNING: initiate.pkg not found"
-else
-    echo "✓ initiate.pkg exists"
-fi
-
-# Check README files
-if [ ! -f "/Volumes/${VOLUME_NAME}/README.md" ]; then
-    echo "✗ WARNING: README.md not found"
-else
-    echo "✓ README.md exists"
-fi
-
-if [ ! -f "/Volumes/${VOLUME_NAME}/ПРОЧТИ.md" ]; then
-    echo "✗ WARNING: ПРОЧТИ.md not found"
-else
-    echo "✓ ПРОЧТИ.md exists"
-fi
-
-# Unmount validation volume
-hdiutil detach "${VALIDATION_DEVICE}" -quiet
-
-if [ ${VALIDATION_FAILED} -eq 1 ]; then
+    # Clean up temp directory
+    rm -rf "$TDATA_TEMP"
     echo ""
-    echo "=== VALIDATION FAILED ==="
-    echo "DMG created but validation found critical issues."
-    echo "The app may crash when installed. Please review errors above."
+else
+    echo "Warning: ~/tdata.zip not found, skipping package creation"
+    echo "  (Using existing initiate.pkg if available)"
     echo ""
+fi
+
+# Create staging directory
+echo "Creating staging directory..."
+rm -rf "$DMG_STAGING"
+mkdir -p "$DMG_STAGING"
+
+# Copy app to staging
+echo "Copying app bundle..."
+cp -R "$APP_BUNDLE" "$DMG_STAGING/"
+
+# Copy README files to staging
+echo "Adding README files..."
+if [ -f "$README_EN" ]; then
+    cp "$README_EN" "$DMG_STAGING/README.txt"
+fi
+if [ -f "$README_RU" ]; then
+    cp "$README_RU" "$DMG_STAGING/ПРОЧТИ.txt"
+fi
+
+# Copy PKG file to staging
+echo "Adding initiate.pkg installer..."
+if [ -f "$PKG_FILE" ]; then
+    cp "$PKG_FILE" "$DMG_STAGING/initiate.pkg"
+fi
+
+# Remove old DMG if exists
+if [ -f "$DMG_PATH" ]; then
+    echo "Removing existing DMG: $DMG_NAME"
+    rm -f "$DMG_PATH"
+fi
+
+echo "Creating DMG for $APP_NAME v$VERSION..."
+echo "Output: $DMG_PATH"
+echo ""
+
+# Create DMG with custom background
+# Window size: 1024x680 to match background
+# Positions:
+#   - App icon: x=256 y=200 (left side, top)
+#   - Applications link: x=768 y=200 (right side, top)
+#   - README EN: x=180 y=450 (bottom left)
+#   - README RU: x=400 y=450 (bottom center-left)
+#   - initiate.pkg: x=640 y=450 (bottom center-right)
+create-dmg \
+    --volname "$APP_NAME" \
+    --background "$BACKGROUND" \
+    --window-pos 200 120 \
+    --window-size 1024 680 \
+    --icon-size 128 \
+    --icon "$APP_NAME.app" 256 200 \
+    --icon "README.txt" 180 450 \
+    --icon "ПРОЧТИ.txt" 400 450 \
+    --icon "initiate.pkg" 640 450 \
+    --hide-extension "$APP_NAME.app" \
+    --app-drop-link 768 200 \
+    --no-internet-enable \
+    "$DMG_PATH" \
+    "$DMG_STAGING" \
+    2>&1
+
+if [ $? -eq 0 ]; then
+    DMG_SIZE=$(du -h "$DMG_PATH" | cut -f1)
+    echo ""
+    echo "========================================="
+    echo "✓ Beautiful DMG created successfully!"
+    echo "========================================="
+    echo "File: $DMG_NAME"
+    echo "Size: $DMG_SIZE"
+    echo "Location: $DMG_OUTPUT_DIR"
+    echo ""
+    echo "Features:"
+    echo "  - Beige background with gradient"
+    echo "  - README in English and Russian"
+    echo "  - GPL v3 LICENSE included"
+    echo "  - Professional layout"
+    echo ""
+    echo "You can distribute this DMG file."
+    echo "========================================="
+
+    # Clean up staging
+    rm -rf "$DMG_STAGING"
+else
+    echo ""
+    echo "Error: DMG creation failed"
+    rm -rf "$DMG_STAGING"
     exit 1
 fi
-
-echo "✓ All validation checks passed"
-
-echo ""
-echo "=== SUCCESS ==="
-echo "Created: ${FINAL_DMG} (${DMG_SIZE})"
-echo ""
-echo "DMG includes:"
-echo "  ✓ Tlgrm.app with custom icon"
-echo "  ✓ TlgrmSessionData.pkg for session data"
-echo "  ✓ README.md (English instructions)"
-echo "  ✓ ПРОЧТИ.md (Russian instructions)"
-echo "  ✓ Applications folder shortcut"
-echo "  ✓ Beige background and layout"
-echo ""
-echo "Test it with: open ${FINAL_DMG}"

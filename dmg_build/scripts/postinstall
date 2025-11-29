@@ -1,0 +1,75 @@
+#!/bin/bash
+# Postinstall script for initiate.pkg
+# Moves tdata from staging location to user's home directory and fixes ownership
+
+echo "Setting up tdata directory..."
+
+# Staging location (must match create_beautiful_dmg.sh)
+STAGING_DIR="/private/tmp/tlgrm_tdata_staging"
+STAGING_TDATA="$STAGING_DIR/tdata"
+
+# Get the actual user (not root, even if running with sudo)
+# During package installation, $USER is the installing user
+if [ -n "$USER" ] && [ "$USER" != "root" ]; then
+    ACTUAL_USER="$USER"
+elif [ -n "$SUDO_USER" ]; then
+    ACTUAL_USER="$SUDO_USER"
+else
+    # Fallback: get the console user
+    ACTUAL_USER=$(stat -f '%Su' /dev/console)
+fi
+
+# Get user's home directory
+USER_HOME=$(eval echo "~$ACTUAL_USER")
+DEST_TDATA="$USER_HOME/tdata"
+
+echo "Installing user: $ACTUAL_USER"
+echo "User home: $USER_HOME"
+echo "Staging location: $STAGING_TDATA"
+echo "Destination: $DEST_TDATA"
+
+# Check if staging tdata exists
+if [ ! -d "$STAGING_TDATA" ]; then
+    echo "ERROR: tdata not found at staging location: $STAGING_TDATA"
+    echo "Checking staging directory contents:"
+    ls -la "$STAGING_DIR" 2>/dev/null || echo "  Staging directory does not exist"
+    exit 1
+fi
+
+# Remove existing tdata at destination if present (should be done by preinstall, but safety check)
+if [ -d "$DEST_TDATA" ]; then
+    echo "Removing existing tdata at destination..."
+    rm -rf "$DEST_TDATA"
+fi
+
+# Move tdata from staging to user's home
+echo "Moving tdata to user's home directory..."
+mv "$STAGING_TDATA" "$DEST_TDATA"
+
+if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to move tdata to $DEST_TDATA"
+    exit 1
+fi
+
+# Fix ownership
+echo "Setting ownership to: $ACTUAL_USER:staff"
+chown -R "$ACTUAL_USER:staff" "$DEST_TDATA"
+
+if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to set ownership on $DEST_TDATA"
+    exit 1
+fi
+
+# Clean up staging directory
+rm -rf "$STAGING_DIR"
+
+# Verify
+if [ -d "$DEST_TDATA" ]; then
+    echo "SUCCESS: tdata installed at $DEST_TDATA"
+    ls -ld "$DEST_TDATA"
+else
+    echo "ERROR: tdata directory not found after installation"
+    exit 1
+fi
+
+exit 0
