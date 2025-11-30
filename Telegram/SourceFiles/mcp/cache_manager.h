@@ -15,10 +15,11 @@
 
 namespace MCP {
 
-// Cache entry with TTL (time-to-live)
+// Cache entry with TTL (time-to-live) and LRU timestamp
 struct CacheEntry {
 	QJsonObject data;
 	QDateTime expiration;
+	QDateTime lastAccess;  // For true LRU eviction
 	int hitCount = 0;
 
 	bool isExpired() const {
@@ -62,11 +63,46 @@ public:
 	void setMaxSize(int maxSizeMB);
 	void setDefaultTTL(int seconds);
 
-	// Specialized cache helpers
+	// Specialized cache key helpers - centralized key generation for consistency
+	// Chat-related keys
 	QString chatListKey() const { return QStringLiteral("chats:list"); }
 	QString chatInfoKey(qint64 chatId) const { return QStringLiteral("chat:%1:info").arg(chatId); }
-	QString userInfoKey(qint64 userId) const { return QStringLiteral("user:%1:info").arg(userId); }
 	QString messagesKey(qint64 chatId, int limit) const { return QStringLiteral("messages:%1:limit:%2").arg(chatId).arg(limit); }
+
+	// User-related keys
+	QString userInfoKey(qint64 userId) const { return QStringLiteral("user:%1:info").arg(userId); }
+	QString profileSettingsKey() const { return QStringLiteral("settings:profile"); }
+	QString privacySettingsKey() const { return QStringLiteral("settings:privacy"); }
+	QString securitySettingsKey() const { return QStringLiteral("settings:security"); }
+	QString blockedUsersKey() const { return QStringLiteral("users:blocked"); }
+
+	// Search-related keys
+	QString searchKey(const QString &query, qint64 chatId = 0) const {
+		return chatId ? QStringLiteral("search:%1:chat:%2").arg(query).arg(chatId)
+		              : QStringLiteral("search:%1:global").arg(query);
+	}
+
+	// Analytics keys
+	QString analyticsKey(const QString &type, qint64 chatId = 0) const {
+		return chatId ? QStringLiteral("analytics:%1:chat:%2").arg(type).arg(chatId)
+		              : QStringLiteral("analytics:%1:global").arg(type);
+	}
+	QString statsKey(const QString &category) const { return QStringLiteral("stats:%1").arg(category); }
+
+	// Archive keys
+	QString archiveListKey() const { return QStringLiteral("archive:list"); }
+	QString archiveStatsKey() const { return QStringLiteral("archive:stats"); }
+	QString ephemeralStatsKey() const { return QStringLiteral("ephemeral:stats"); }
+
+	// Bot keys
+	QString botListKey() const { return QStringLiteral("bots:list"); }
+	QString botInfoKey(qint64 botId) const { return QStringLiteral("bot:%1:info").arg(botId); }
+
+	// Wallet/Stars keys
+	QString walletBalanceKey() const { return QStringLiteral("wallet:balance"); }
+	QString transactionsKey(int limit) const { return QStringLiteral("wallet:transactions:limit:%1").arg(limit); }
+	QString giftsKey() const { return QStringLiteral("gifts:list"); }
+	QString subscriptionsKey() const { return QStringLiteral("subscriptions:list"); }
 
 private:
 	void cleanupExpired();

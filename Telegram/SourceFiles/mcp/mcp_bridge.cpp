@@ -149,12 +149,56 @@ QJsonObject Bridge::handleCommand(const QJsonObject &request) {
 		result = handleSearchLocal(params);
 	} else if (method == "get_dialogs") {
 		result = handleGetDialogs(params);
+	} else if (method == "tools/list") {
+		// MCP protocol method: list available tools
+		if (_mcpServer) {
+			result = _mcpServer->handleListTools(params);
+		} else {
+			QJsonObject error;
+			error["code"] = -32603;
+			error["message"] = "MCP server not connected";
+			response["error"] = error;
+			return response;
+		}
+	} else if (method == "tools/call") {
+		// MCP protocol method: call a tool by name
+		if (_mcpServer) {
+			result = _mcpServer->handleCallTool(params);
+		} else {
+			QJsonObject error;
+			error["code"] = -32603;
+			error["message"] = "MCP server not connected";
+			response["error"] = error;
+			return response;
+		}
+	} else if (method == "initialize") {
+		// MCP protocol method: initialize
+		if (_mcpServer) {
+			result = _mcpServer->handleInitialize(params);
+		} else {
+			QJsonObject error;
+			error["code"] = -32603;
+			error["message"] = "MCP server not connected";
+			response["error"] = error;
+			return response;
+		}
+	} else if (_mcpServer) {
+		// Try to dispatch to MCP server's tool handlers
+		result = _mcpServer->callTool(method, params);
+		if (result.contains("error") && result["error"].toString() == "tool_not_found") {
+			// Tool not found in MCP server either
+			QJsonObject error;
+			error["code"] = -32601;
+			error["message"] = "Method not found: " + method;
+			response["error"] = error;
+			return response;
+		}
 	} else {
-		// Unknown method
-		response["error"] = QJsonObject{
-			{"code", -32601},
-			{"message", "Method not found: " + method}
-		};
+		// No MCP server connected and unknown method
+		QJsonObject error;
+		error["code"] = -32601;
+		error["message"] = "Method not found: " + method;
+		response["error"] = error;
 		return response;
 	}
 

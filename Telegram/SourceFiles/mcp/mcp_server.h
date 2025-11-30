@@ -14,12 +14,20 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonArray>
 #include <QtCore/QTextStream>
+#include <QtCore/QHash>
 #include <QtNetwork/QTcpServer>
 #include <QtSql/QSqlDatabase>
+
+#include <functional>
+#include <memory>
+
+#include "mcp/mcp_helpers.h"
 
 namespace Main {
 class Session;
 } // namespace Main
+
+class HistoryItem;
 
 namespace MCP {
 
@@ -91,6 +99,9 @@ public:
 	};
 
 	ServerInfo serverInfo() const { return _serverInfo; }
+
+	// Call a tool by name (for Bridge delegation)
+	QJsonObject callTool(const QString &toolName, const QJsonObject &args);
 
 private:
 	// Initialize server capabilities
@@ -570,6 +581,29 @@ private:
 		const QJsonObject &result
 	);
 
+	// ============================================================
+	// HELPER METHODS
+	// ============================================================
+
+	// Input validation helper - checks required fields exist and returns error message
+	bool validateRequired(
+		const QJsonObject &args,
+		const QStringList &requiredFields,
+		QString &errorMessage
+	);
+
+	// Create standardized error response for tools
+	QJsonObject toolError(const QString &message, const QJsonObject &context = QJsonObject());
+
+	// Extract message data to JSON - reduces code duplication
+	QJsonObject extractMessageJson(HistoryItem *item);
+
+	// Tool dispatcher type alias
+	using ToolHandler = std::function<QJsonObject(const QJsonObject&)>;
+
+	// Initialize tool dispatcher lookup table
+	void initializeToolHandlers();
+
 private:
 	ServerInfo _serverInfo;
 	TransportType _transport = TransportType::Stdio;
@@ -579,29 +613,32 @@ private:
 	QVector<Resource> _resources;
 	QVector<Prompt> _prompts;
 
-	// Transports
-	QTextStream *_stdin = nullptr;
-	QTextStream *_stdout = nullptr;
-	QTcpServer *_httpServer = nullptr;
+	// Transports (owned)
+	std::unique_ptr<QTextStream> _stdin;
+	std::unique_ptr<QTextStream> _stdout;
+	std::unique_ptr<QTcpServer> _httpServer;
 
-	// Feature components
+	// Feature components (owned)
 	QSqlDatabase _db;
-	ChatArchiver *_archiver = nullptr;
-	EphemeralArchiver *_ephemeralArchiver = nullptr;
-	Analytics *_analytics = nullptr;
-	SemanticSearch *_semanticSearch = nullptr;
-	BatchOperations *_batchOps = nullptr;
-	MessageScheduler *_scheduler = nullptr;
-	AuditLogger *_auditLogger = nullptr;
-	RBAC *_rbac = nullptr;
-	VoiceTranscription *_voiceTranscription = nullptr;
-	BotManager *_botManager = nullptr;
-	CacheManager *_cache = nullptr;
+	std::unique_ptr<ChatArchiver> _archiver;
+	std::unique_ptr<EphemeralArchiver> _ephemeralArchiver;
+	std::unique_ptr<Analytics> _analytics;
+	std::unique_ptr<SemanticSearch> _semanticSearch;
+	std::unique_ptr<BatchOperations> _batchOps;
+	std::unique_ptr<MessageScheduler> _scheduler;
+	std::unique_ptr<AuditLogger> _auditLogger;
+	std::unique_ptr<RBAC> _rbac;
+	std::unique_ptr<VoiceTranscription> _voiceTranscription;
+	std::unique_ptr<BotManager> _botManager;
+	std::unique_ptr<CacheManager> _cache;
 
 	// State
 	bool _initialized = false;
 	QString _databasePath;
 	Main::Session *_session = nullptr;
+
+	// Tool dispatcher lookup table
+	QHash<QString, ToolHandler> _toolHandlers;
 };
 
 } // namespace MCP

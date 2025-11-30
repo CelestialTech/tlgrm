@@ -1242,6 +1242,7 @@ PRIVATE
     mcp/voice_transcription.h
     mcp/cache_manager.cpp
     mcp/cache_manager.h
+    mcp/mcp_helpers.h
     media/audio/media_audio.cpp
     media/audio/media_audio.h
     media/audio/media_audio_capture.cpp
