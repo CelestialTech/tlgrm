@@ -21,12 +21,13 @@ STARTUP_TIMEOUT = 15  # seconds
 class MCPClient:
     """Client for communicating with MCP server via IPC bridge"""
 
-    def __init__(self, socket_path: str = IPC_SOCKET_PATH):
+    def __init__(self, socket_path: str = IPC_SOCKET_PATH, max_retries: int = 3):
         self.socket_path = socket_path
         self._request_id = 0
+        self._max_retries = max_retries
 
     def send_request(self, method: str, params: Optional[Dict] = None, timeout: float = 5.0) -> Dict[str, Any]:
-        """Send JSON-RPC request and return response"""
+        """Send JSON-RPC request and return response with retry logic"""
         self._request_id += 1
         request = {
             "jsonrpc": "2.0",
@@ -35,29 +36,40 @@ class MCPClient:
             "params": params or {}
         }
 
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
+        last_error = None
+        for attempt in range(self._max_retries):
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
 
-        try:
-            sock.connect(self.socket_path)
-            sock.sendall(json.dumps(request).encode() + b'\n')
+            try:
+                sock.connect(self.socket_path)
+                sock.sendall(json.dumps(request).encode() + b'\n')
 
-            # Read response
-            response_data = b''
-            while True:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-                response_data += chunk
-                # Check if we have complete JSON
-                try:
+                # Read response
+                response_data = b''
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    response_data += chunk
+                    # Check if we have complete JSON
+                    try:
+                        return json.loads(response_data.decode())
+                    except json.JSONDecodeError:
+                        continue
+
+                if response_data:
                     return json.loads(response_data.decode())
-                except json.JSONDecodeError:
-                    continue
+                else:
+                    raise ConnectionError("Empty response from server")
+            except (socket.error, ConnectionError, json.JSONDecodeError) as e:
+                last_error = e
+                if attempt < self._max_retries - 1:
+                    time.sleep(0.2 * (attempt + 1))  # Exponential backoff
+            finally:
+                sock.close()
 
-            return json.loads(response_data.decode())
-        finally:
-            sock.close()
+        raise last_error or ConnectionError("Failed after retries")
 
     def ping(self) -> Dict[str, Any]:
         """Ping the server"""

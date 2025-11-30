@@ -7,6 +7,7 @@ This is a **custom fork of Telegram Desktop** with integrated **Model Context Pr
 **Base Version:** Telegram Desktop 6.3 (commit aadc81279a)
 **Custom Additions:** MCP server integration for AI assistant access to Telegram data
 **Target Platform:** macOS (Apple Silicon + Intel)
+**Total MCP Tools:** 200+ (see Tool Categories below)
 
 ---
 
@@ -517,9 +518,31 @@ print("✓ MCP integration working")
 
 ---
 
-## Available MCP Tools (30 total)
+## Available MCP Tools (200+ total)
 
-### Core Messaging Tools (11 tools)
+### Tool Implementation Status
+
+| Category | Tools | Status |
+|----------|-------|--------|
+| Core Messaging | 6 | Implemented |
+| Archive & Export | 9 | Implemented |
+| Analytics | 8 | Implemented |
+| Semantic Search | 5 | Stub |
+| Message Operations | 6 | Implemented |
+| Batch Operations | 5 | Stub |
+| Scheduler | 4 | Stub |
+| System | 4 | Implemented |
+| Voice/Transcription | 2 | Stub |
+| Bot Framework | 8 | Stub |
+| Profile Settings | 5 | Implemented |
+| Privacy Settings | 8 | Implemented |
+| Security Settings | 6 | Implemented |
+| Premium Features | 17 | Stub |
+| Business Features | 36 | Stub |
+| Wallet Features | 32 | Stub |
+| Stars Features | 45 | Stub |
+
+### Core Messaging Tools (6 tools) - IMPLEMENTED
 | Tool | Description |
 |------|-------------|
 | `list_chats` | Get all Telegram chats from local database |
@@ -528,22 +551,27 @@ print("✓ MCP integration working")
 | `send_message` | Send a message to a chat |
 | `search_messages` | Search messages in local database |
 | `get_user_info` | Get information about a Telegram user |
-| `delete_message` | Delete a message from a chat |
+
+### Message Operations (6 tools) - IMPLEMENTED
+| Tool | Description |
+|------|-------------|
 | `edit_message` | Edit a message in a chat |
+| `delete_message` | Delete a message from a chat |
 | `forward_message` | Forward a message to another chat |
 | `pin_message` | Pin a message in a chat |
+| `unpin_message` | Unpin a message |
 | `add_reaction` | Add a reaction to a message |
 
-### Profile Settings Tools (5 tools)
+### Profile Settings Tools (5 tools) - IMPLEMENTED
 | Tool | Description | Status |
 |------|-------------|--------|
 | `get_profile_settings` | Get firstName, lastName, username, phone, bio, birthday | Working |
-| `update_profile_name` | Update first/last name | Not supported (requires GUI) |
+| `update_profile_name` | Update first/last name | Stub (requires GUI) |
 | `update_profile_bio` | Update bio via `api().saveSelfBio()` | **Working** |
-| `update_profile_username` | Update username | Not supported (requires verification) |
-| `update_profile_phone` | Update phone number | Not supported (requires SMS) |
+| `update_profile_username` | Update username | Stub (requires verification) |
+| `update_profile_phone` | Update phone number | Stub (requires SMS) |
 
-### Privacy Settings Tools (8 tools)
+### Privacy Settings Tools (8 tools) - IMPLEMENTED
 | Tool | Description | API Used |
 |------|-------------|----------|
 | `get_privacy_settings` | Reload all privacy settings | Reloads all keys |
@@ -555,7 +583,7 @@ print("✓ MCP integration working")
 | `update_about_privacy` | Set bio/about visibility | `Api::UserPrivacy::Key::About` |
 | `get_blocked_users` | Get blocked users list | `blockedPeers().reload()` |
 
-### Security Settings Tools (6 tools)
+### Security Settings Tools (6 tools) - IMPLEMENTED
 | Tool | Description | API Used |
 |------|-------------|----------|
 | `get_security_settings` | Get auto-delete period | `selfDestruct()` |
@@ -563,7 +591,88 @@ print("✓ MCP integration working")
 | `terminate_session` | Terminate a session by hash | `authorizations().requestTerminate()` |
 | `block_user` | Block a user | `blockedPeers().block()` |
 | `unblock_user` | Unblock a user | `blockedPeers().unblock()` |
-| `update_auto_delete_period` | Set default auto-delete (0/86400/604800/2592000) | `selfDestruct().updateDefaultHistoryTTL()` |
+| `update_auto_delete_period` | Set default auto-delete | `selfDestruct().updateDefaultHistoryTTL()` |
+
+### Archive & Export Tools (9 tools) - IMPLEMENTED
+| Tool | Description |
+|------|-------------|
+| `archive_chat` | Archive a chat to local database |
+| `export_chat` | Export chat to JSON/HTML/TXT |
+| `list_archived_chats` | List all archived chats |
+| `get_archive_stats` | Get archive statistics |
+| `configure_ephemeral_capture` | Configure disappearing message capture |
+| `get_ephemeral_stats` | Get ephemeral capture statistics |
+| `get_ephemeral_messages` | Retrieve captured ephemeral messages |
+| `search_archive` | Search archived messages |
+| `purge_archive` | Purge old archive data |
+
+### Analytics Tools (8 tools) - IMPLEMENTED
+| Tool | Description |
+|------|-------------|
+| `get_message_stats` | Get message statistics |
+| `get_user_activity` | Get user activity metrics |
+| `get_chat_activity` | Get chat activity metrics |
+| `get_time_series` | Get time-series data |
+| `get_top_users` | Get most active users |
+| `get_top_words` | Get word frequency analysis |
+| `export_analytics` | Export analytics data |
+| `get_trends` | Get trending topics |
+
+### System Tools (4 tools) - IMPLEMENTED
+| Tool | Description |
+|------|-------------|
+| `get_cache_stats` | Get cache statistics |
+| `get_server_info` | Get MCP server information |
+| `get_audit_log` | Get audit log entries |
+| `health_check` | Check server health |
+
+### Premium-Equivalent Features (17 tools) - STUB
+| Category | Tools |
+|----------|-------|
+| Voice-to-Text (Whisper) | `transcribe_voice_message`, `get_transcription_status` |
+| Translation | `translate_messages`, `auto_translate_chat`, `get_translation_languages` |
+| Message Tags | `tag_message`, `get_tagged_messages`, `list_tags`, `delete_tag` |
+| Ad Filtering | `configure_ad_filter`, `get_filtered_ads` |
+| Chat Rules | `create_chat_rule`, `list_chat_rules`, `execute_chat_rules`, `delete_chat_rule` |
+| Task Management | `create_task`, `list_tasks` |
+
+### Business-Equivalent Features (36 tools) - STUB
+| Category | Tools |
+|----------|-------|
+| Quick Replies | `create_quick_reply`, `list_quick_replies`, `send_quick_reply`, `edit_quick_reply`, `delete_quick_reply` |
+| Greeting Messages | `configure_greeting`, `get_greeting_config`, `test_greeting`, `get_greeting_stats` |
+| Away Messages | `configure_away_message`, `get_away_config`, `set_away_now`, `disable_away`, `get_away_stats` |
+| Business Hours | `set_business_hours`, `get_business_hours`, `is_open_now` |
+| Business Location | `set_business_location`, `get_business_location` |
+| AI Chatbot | `configure_ai_chatbot`, `get_chatbot_config`, `pause_chatbot`, `resume_chatbot`, `set_chatbot_prompt`, `get_chatbot_stats`, `train_chatbot` |
+| AI Voice (TTS) | `configure_voice_persona`, `generate_voice_message`, `send_voice_reply`, `list_voice_presets`, `clone_voice` |
+| AI Video Circles | `configure_video_avatar`, `generate_video_circle`, `send_video_reply`, `upload_avatar_source`, `list_avatar_presets` |
+
+### Wallet Features (32 tools) - STUB
+| Category | Tools |
+|----------|-------|
+| Balance & Analytics | `get_wallet_balance`, `get_balance_history`, `get_spending_analytics`, `get_income_analytics` |
+| Transactions | `get_transactions`, `get_transaction_details`, `export_transactions`, `search_transactions` |
+| Gifts | `list_gifts`, `get_gift_details`, `get_gift_analytics`, `send_stars` |
+| Subscriptions | `list_subscriptions`, `get_subscription_alerts`, `cancel_subscription` |
+| Monetization | `get_channel_earnings`, `get_all_channels_earnings`, `get_earnings_chart`, `get_reaction_stats`, `get_paid_content_earnings` |
+| Giveaways | `get_giveaway_options`, `list_giveaways`, `get_giveaway_stats` |
+| Advanced | `get_topup_options`, `get_star_rating`, `get_withdrawal_status`, `create_crypto_payment` |
+| Budget & Reporting | `set_wallet_budget`, `get_budget_status`, `configure_wallet_alerts`, `generate_financial_report`, `get_tax_summary` |
+
+### Stars Features (45 tools) - STUB
+| Category | Tools |
+|----------|-------|
+| Star Gifts | `list_star_gifts`, `get_star_gift_details`, `get_unique_gift_analytics`, `get_collectibles_portfolio`, `send_star_gift`, `get_gift_transfer_history`, `get_upgrade_options`, `transfer_gift` |
+| Gift Collections | `list_gift_collections`, `get_collection_details`, `get_collection_completion` |
+| Auctions | `list_active_auctions`, `get_auction_details`, `get_auction_alerts`, `place_auction_bid`, `get_auction_history` |
+| Marketplace | `browse_gift_marketplace`, `get_market_trends`, `list_gift_for_sale`, `update_listing`, `cancel_listing` |
+| Star Reactions | `get_star_reactions_received`, `get_star_reactions_sent`, `get_top_supporters` |
+| Paid Content | `get_paid_messages_stats`, `configure_paid_messages`, `get_paid_media_stats`, `get_unlocked_content` |
+| Mini Apps | `get_miniapp_spending`, `get_miniapp_history`, `set_miniapp_budget` |
+| Star Rating | `get_star_rating_details`, `get_rating_history`, `simulate_rating_change` |
+| Profile Display | `get_profile_gifts`, `update_gift_display`, `reorder_profile_gifts`, `toggle_gift_notifications` |
+| AI & Analytics | `get_gift_investment_advice`, `backtest_strategy`, `get_portfolio_performance`, `create_price_alert`, `create_auction_alert`, `get_fragment_listings`, `export_portfolio_report` |
 
 ### Privacy Option Values
 When updating privacy settings, use one of:
@@ -815,4 +924,74 @@ log stream --predicate 'process == "Telegram"' --level debug
 **Last Updated**: 2025-11-28
 **Maintained for**: AI assistants working on tdesktop MCP integration
 **Base Commit**: aadc81279a (Telegram Desktop 6.3)
-**MCP Tools**: 30 tools with real Telegram API integration
+**MCP Tools**: 200+ tools (52 implemented, 150+ stub implementations)
+
+## Adding New MCP Tools
+
+### Step 1: Declare in Header
+Add the tool method declaration in `mcp_server.h`:
+```cpp
+QJsonObject toolYourNewTool(const QJsonObject &args);
+```
+
+### Step 2: Implement in Source
+Add implementation in `mcp_server_complete.cpp`:
+```cpp
+QJsonObject Server::toolYourNewTool(const QJsonObject &args) {
+    // Validate required arguments
+    QString errorMsg;
+    if (!validateRequired(args, {"required_param"}, errorMsg)) {
+        return toolError(errorMsg);
+    }
+
+    // Check session
+    if (!_session) {
+        return toolError("No active session");
+    }
+
+    // Implement logic using tdesktop APIs
+    QJsonObject result;
+    result["success"] = true;
+    result["data"] = "...";
+    return result;
+}
+```
+
+### Step 3: Register in Tool Handlers
+Add to `initializeToolHandlers()` lookup table:
+```cpp
+_toolHandlers["your_new_tool"] = [this](const QJsonObject &args) {
+    return toolYourNewTool(args);
+};
+```
+
+### Step 4: Register Tool Metadata
+Add to `registerTools()`:
+```cpp
+Tool yourTool;
+yourTool.name = "your_new_tool";
+yourTool.description = "Description of what the tool does";
+yourTool.inputSchema = createInputSchema({
+    {"required_param", "string", true, "Parameter description"}
+});
+_tools.append(yourTool);
+```
+
+### Key APIs for Tool Implementation
+
+**User/Chat Data**:
+- `_session->data().peer(peerId)` - Get peer by ID
+- `_session->data().chatsList()` - Get chat list
+- `_session->user()` - Get current user
+
+**Privacy Settings**:
+- `_session->api().userPrivacy()` - Privacy API
+- `Api::UserPrivacy::Key::LastSeen` - Privacy keys
+
+**Security**:
+- `_session->api().authorizations()` - Active sessions
+- `_session->api().blockedPeers()` - Blocked users
+
+**Messages**:
+- `history->blocks()` - Message blocks
+- `history->peer()` - Chat peer
