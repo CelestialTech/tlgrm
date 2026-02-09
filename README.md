@@ -87,9 +87,20 @@ cd ../out
 xcodebuild -project Telegram.xcodeproj -scheme Telegram -configuration Release build
 ```
 
-> **Note:** Tlgrm uses the official Telegram Desktop API credentials (extracted from the precompiled binary). No need to register your own app at my.telegram.org.
+> **Note:** Tlgrm uses the official Telegram Desktop API credentials. No need to register your own app at my.telegram.org.
 
-**Step 4: Run**
+### API Credentials
+
+Tlgrm uses the official Telegram Desktop API credentials:
+
+| Parameter | Value |
+|-----------|-------|
+| **API ID** | `2040` |
+| **API Hash** | `b18441a1ff607e10a989891a5462e627` |
+
+These credentials are extracted from the official Telegram Desktop binary and are required for the app to communicate with Telegram's servers. They are pre-configured in the build system via `DesktopPrivate/custom_api_id.h`.
+
+**Step 3: Run**
 ```bash
 # Launch Tlgrm
 ./Release/Tlgrm.app/Contents/MacOS/Tlgrm
