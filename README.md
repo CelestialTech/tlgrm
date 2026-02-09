@@ -69,15 +69,7 @@ hdiutil detach /Volumes/Tlgrm
 brew install git cmake python3 automake autoconf libtool pkg-config ninja wget meson nasm
 ```
 
-**Step 2: Get API Credentials**
-
-1. Visit https://my.telegram.org
-2. Log in with your phone number
-3. Go to "API development tools"
-4. Create a new application
-5. Note your `api_id` and `api_hash`
-
-**Step 3: Clone and Build**
+**Step 2: Clone and Build**
 ```bash
 # Clone the repository with submodules
 git clone --recursive https://github.com/CelestialTech/tlgrm.git
@@ -87,13 +79,15 @@ cd tlgrm
 cd Telegram
 ./build/prepare/mac.sh silent
 
-# Configure with your API credentials
-./configure.sh -D TDESKTOP_API_ID=YOUR_API_ID -D TDESKTOP_API_HASH=YOUR_API_HASH
+# Configure (uses built-in API credentials)
+./configure.sh
 
 # Build the application (10-20 minutes)
 cd ../out
 xcodebuild -project Telegram.xcodeproj -scheme Telegram -configuration Release build
 ```
+
+> **Note:** Tlgrm uses the official Telegram Desktop API credentials. No need to register your own app at my.telegram.org.
 
 **Step 4: Run**
 ```bash
@@ -1198,7 +1192,7 @@ git submodule update --init --recursive --depth 1
 ```bash
 rm -rf out/
 cd Telegram
-./configure.sh -D TDESKTOP_API_ID=YOUR_ID -D TDESKTOP_API_HASH=YOUR_HASH
+./configure.sh
 cd ../out
 xcodebuild -project Telegram.xcodeproj -scheme Telegram -configuration Release clean build
 ```
