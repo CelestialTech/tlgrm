@@ -87,7 +87,7 @@ cd ../out
 xcodebuild -project Telegram.xcodeproj -scheme Telegram -configuration Release build
 ```
 
-> **Note:** Tlgrm uses the official Telegram Desktop API credentials. No need to register your own app at my.telegram.org.
+> **Note:** Tlgrm uses the official Telegram Desktop API credentials (extracted from the precompiled binary). No need to register your own app at my.telegram.org.
 
 **Step 4: Run**
 ```bash
