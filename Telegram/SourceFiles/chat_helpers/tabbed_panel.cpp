@@ -12,9 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "chat_helpers/tabbed_selector.h"
 #include "window/window_session_controller.h"
-#include "main/main_session.h"
-#include "data/data_session.h"
-#include "data/stickers/data_stickers.h"
+#include "mainwindow.h"
 #include "core/application.h"
 #include "base/options.h"
 #include "styles/style_chat_helpers.h"
@@ -88,7 +86,7 @@ TabbedPanel::TabbedPanel(
 		_pauseAnimations.fire(false);
 	});
 	_selector->showRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		showFromSelector();
 	}, lifetime());
 
@@ -105,26 +103,19 @@ TabbedPanel::TabbedPanel(
 	_hideTimer.setCallback([this] { hideByTimerOrLeave(); });
 
 	_selector->checkForHide(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (!rect().contains(mapFromGlobal(QCursor::pos()))) {
 			_hideTimer.callOnce(kDelayedHideTimeoutMs);
 		}
 	}, lifetime());
 
 	_selector->cancelled(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		hideAnimated();
 	}, lifetime());
 
-	if (_regularWindow) {
-		_regularWindow->session().data().stickers().gifWithCaptionSent(
-		) | rpl::on_next([=] {
-			hideAnimated();
-		}, lifetime());
-	}
-
 	_selector->slideFinished(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		InvokeQueued(this, [=] {
 			if (_hideAfterSlide) {
 				startOpacityAnimation(true);
@@ -135,7 +126,7 @@ TabbedPanel::TabbedPanel(
 	macWindowDeactivateEvents(
 	) | rpl::filter([=] {
 		return !isHidden() && !preventAutoHide();
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		hideAnimated();
 	}, lifetime());
 

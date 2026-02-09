@@ -96,7 +96,7 @@ PhotoEditor::PhotoEditor(
 	Deserialize(Core::App().settings().photoEditorBrush()))) {
 
 	sizeValue(
-	) | rpl::on_next([=](const QSize &size) {
+	) | rpl::start_with_next([=](const QSize &size) {
 		if (size.isEmpty()) {
 			return;
 		}
@@ -104,7 +104,7 @@ PhotoEditor::PhotoEditor(
 	}, lifetime());
 
 	_content->innerRect(
-	) | rpl::on_next([=](QRect inner) {
+	) | rpl::start_with_next([=](QRect inner) {
 		if (inner.isEmpty()) {
 			return;
 		}
@@ -116,23 +116,23 @@ PhotoEditor::PhotoEditor(
 	}, lifetime());
 
 	_controls->colorLinePositionValue(
-	) | rpl::on_next([=](const QPoint &p) {
+	) | rpl::start_with_next([=](const QPoint &p) {
 		_colorPicker->moveLine(p);
 	}, _controls->lifetime());
 
 	_controls->colorLineShownValue(
-	) | rpl::on_next([=](bool shown) {
+	) | rpl::start_with_next([=](bool shown) {
 		_colorPicker->setVisible(shown);
 	}, _controls->lifetime());
 
 	_mode.value(
-	) | rpl::on_next([=](const PhotoEditorMode &mode) {
+	) | rpl::start_with_next([=](const PhotoEditorMode &mode) {
 		_content->applyMode(mode);
 		_controls->applyMode(mode);
 	}, lifetime());
 
 	_controls->rotateRequests(
-	) | rpl::on_next([=](int angle) {
+	) | rpl::start_with_next([=](int angle) {
 		_modifications.angle += 90;
 		if (_modifications.angle >= 360) {
 			_modifications.angle -= 360;
@@ -141,13 +141,13 @@ PhotoEditor::PhotoEditor(
 	}, lifetime());
 
 	_controls->flipRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_modifications.flipped = !_modifications.flipped;
 		_content->applyModifications(_modifications);
 	}, lifetime());
 
 	_controls->paintModeRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_mode = PhotoEditorMode{
 			.mode = PhotoEditorMode::Mode::Paint,
 			.action = PhotoEditorMode::Action::None,
@@ -155,7 +155,7 @@ PhotoEditor::PhotoEditor(
 	}, lifetime());
 
 	_controls->doneRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		const auto mode = _mode.current().mode;
 		if (mode == PhotoEditorMode::Mode::Paint) {
 			_mode = PhotoEditorMode{
@@ -172,7 +172,7 @@ PhotoEditor::PhotoEditor(
 	}, lifetime());
 
 	_controls->cancelRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		const auto mode = _mode.current().mode;
 		if (mode == PhotoEditorMode::Mode::Paint) {
 			_mode = PhotoEditorMode{
@@ -189,7 +189,7 @@ PhotoEditor::PhotoEditor(
 	}, lifetime());
 
 	_colorPicker->saveBrushRequests(
-	) | rpl::on_next([=](const Brush &brush) {
+	) | rpl::start_with_next([=](const Brush &brush) {
 		_content->applyBrush(brush);
 
 		const auto serialized = Serialize(brush);
@@ -224,13 +224,13 @@ void InitEditorLayer(
 		not_null<PhotoEditor*> editor,
 		Fn<void(PhotoModifications)> doneCallback) {
 	editor->cancelRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		layer->closeLayer();
 	}, editor->lifetime());
 
 	const auto weak = base::make_weak(layer.get());
 	editor->doneRequests(
-	) | rpl::on_next([=, done = std::move(doneCallback)](
+	) | rpl::start_with_next([=, done = std::move(doneCallback)](
 			const PhotoModifications &mods) {
 		done(mods);
 		if (const auto strong = weak.get()) {

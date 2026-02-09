@@ -32,7 +32,7 @@ not_null<Ui::RpWidget*> InfiniteRadialAnimationWidget(
 		, _st(st ? st : &st::startGiveawayButtonLoading)
 		, _animation([=] { update(); }, *_st) {
 			resize(size, size);
-			shownValue() | rpl::on_next([=](bool v) {
+			shownValue() | rpl::start_with_next([=](bool v) {
 				return v
 					? _animation.start()
 					: _animation.stop(anim::type::instant);
@@ -61,7 +61,7 @@ void AddChildToWidgetCenter(
 		not_null<Ui::RpWidget*> parent,
 		not_null<Ui::RpWidget*> child) {
 	parent->sizeValue(
-	) | rpl::on_next([=](const QSize &s) {
+	) | rpl::start_with_next([=](const QSize &s) {
 		const auto size = child->size();
 		child->moveToLeft(
 			(s.width() - size.width()) / 2,
@@ -135,18 +135,18 @@ void AddLabelWithBadgeToButton(
 		st::startGiveawayButtonLabelSimple);
 	std::move(
 		text
-	) | rpl::on_next([=](const QString &s) {
+	) | rpl::start_with_next([=](const QString &s) {
 		label->setText(s);
 	}, label->lifetime());
 	const auto count = Ui::CreateChild<Ui::RpWidget>(parent.get());
 	count->paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		auto p = QPainter(count);
 		p.drawImage(0, 0, state->badge);
 	}, count->lifetime());
 	std::move(
 		number
-	) | rpl::on_next([=](int c) {
+	) | rpl::start_with_next([=](int c) {
 		state->badge = Info::Statistics::CreateBadge(
 			st::startGiveawayButtonTextStyle,
 			QString::number(c),
@@ -163,7 +163,7 @@ void AddLabelWithBadgeToButton(
 
 	std::move(
 		shown
-	) | rpl::on_next([=](bool shown) {
+	) | rpl::start_with_next([=](bool shown) {
 		count->setVisible(shown);
 		label->setVisible(shown);
 	}, count->lifetime());
@@ -172,7 +172,7 @@ void AddLabelWithBadgeToButton(
 		parent->sizeValue(),
 		label->sizeValue(),
 		count->sizeValue()
-	) | rpl::on_next([=](
+	) | rpl::start_with_next([=](
 			const QSize &s,
 			const QSize &s1,
 			const QSize &s2) {

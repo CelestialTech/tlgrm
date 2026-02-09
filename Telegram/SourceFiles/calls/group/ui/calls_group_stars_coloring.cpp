@@ -105,15 +105,15 @@ object_ptr<RpWidget> VideoStreamStarsLevel(
 	});
 	return MakeStarSelectInfoBlocks(box, {
 		{
-			.title = std::move(pinTitle) | rpl::map(tr::marked),
+			.title = std::move(pinTitle) | Text::ToWithEntities(),
 			.subtext = tr::lng_paid_comment_pin_about(),
 		},
 		{
-			.title = std::move(limitTitle) | rpl::map(tr::marked),
+			.title = std::move(limitTitle) | Text::ToWithEntities(),
 			.subtext = std::move(limitSubtext),
 		},
 		{
-			.title = std::move(emojiTitle) | rpl::map(tr::marked),
+			.title = std::move(emojiTitle) | Text::ToWithEntities(),
 			.subtext = std::move(emojiSubtext),
 		},
 	}, {}, true);

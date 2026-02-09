@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/chat/attach/attach_prepare.h"
+#include "ui/text/text_utilities.h" // Ui::Text::ToUpper
 #include "ui/text/text_options.h"
 #include "ui/image/image_prepare.h"
 #include "ui/painter.h"
@@ -224,7 +225,7 @@ Ui::SlideWrap<ScanButton> *EditScans::List::nonDeletedErrorRow() const {
 rpl::producer<QString> EditScans::List::uploadButtonText() const {
 	return (files.empty()
 		? tr::lng_passport_upload_scans
-		: tr::lng_passport_upload_more)(tr::upper);
+		: tr::lng_passport_upload_more)() | Ui::Text::ToUpper();
 }
 
 void EditScans::List::hideError() {
@@ -290,12 +291,12 @@ void EditScans::List::pushScan(const ScanInfo &info) {
 	const auto scan = rows.back()->entity();
 
 	scan->deleteClicks(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		controller->deleteScan(type, index);
 	}, scan->lifetime());
 
 	scan->restoreClicks(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		controller->restoreScan(type, index);
 	}, scan->lifetime());
 
@@ -683,8 +684,9 @@ void EditScans::setupSpecialScans(
 		}
 		auto label = scan.rowCreated.value(
 		) | rpl::map([=, type = type](bool created) {
-			return uploadText(type, created)(tr::upper);
-		}) | rpl::flatten_latest();
+			return uploadText(type, created)();
+		}) | rpl::flatten_latest(
+		) | Ui::Text::ToUpper();
 		scan.upload = inner->add(
 			object_ptr<Ui::SettingsButton>(
 				inner,
@@ -711,17 +713,17 @@ void EditScans::setupSpecialScans(
 
 void EditScans::init() {
 	_controller->scanUpdated(
-	) | rpl::on_next([=](ScanInfo &&info) {
+	) | rpl::start_with_next([=](ScanInfo &&info) {
 		updateScan(std::move(info));
 	}, lifetime());
 
 	widthValue(
-	) | rpl::on_next([=](int width) {
+	) | rpl::start_with_next([=](int width) {
 		_content->resizeToWidth(width);
 	}, _content->lifetime());
 
 	_content->heightValue(
-	) | rpl::on_next([=](int height) {
+	) | rpl::start_with_next([=](int height) {
 		resize(width(), height);
 	}, _content->lifetime());
 }
@@ -820,12 +822,12 @@ void EditScans::createSpecialScanRow(
 	const auto row = scan.row->entity();
 
 	row->deleteClicks(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_controller->deleteScan(type, std::nullopt);
 	}, row->lifetime());
 
 	row->restoreClicks(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_controller->restoreScan(type, std::nullopt);
 	}, row->lifetime());
 

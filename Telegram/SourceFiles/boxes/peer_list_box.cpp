@@ -113,7 +113,7 @@ void PeerListBox::createMultiSelect() {
 		tr::lng_participant_filter());
 	_select.create(this, std::move(entity));
 	_select->heightValue(
-	) | rpl::on_next(
+	) | rpl::start_with_next(
 		[this] { updateScrollSkips(); },
 		lifetime());
 	_select->entity()->setSubmittedCallback([=](Qt::KeyboardModifiers) {
@@ -191,7 +191,7 @@ void PeerListBox::prepare() {
 	_controller->setDelegate(this);
 
 	_controller->boxHeightValue(
-	) | rpl::on_next([=](int height) {
+	) | rpl::start_with_next([=](int height) {
 		setDimensions(_controller->contentWidth(), height);
 	}, lifetime());
 
@@ -203,21 +203,12 @@ void PeerListBox::prepare() {
 	}
 
 	content()->scrollToRequests(
-	) | rpl::on_next([this](Ui::ScrollToRequest request) {
+	) | rpl::start_with_next([this](Ui::ScrollToRequest request) {
 		scrollToY(request.ymin, request.ymax);
 	}, lifetime());
 
 	if (_init) {
 		_init(this);
-	}
-
-	{
-		setDimensions(
-			_controller->contentWidth(),
-			std::clamp(
-				content()->height(),
-				st::boxMaxListHeight,
-				st::boxMaxListHeight * 3));
 	}
 }
 
@@ -356,16 +347,6 @@ const style::PeerList &PeerListController::computeListSt() const {
 
 const style::MultiSelect &PeerListController::computeSelectSt() const {
 	return _selectSt ? *_selectSt : st::defaultMultiSelect;
-}
-
-void PeerListController::showFinished() {
-	if (const auto onstack = _showFinished) {
-		onstack();
-	}
-}
-
-void PeerListController::setShowFinishedCallback(Fn<void()> callback) {
-	_showFinished = std::move(callback);
 }
 
 bool PeerListController::hasComplexSearch() const {
@@ -1021,14 +1002,14 @@ PeerListContent::PeerListContent(
 , _controller(controller)
 , _rowHeight(_st.item.height) {
 	_controller->session().downloaderTaskFinished(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		update();
 	}, lifetime());
 
 	using UpdateFlag = Data::PeerUpdate::Flag;
 	_controller->session().changes().peerUpdates(
 		UpdateFlag::Name | UpdateFlag::Photo | UpdateFlag::EmojiStatus
-	) | rpl::on_next([=](const Data::PeerUpdate &update) {
+	) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
 		if (update.flags & UpdateFlag::Name) {
 			handleNameChanged(update.peer);
 		}
@@ -1038,7 +1019,7 @@ PeerListContent::PeerListContent(
 	}, lifetime());
 
 	style::PaletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		invalidatePixmapsCache();
 	}, lifetime());
 
@@ -1406,10 +1387,10 @@ void PeerListContent::initDecorateWidget(Ui::RpWidget *widget) {
 		widget->events(
 		) | rpl::filter([=](not_null<QEvent*> e) {
 			return (e->type() == QEvent::Enter) && widget->isVisible();
-		}) | rpl::on_next([=] {
+		}) | rpl::start_with_next([=] {
 			mouseLeftGeometry();
 		}, widget->lifetime());
-		widget->heightValue() | rpl::skip(1) | rpl::on_next([=] {
+		widget->heightValue() | rpl::skip(1) | rpl::start_with_next([=] {
 			resizeToWidth(width());
 		}, widget->lifetime());
 	}

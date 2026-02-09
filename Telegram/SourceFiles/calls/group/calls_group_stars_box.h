@@ -39,7 +39,6 @@ struct VideoStreamStarsBoxArgs {
 	int min = 0;
 	int current = 0;
 	bool sending = false;
-	bool admin = false;
 	Fn<void(int)> save;
 	QString name;
 };

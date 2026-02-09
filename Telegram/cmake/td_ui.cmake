@@ -32,7 +32,6 @@ set(style_files
     intro/intro.style
     iv/iv.style
     media/player/media_player.style
-    media/stories/media_stories.style
     passport/passport.style
     payments/ui/payments.style
     profile/profile.style
@@ -62,9 +61,6 @@ PRIVATE
     boxes/peers/edit_peer_history_visibility_box.h
     boxes/peers/toggle_topics_box.cpp
     boxes/peers/toggle_topics_box.h
-
-    boxes/url_auth_box_content.cpp
-    boxes/url_auth_box_content.h
 
     calls/group/ui/calls_group_recording_box.cpp
     calls/group/ui/calls_group_recording_box.h
@@ -100,8 +96,6 @@ PRIVATE
     data/data_channel_earn.h
     data/data_credits.h
     data/data_credits_earn.h
-    data/data_passkey_deserialize.cpp
-    data/data_passkey_deserialize.h
     data/data_peer_colors.h
     data/data_premium_subscription_option.h
     data/data_statistics_chart.cpp
@@ -144,9 +138,6 @@ PRIVATE
     editor/scene/scene_item_image.h
     editor/scene/scene_item_line.cpp
     editor/scene/scene_item_line.h
-
-    ui/boxes/about_cocoon_box.h
-    ui/boxes/about_cocoon_box.cpp
 
     history/admin_log/history_admin_log_filter_value.h
     history/history_view_top_toast.cpp
@@ -245,22 +236,14 @@ PRIVATE
 
     platform/linux/current_geo_location_linux.cpp
     platform/linux/current_geo_location_linux.h
-    platform/linux/text_recognition_linux.h
     platform/mac/file_bookmark_mac.h
     platform/mac/file_bookmark_mac.mm
     platform/mac/current_geo_location_mac.h
     platform/mac/current_geo_location_mac.mm
-    platform/mac/text_recognition_mac.h
-    platform/mac/text_recognition_mac.mm
     platform/win/current_geo_location_win.cpp
     platform/win/current_geo_location_win.h
-    platform/win/text_recognition_win.h
     platform/platform_file_bookmark.h
     platform/platform_current_geo_location.h
-    platform/platform_text_recognition.h
-
-    profile/profile_back_button.cpp
-    profile/profile_back_button.h
 
     settings/settings_common.cpp
     settings/settings_common.h
@@ -406,8 +389,6 @@ PRIVATE
     ui/controls/delete_message_context_action.h
     ui/controls/download_bar.cpp
     ui/controls/download_bar.h
-    ui/controls/dynamic_images_strip.cpp
-    ui/controls/dynamic_images_strip.h
     ui/controls/emoji_button.cpp
     ui/controls/emoji_button.h
     ui/controls/feature_list.cpp
@@ -422,8 +403,6 @@ PRIVATE
     ui/controls/invite_link_label.h
     ui/controls/peer_list_dummy.cpp
     ui/controls/peer_list_dummy.h
-    ui/controls/popup_selector.cpp
-    ui/controls/popup_selector.h
     ui/controls/round_video_recorder_data.h
     ui/controls/round_video_recorder.cpp
     ui/controls/round_video_recorder.h

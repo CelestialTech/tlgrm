@@ -95,7 +95,7 @@ GroupCallUserpics::GroupCallUserpics(
 	_maxWidth = 2 * single + (limit - 1) * (single - shift);
 
 	style::PaletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		for (auto &userpic : _list) {
 			userpic.cache = QImage();
 		}
@@ -120,7 +120,7 @@ GroupCallUserpics::GroupCallUserpics(
 	rpl::combine(
 		PowerSaving::OnValue(PowerSaving::kCalls),
 		std::move(hideBlobs)
-	) | rpl::on_next([=](bool disabled, bool deactivated) {
+	) | rpl::start_with_next([=](bool disabled, bool deactivated) {
 		const auto hide = disabled || deactivated;
 
 		if (!(hide && _speakingAnimationHideLastTime)) {

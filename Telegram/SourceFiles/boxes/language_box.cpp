@@ -39,7 +39,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_cloud_manager.h"
 #include "settings/settings_common.h"
 #include "spellcheck/spellcheck_types.h"
-#include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
@@ -909,7 +908,7 @@ void Content::setupContent(
 			inner,
 			st::defaultBox.margin.top()));
 
-		rows->isEmpty() | rpl::on_next([=](bool empty) {
+		rows->isEmpty() | rpl::start_with_next([=](bool empty) {
 			wrap->toggle(!empty, anim::type::instant);
 		}, rows->lifetime());
 
@@ -932,7 +931,7 @@ void Content::setupContent(
 		tr::lng_languages_none(),
 		st::membersAbout);
 	empty->entity()->sizeValue(
-	) | rpl::on_next([=](QSize size) {
+	) | rpl::start_with_next([=](QSize size) {
 		label->move(
 			(size.width() - label->width()) / 2,
 			(size.height() - label->height()) / 2);
@@ -952,7 +951,7 @@ void Content::setupContent(
 			main->isEmpty(),
 			other->isEmpty(),
 			_1 || _2
-		) | rpl::on_next([=](bool empty) {
+		) | rpl::start_with_next([=](bool empty) {
 			divider->toggle(!empty, anim::type::instant);
 		}, divider->lifetime());
 
@@ -960,7 +959,7 @@ void Content::setupContent(
 			a->hasSelection(
 			) | rpl::filter(
 				_1
-			) | rpl::on_next([=] {
+			) | rpl::start_with_next([=] {
 				b->setSelected(-1);
 			}, a->lifetime());
 		};
@@ -1049,7 +1048,7 @@ void Content::setupContent(
 	};
 	_activations = [=] {
 		if (!main && !other) {
-			return rpl::never<Language>() | rpl::type_erased;
+			return rpl::never<Language>() | rpl::type_erased();
 		} else if (!main) {
 			return other->activations();
 		} else if (!other) {
@@ -1058,7 +1057,7 @@ void Content::setupContent(
 		return rpl::merge(
 			main->activations(),
 			other->activations()
-		) | rpl::type_erased;
+		) | rpl::type_erased();
 	};
 	_changeChosen = [=](const QString &chosen) {
 		if (main) {
@@ -1103,12 +1102,8 @@ Ui::ScrollToRequest Content::jump(int rows) {
 
 } // namespace
 
-LanguageBox::LanguageBox(
-	QWidget*,
-	Window::SessionController *controller,
-	const QString &highlightId)
-: _controller(controller)
-, _highlightId(highlightId) {
+LanguageBox::LanguageBox(QWidget*, Window::SessionController *controller)
+: _controller(controller) {
 }
 
 void LanguageBox::prepare() {
@@ -1139,12 +1134,12 @@ void LanguageBox::prepare() {
 		inner->heightValue(),
 		topContainer->heightValue(),
 		_1 + _2
-	) | rpl::on_next([=](int height) {
+	) | rpl::start_with_next([=](int height) {
 		accumulate_max(*max, height);
 		setDimensions(st::boxWidth, qMin(*max, st::boxMaxListHeight));
 	}, inner->lifetime());
 	topContainer->heightValue(
-	) | rpl::on_next([=](int height) {
+	) | rpl::start_with_next([=](int height) {
 		setInnerTopSkip(height);
 	}, inner->lifetime());
 
@@ -1159,7 +1154,7 @@ void LanguageBox::prepare() {
 	});
 
 	inner->activations(
-	) | rpl::on_next([=](const Language &language) {
+	) | rpl::start_with_next([=](const Language &language) {
 		// "#custom" is applied each time it's passed to switchToLanguage().
 		// So we check that the language really has changed.
 		const auto currentId = [] {
@@ -1181,22 +1176,6 @@ void LanguageBox::prepare() {
 	};
 }
 
-void LanguageBox::showFinished() {
-	if (_controller && !_highlightId.isEmpty()) {
-		if (const auto window = Core::App().findWindow(this)) {
-			window->checkHighlightControl(
-				u"language/show-button"_q,
-				_showButtonToggle.data());
-			window->checkHighlightControl(
-				u"language/translate-chats"_q,
-				_translateChatsToggle.data());
-			window->checkHighlightControl(
-				u"language/do-not-translate"_q,
-				_doNotTranslateButton.data());
-		}
-	}
-}
-
 void LanguageBox::setupTop(not_null<Ui::VerticalLayout*> container) {
 	if (!_controller) {
 		return;
@@ -1207,12 +1186,11 @@ void LanguageBox::setupTop(not_null<Ui::VerticalLayout*> container) {
 			tr::lng_translate_settings_show(),
 			st::settingsButtonNoIcon))->toggleOn(
 				rpl::single(Core::App().settings().translateButtonEnabled()));
-	_showButtonToggle = translateEnabled;
 
 	translateEnabled->toggledValue(
 	) | rpl::filter([](bool checked) {
 		return (checked != Core::App().settings().translateButtonEnabled());
-	}) | rpl::on_next([=](bool checked) {
+	}) | rpl::start_with_next([=](bool checked) {
 		Core::App().settings().setTranslateButtonEnabled(checked);
 		Core::App().saveSettingsDelayed();
 	}, translateEnabled->lifetime());
@@ -1229,8 +1207,7 @@ void LanguageBox::setupTop(not_null<Ui::VerticalLayout*> container) {
 			rpl::duplicate(premium),
 			_1 && _2),
 		_translateChatTurnOff.events()));
-	_translateChatsToggle = translateChat;
-	std::move(premium) | rpl::on_next([=](bool value) {
+	std::move(premium) | rpl::start_with_next([=](bool value) {
 		translateChat->setToggleLocked(!value);
 	}, translateChat->lifetime());
 
@@ -1245,7 +1222,7 @@ void LanguageBox::setupTop(not_null<Ui::VerticalLayout*> container) {
 		}
 		return premium
 			&& (checked != Core::App().settings().translateChatEnabled());
-	}) | rpl::on_next([=](bool checked) {
+	}) | rpl::start_with_next([=](bool checked) {
 		Core::App().settings().setTranslateChatEnabled(checked);
 		Core::App().saveSettingsDelayed();
 	}, translateChat->lifetime());
@@ -1272,7 +1249,6 @@ void LanguageBox::setupTop(not_null<Ui::VerticalLayout*> container) {
 				: Ui::LanguageName(list.front());
 		}),
 		st::settingsButtonNoIcon);
-	_doNotTranslateButton = translateSkip;
 
 	translateSkip->setClickedCallback([=] {
 		uiShow()->showBox(Ui::EditSkipTranslationLanguages());
@@ -1312,9 +1288,7 @@ void LanguageBox::setInnerFocus() {
 	_setInnerFocus();
 }
 
-base::binary_guard LanguageBox::Show(
-		Window::SessionController *controller,
-		const QString &highlightId) {
+base::binary_guard LanguageBox::Show(Window::SessionController *controller) {
 	auto result = base::binary_guard();
 
 	auto &manager = Lang::CurrentCloudManager();
@@ -1326,17 +1300,17 @@ base::binary_guard LanguageBox::Show(
 		manager.languageListChanged(
 		) | rpl::take(
 			1
-		) | rpl::on_next([=]() mutable {
+		) | rpl::start_with_next([=]() mutable {
 			const auto show = guard->alive();
 			if (lifetime) {
 				base::take(lifetime)->destroy();
 			}
 			if (show) {
-				Ui::show(Box<LanguageBox>(weak.get(), highlightId));
+				Ui::show(Box<LanguageBox>(weak.get()));
 			}
 		}, *lifetime);
 	} else {
-		Ui::show(Box<LanguageBox>(controller, highlightId));
+		Ui::show(Box<LanguageBox>(controller));
 	}
 	manager.requestLanguageList();
 

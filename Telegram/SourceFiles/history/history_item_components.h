@@ -62,7 +62,6 @@ enum class SuggestionActions : uchar {
 	None,
 	Decline,
 	AcceptAndDecline,
-	GiftOfferActions,
 };
 
 struct HistoryMessageVia : RuntimeComponent<HistoryMessageVia, HistoryItem> {
@@ -165,7 +164,6 @@ struct HistoryMessageForwarded
 
 	PeerData *savedFromPeer = nullptr;
 	MsgId savedFromMsgId = 0;
-	TimeId savedFromDate = 0;
 
 	PeerData *savedFromSender = nullptr;
 	std::unique_ptr<HiddenSenderInfo> savedFromHiddenSenderInfo;
@@ -457,6 +455,9 @@ public:
 		Style(const style::BotKeyboardButton &st) : _st(&st) {
 		}
 
+		virtual void startPaint(
+			QPainter &p,
+			const Ui::ChatStyle *st) const = 0;
 		virtual const style::TextStyle &textStyle() const = 0;
 
 		int buttonSkip() const;
@@ -475,13 +476,8 @@ public:
 			QPainter &p,
 			const Ui::ChatStyle *st,
 			const QRect &rect,
-			HistoryMessageMarkupButton::Color color,
 			Ui::BubbleRounding rounding,
 			float64 howMuchOver) const = 0;
-		virtual void paintButtonStart(
-			QPainter &p,
-			const Ui::ChatStyle *st,
-			HistoryMessageMarkupButton::Color color) const = 0;
 		virtual void paintButtonIcon(
 			QPainter &p,
 			const Ui::ChatStyle *st,
@@ -492,7 +488,6 @@ public:
 			QPainter &p,
 			const Ui::ChatStyle *st,
 			const QRect &rect,
-			HistoryMessageMarkupButton::Color color,
 			int outerWidth,
 			Ui::BubbleRounding rounding) const = 0;
 		virtual int minButtonWidth(
@@ -506,8 +501,7 @@ public:
 			const Ui::ChatStyle *st,
 			int outerWidth,
 			const ReplyKeyboard::Button &button,
-			Ui::BubbleRounding rounding,
-			bool paused) const;
+			Ui::BubbleRounding rounding) const;
 		friend class ReplyKeyboard;
 
 	};
@@ -531,8 +525,7 @@ public:
 		const Ui::ChatStyle *st,
 		Ui::BubbleRounding rounding,
 		int outerWidth,
-		const QRect &clip,
-		bool paused) const;
+		const QRect &clip) const;
 	ClickHandlerPtr getLink(QPoint point) const;
 	ClickHandlerPtr getLinkByIndex(int index) const;
 
@@ -559,14 +552,12 @@ private:
 		QRect rect;
 		int characters = 0;
 		float64 howMuchOver = 0.;
-		HistoryMessageMarkupButton::Type type = {};
-		HistoryMessageMarkupButton::Color color = {};
+		HistoryMessageMarkupButton::Type type;
 		std::shared_ptr<ReplyMarkupClickHandler> link;
 		mutable std::unique_ptr<Ui::RippleAnimation> ripple;
 	};
 	struct ButtonCoords {
-		int i = 0;
-		int j = 0;
+		int i, j;
 	};
 
 	void startAnimation(int i, int j, int direction);
@@ -631,9 +622,8 @@ struct HistoryMessageFactcheck
 	bool requested = false;
 };
 
-struct HistoryMessageSuggestion
-: RuntimeComponent<HistoryMessageSuggestion, HistoryItem> {
-	std::shared_ptr<Data::UniqueGift> gift;
+struct HistoryMessageSuggestedPost
+: RuntimeComponent<HistoryMessageSuggestedPost, HistoryItem> {
 	CreditsAmount price;
 	TimeId date = 0;
 	mtpRequestId requestId = 0;
@@ -723,13 +713,12 @@ enum class SuggestRefundType {
 	None,
 	User,
 	Admin,
-	Expired,
 };
 
 struct HistoryServiceSuggestFinish
 : RuntimeComponent<HistoryServiceSuggestFinish, HistoryItem>
 , HistoryServiceDependentData {
-	CreditsAmount price;
+	CreditsAmount successPrice;
 	SuggestRefundType refundType = SuggestRefundType::None;
 };
 

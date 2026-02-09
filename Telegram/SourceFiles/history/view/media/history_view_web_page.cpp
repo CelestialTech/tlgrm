@@ -193,7 +193,7 @@ constexpr auto kSponsoredUserpicLines = 2;
 
 [[nodiscard]] TextWithEntities PageToPhrase(not_null<WebPageData*> page) {
 	const auto type = page->type;
-	const auto text = tr::upper(page->iv
+	const auto text = Ui::Text::Upper(page->iv
 		? tr::lng_view_button_iv(tr::now)
 		: page->uniqueGift
 		? tr::lng_view_button_collectible(tr::now)
@@ -238,16 +238,10 @@ constexpr auto kSponsoredUserpicLines = 2;
 		: (type == WebPageType::GiftCollection)
 		? tr::lng_view_button_collection(tr::now)
 		: (type == WebPageType::Auction)
-		? ((page->auction
-			&& page->auction->endDate
+		? (page->auction && page->auction->endDate
 			&& page->auction->endDate <= base::unixtime::now())
 			? tr::lng_auction_preview_view_results(tr::now)
-			: (page->auction
-				&& page->auction->auctionGift->auctionStartDate
-				&& (page->auction->auctionGift->auctionStartDate
-				> base::unixtime::now()))
-			? tr::lng_auction_bar_view(tr::now)
-			: tr::lng_auction_preview_join(tr::now))
+			: tr::lng_auction_preview_join(tr::now)
 		: QString());
 	if (page->iv) {
 		return Ui::Text::IconEmoji(&st::historyIvIcon).append(text);
@@ -408,7 +402,7 @@ QSize WebPage::countOptimalSize() {
 	} else if (sponsored && !sponsored->buttonText.isEmpty()) {
 		_openButton.setText(
 			st::semiboldTextStyle,
-			tr::upper(sponsored->buttonText));
+			Ui::Text::Upper(sponsored->buttonText));
 	}
 
 	const auto padding = inBubblePadding() + innerMargin();
@@ -536,16 +530,20 @@ QSize WebPage::countOptimalSize() {
 				});
 	} else if (!_attach && _data->auction) {
 		const auto &gift = _data->auction->auctionGift;
-		const auto backdrop = gift->background
-			? gift->background->backdrop()
-			: Data::UniqueGiftBackdrop();
+		const auto backdrop = Data::UniqueGiftBackdrop{
+			.centerColor = _data->auction->centerColor,
+			.edgeColor = _data->auction->edgeColor,
+			.patternColor = _data->auction->edgeColor,
+			.textColor = _data->auction->textColor,
+		};
 		_attach = std::make_unique<MediaGeneric>(
 			_parent,
 			GenerateAuctionPreview(
 				_parent,
 				nullptr,
 				gift,
-				backdrop),
+				backdrop,
+				_data->auction->endDate),
 			MediaGenericDescriptor{
 				.maxWidth = st::msgServiceGiftPreview,
 				.paintBgFactory = [=] {
@@ -553,7 +551,6 @@ QSize WebPage::countOptimalSize() {
 						_parent,
 						backdrop,
 						gift,
-						_data->auction->auctionGift->auctionStartDate,
 						_data->auction->endDate);
 				},
 			});
@@ -597,14 +594,14 @@ QSize WebPage::countOptimalSize() {
 		_siteNameLines = 1;
 		_siteName.setMarkedText(
 			st::webPageTitleStyle,
-			tr::link(siteName, _data->url),
+			Ui::Text::Link(siteName, _data->url),
 			Ui::WebpageTextTitleOptions());
 	}
 	if (_title.isEmpty() && !title.isEmpty()) {
 		if (!_siteNameLines && !_data->url.isEmpty()) {
 			_title.setMarkedText(
 				st::webPageTitleStyle,
-				tr::link(title, _data->url),
+				Ui::Text::Link(title, _data->url),
 				Ui::WebpageTextTitleOptions());
 
 		} else {

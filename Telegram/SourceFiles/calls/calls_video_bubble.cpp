@@ -30,17 +30,17 @@ void VideoBubble::setup() {
 	applyDragMode(_dragMode);
 
 	_content.paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		paint();
 	}, lifetime());
 
 	_track->stateValue(
-	) | rpl::on_next([=](Webrtc::VideoState state) {
+	) | rpl::start_with_next([=](Webrtc::VideoState state) {
 		setState(state);
 	}, lifetime());
 
 	_track->renderNextFrame(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (_track->frameSize().isEmpty()) {
 			_track->markFrameShown();
 		} else {

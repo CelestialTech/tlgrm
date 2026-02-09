@@ -151,7 +151,7 @@ struct SendPaymentDetails {
 
 [[nodiscard]] bool SuggestPaymentDataReady(
 	not_null<PeerData*> peer,
-	SuggestOptions suggest);
+	SuggestPostOptions suggest);
 
 struct PaidConfirmStyles {
 	const style::FlatLabel *label = nullptr;

@@ -62,7 +62,7 @@ SelfForwardsTagger::~SelfForwardsTagger() = default;
 
 void SelfForwardsTagger::setup() {
 	_controller->session().data().recentSelfForwards(
-	) | rpl::on_next([=](const Data::RecentSelfForwards &data) {
+	) | rpl::start_with_next([=](const Data::RecentSelfForwards &data) {
 		const auto history = _history ? _history() : nullptr;
 		if (!history || history->peer->id != data.fromPeerId) {
 			return;
@@ -70,7 +70,7 @@ void SelfForwardsTagger::setup() {
 		showSelectorForMessages(data.ids);
 	}, _lifetime);
 	_controller->session().data().recentJoinChat(
-	) | rpl::on_next([=](const Data::RecentJoinChat &data) {
+	) | rpl::start_with_next([=](const Data::RecentJoinChat &data) {
 		if (!_controller->session().data().chatsFilters().has()) {
 			return;
 		}
@@ -148,7 +148,7 @@ void SelfForwardsTagger::showSelectorForMessages(
 		}
 		Ui::Animations::HideWidgets({ toastWidget->widget(), selector });
 		selector->shownValue(
-		) | rpl::on_next([toastWidgetWeak](bool shown) {
+		) | rpl::start_with_next([toastWidgetWeak](bool shown) {
 			if (!shown) {
 				if (const auto toast = toastWidgetWeak.get()) {
 					delete toast->widget();
@@ -158,7 +158,7 @@ void SelfForwardsTagger::showSelectorForMessages(
 	};
 
 	selector->chosen(
-	) | rpl::on_next([=](ChosenReaction reaction) {
+	) | rpl::start_with_next([=](ChosenReaction reaction) {
 		selector->setAttribute(Qt::WA_TransparentForMouseEvents);
 		for (const auto &id : ids) {
 			if (const auto item = _controller->session().data().message(id)) {
@@ -190,7 +190,7 @@ void SelfForwardsTagger::showSelectorForMessages(
 
 	const auto state = selector->lifetime().make_state<ToastTimerState>();
 
-	selector->willExpand() | rpl::on_next([=] {
+	selector->willExpand() | rpl::start_with_next([=] {
 		state->expanded = true;
 	}, selector->lifetime());
 
@@ -207,7 +207,7 @@ void SelfForwardsTagger::showSelectorForMessages(
 	selector->initGeometry(_parent->height() / 2);
 
 	_toast->widget()->geometryValue(
-	) | rpl::on_next([=](const QRect &rect) {
+	) | rpl::start_with_next([=](const QRect &rect) {
 		if (rect.isEmpty()) {
 			return;
 		}
@@ -263,7 +263,7 @@ void SelfForwardsTagger::createLottieIcon(
 		[=] { lottieWidget->update(); },
 		0,
 		icon->framesCount() - 1);
-	lottieWidget->paintRequest() | rpl::on_next([=] {
+	lottieWidget->paintRequest() | rpl::start_with_next([=] {
 		auto p = QPainter(lottieWidget);
 		icon->paint(p, 0, 0);
 	}, lottieWidget->lifetime());
@@ -274,7 +274,7 @@ void SelfForwardsTagger::showTaggedToast(DocumentId reaction) {
 		tr::now,
 		lt_emoji,
 		Data::SingleCustomEmoji(reaction),
-		tr::marked);
+		Ui::Text::WithEntities);
 	hideToast();
 
 	const auto &st = st::selfForwardsTaggerToast;
@@ -304,7 +304,7 @@ void SelfForwardsTagger::showTaggedToast(DocumentId reaction) {
 			hideToast();
 		});
 
-		button->paintRequest() | rpl::on_next([=] {
+		button->paintRequest() | rpl::start_with_next([=] {
 			auto p = QPainter(button);
 			const auto font = st::historyPremiumViewSet.style.font;
 			const auto top = (button->height() - font->height) / 2;
@@ -320,7 +320,7 @@ void SelfForwardsTagger::showTaggedToast(DocumentId reaction) {
 		rpl::combine(
 			widget->sizeValue(),
 			button->sizeValue()
-		) | rpl::on_next([=](const QSize &outer, const QSize &inner) {
+		) | rpl::start_with_next([=](const QSize &outer, const QSize &inner) {
 			button->moveToRight(
 				st.padding.right(),
 				(outer.height() - inner.height()) / 2,
@@ -382,7 +382,7 @@ not_null<Ui::AbstractButton*> SelfForwardsTagger::createRightButton(
 	const auto button = Ui::CreateChild<Ui::IconButton>(
 		widget.get(),
 		st::joinChatAddToFilterToastButton);
-	widget->sizeValue() | rpl::on_next([=](const QSize &size) {
+	widget->sizeValue() | rpl::start_with_next([=](const QSize &size) {
 		button->moveToRight(
 			st::lineWidth * 4,
 			(size.height() - button->height()) / 2);
@@ -398,7 +398,7 @@ void SelfForwardsTagger::setupToastTimer(
 		Fn<void()> hideCallback) {
 	const auto restartTimer = [=](crl::time ms) {
 		state->timerLifetime.destroy();
-		base::timer_once(ms) | rpl::on_next([=] {
+		base::timer_once(ms) | rpl::start_with_next([=] {
 			hideCallback();
 		}, state->timerLifetime);
 	};

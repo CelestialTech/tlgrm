@@ -186,7 +186,7 @@ if %AlphaVersion% neq 0 (
 
 cd "%HomePath%"
 
-call configure.bat -DDESKTOP_APP_ENABLE_LTO=ON
+call configure.bat
 if %errorlevel% neq 0 goto error
 
 cd "%SolutionPath%"

@@ -19,7 +19,7 @@ namespace Api {
 
 inline constexpr auto kScheduledUntilOnlineTimestamp = TimeId(0x7FFFFFFE);
 
-[[nodiscard]] MTPSuggestedPost SuggestToMTP(SuggestOptions suggest);
+[[nodiscard]] MTPSuggestedPost SuggestToMTP(SuggestPostOptions suggest);
 
 struct SendOptions {
 	uint64 price = 0;
@@ -28,16 +28,13 @@ struct SendOptions {
 	TimeId scheduleRepeatPeriod = 0;
 	BusinessShortcutId shortcutId = 0;
 	EffectId effectId = 0;
-	QByteArray stakeSeedHash;
-	int64 stakeNanoTon = 0;
 	int starsApproved = 0;
 	bool silent = false;
 	bool handleSupportSwitch = false;
 	bool invertCaption = false;
 	bool hideViaBot = false;
-	bool mediaSpoiler = false;
 	crl::time ttlSeconds = 0;
-	SuggestOptions suggest;
+	SuggestPostOptions suggest;
 
 	friend inline bool operator==(
 		const SendOptions &,

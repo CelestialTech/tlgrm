@@ -93,7 +93,7 @@ constexpr auto kShowChatNamesCount = 8;
 				result,
 				lt_chat,
 				wrapName(*i),
-				tr::marked);
+				Ui::Text::WithEntities);
 		}
 		return result;
 	}();
@@ -104,7 +104,7 @@ constexpr auto kShowChatNamesCount = 8;
 			(count - shown),
 			lt_chats,
 			accumulated,
-			tr::marked)
+			Ui::Text::WithEntities)
 		: accumulated;
 }
 
@@ -124,7 +124,7 @@ Folder::Folder(not_null<Session*> owner, FolderId id)
 		PeerUpdate::Flag::Name
 	) | rpl::filter([=](const PeerUpdate &update) {
 		return ranges::contains(_lastHistories, update.peer, &History::peer);
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		++_chatListViewVersion;
 		updateChatListEntryPostponed();
 	}, _lifetime);
@@ -134,13 +134,13 @@ Folder::Folder(not_null<Session*> owner, FolderId id)
 	_chatsList.unreadStateChanges(
 	) | rpl::filter([=] {
 		return inChatList();
-	}) | rpl::on_next([=](const Dialogs::UnreadState &old) {
+	}) | rpl::start_with_next([=](const Dialogs::UnreadState &old) {
 		++_chatListViewVersion;
 		notifyUnreadStateChange(old);
 	}, _lifetime);
 
 	_chatsList.fullSize().changes(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateChatListEntryPostponed();
 	}, _lifetime);
 }

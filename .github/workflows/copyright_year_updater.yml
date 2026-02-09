@@ -9,7 +9,7 @@ on:
 
 jobs:
   Copyright-year:
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     steps:
       - uses: desktop-app/action_code_updater@master
         with:

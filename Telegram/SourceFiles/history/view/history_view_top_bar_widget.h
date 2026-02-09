@@ -36,10 +36,6 @@ namespace Window {
 class SessionController;
 } // namespace Window
 
-namespace Calls {
-struct StartOutgoingCallArgs;
-} // namespace Calls
-
 namespace HistoryView {
 
 class SendActionPainter;
@@ -145,15 +141,12 @@ private:
 	void updateInfoToggleActive();
 	void setupDragOnBackButton();
 
-	void call(Calls::StartOutgoingCallArgs);
+	void call();
 	void groupCall();
 	void showGroupCallMenu(not_null<PeerData*> peer);
-	void showCallMenu();
 	void toggleInfoSection();
 
-	[[nodiscard]] bool createMenu(
-		not_null<Ui::IconButton*> button,
-		bool withIcons = true);
+	[[nodiscard]] bool createMenu(not_null<Ui::IconButton*> button);
 
 	void handleEmojiInteractionSeen(const QString &emoticon);
 	bool paintSendAction(

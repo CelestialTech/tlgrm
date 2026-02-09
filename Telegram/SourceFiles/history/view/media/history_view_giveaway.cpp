@@ -82,7 +82,7 @@ auto GenerateGiveawayStart(
 				links));
 		};
 		pushText(
-			tr::bold(
+			Ui::Text::Bold(
 				tr::lng_prizes_title(tr::now, lt_count, quantity)),
 			st::chatGiveawayPrizesTitleMargin);
 
@@ -94,7 +94,7 @@ auto GenerateGiveawayStart(
 					quantity,
 					lt_prize,
 					TextWithEntities{ data->additionalPrize },
-					tr::rich),
+					Ui::Text::RichLangValue),
 				st::chatGiveawayPrizesMargin);
 			push(std::make_unique<TextDelimeterPart>(
 				tr::lng_prizes_additional_with(tr::now),
@@ -109,8 +109,8 @@ auto GenerateGiveawayStart(
 					tr::now,
 					lt_count,
 					data->credits,
-					tr::rich),
-				tr::rich)
+					Ui::Text::RichLangValue),
+				Ui::Text::RichLangValue)
 			: (data->credits && (quantity > 1))
 			? tr::lng_prizes_credits_about(
 				tr::now,
@@ -121,18 +121,18 @@ auto GenerateGiveawayStart(
 					tr::now,
 					lt_count,
 					data->credits,
-					tr::rich),
-				tr::rich)
+					Ui::Text::RichLangValue),
+				Ui::Text::RichLangValue)
 			: tr::lng_prizes_about(
 				tr::now,
 				lt_count,
 				quantity,
 				lt_duration,
-				tr::bold(GiftDuration(months * 30)),
-				tr::rich),
+				Ui::Text::Bold(GiftDuration(months * 30)),
+				Ui::Text::RichLangValue),
 			st::chatGiveawayPrizesMargin);
 		pushText(
-			tr::bold(tr::lng_prizes_participants(tr::now)),
+			Ui::Text::Bold(tr::lng_prizes_participants(tr::now)),
 			st::chatGiveawayPrizesTitleMargin);
 
 		const auto hasChannel = ranges::any_of(
@@ -192,7 +192,7 @@ auto GenerateGiveawayStart(
 		}
 
 		pushText(
-			tr::bold(tr::lng_prizes_date(tr::now)),
+			Ui::Text::Bold(tr::lng_prizes_date(tr::now)),
 			(countries.empty()
 				? st::chatGiveawayNoCountriesTitleMargin
 				: st::chatGiveawayPrizesMargin));
@@ -259,7 +259,7 @@ auto GenerateGiveawayResults(
 		pushText(
 			(isSingleWinner
 				? tr::lng_prizes_results_title_one
-				: tr::lng_prizes_results_title)(tr::now, tr::bold),
+				: tr::lng_prizes_results_title)(tr::now, Ui::Text::Bold),
 			st::chatGiveawayPrizesTitleMargin);
 		const auto showGiveawayHandler = JumpToMessageClickHandler(
 			data->channel,
@@ -271,14 +271,14 @@ auto GenerateGiveawayResults(
 				lt_count,
 				quantity,
 				lt_link,
-				tr::link(tr::lng_prizes_results_link(tr::now)),
-				tr::rich),
+				Ui::Text::Link(tr::lng_prizes_results_link(tr::now)),
+				Ui::Text::RichLangValue),
 			st::chatGiveawayPrizesMargin,
 			{ { 1, showGiveawayHandler } });
 		pushText(
 			(isSingleWinner
 				? tr::lng_prizes_results_winner
-				: tr::lng_prizes_results_winners)(tr::now, tr::bold),
+				: tr::lng_prizes_results_winners)(tr::now, Ui::Text::Bold),
 			st::chatGiveawayPrizesTitleMargin);
 
 		push(std::make_unique<PeerBubbleListPart>(
@@ -286,7 +286,7 @@ auto GenerateGiveawayResults(
 			data->winners));
 		if (data->winnersCount > data->winners.size()) {
 			pushText(
-				tr::bold(tr::lng_prizes_results_more(
+				Ui::Text::Bold(tr::lng_prizes_results_more(
 					tr::now,
 					lt_count,
 					data->winnersCount - data->winners.size())),

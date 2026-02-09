@@ -95,14 +95,16 @@ Action::Action(
 , _height(st::dialogsSearchInHeight)
 , _icon(std::move(icon))
 , _checked(chosen) {
+	const auto parent = parentMenu->menu();
+
 	_text.setText(st::semiboldTextStyle, label);
 	_icon->subscribeToUpdates([=] { update(); });
 
-	fitToMenuWidth();
+	initResizeHook(parent->sizeValue());
 	resolveMinWidth();
 
 	paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		Painter p(this);
 		paint(p);
 	}, lifetime());
@@ -261,7 +263,7 @@ void ChatSearchIn::Section::update() {
 
 ChatSearchIn::ChatSearchIn(QWidget *parent)
 : RpWidget(parent) {
-	_in.clicks.events() | rpl::on_next([=] {
+	_in.clicks.events() | rpl::start_with_next([=] {
 		showMenu();
 	}, lifetime());
 }
@@ -283,13 +285,13 @@ void ChatSearchIn::apply(
 	updateSection(
 		&_in,
 		i->icon->clone(),
-		tr::semibold(TabLabel(active, peerTabType)));
+		Ui::Text::Semibold(TabLabel(active, peerTabType)));
 
 	auto text = tr::lng_dlg_search_from(
 		tr::now,
 		lt_user,
-		tr::semibold(fromName),
-		tr::marked);
+		Ui::Text::Semibold(fromName),
+		Ui::Text::WithEntities);
 	updateSection(&_from, std::move(fromUserpic), std::move(text));
 
 	resizeToWidth(width());
@@ -330,7 +332,7 @@ void ChatSearchIn::showMenu() {
 			tab.icon,
 			TabLabel(value, _peerTabType),
 			(value == active));
-		action->setActionTriggered([=] {
+		action->setClickedCallback([=] {
 			_active = value;
 		});
 		_menu->addAction(std::move(action));
@@ -408,7 +410,7 @@ void ChatSearchIn::updateSection(
 			st::columnMinimalWidthLeft,
 			st::dialogsSearchInHeight);
 
-		raw->paintRequest() | rpl::on_next([=] {
+		raw->paintRequest() | rpl::start_with_next([=] {
 			auto p = QPainter(raw);
 			if (!section->subscribed) {
 				section->subscribed = true;
@@ -450,7 +452,7 @@ void ChatSearchIn::updateSection(
 		const auto st = &st::dialogsCancelSearchInPeer;
 		section->cancel = std::make_unique<Ui::IconButton>(raw, *st);
 		section->cancel->show();
-		raw->sizeValue() | rpl::on_next([=](QSize size) {
+		raw->sizeValue() | rpl::start_with_next([=](QSize size) {
 			const auto left = size.width() - section->cancel->width();
 			const auto top = (size.height() - st->height) / 2;
 			section->cancel->moveToLeft(left, top);

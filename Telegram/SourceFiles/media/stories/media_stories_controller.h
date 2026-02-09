@@ -35,7 +35,6 @@ class DocumentMedia;
 
 namespace HistoryView::Controls {
 enum class ToggleCommentsState;
-struct SendStarButtonEffect;
 } // namespace HistoryView::Controls
 
 namespace HistoryView::Reactions {
@@ -87,7 +86,6 @@ struct RepostClickHandler;
 
 using CommentsState = HistoryView::Controls::ToggleCommentsState;
 using PaidReactionToast = HistoryView::PaidReactionToast;
-using SendStarButtonEffect = HistoryView::Controls::SendStarButtonEffect;
 
 enum class HeaderLayout {
 	Normal,
@@ -188,8 +186,6 @@ public:
 	void setCommentsShownToggles(rpl::producer<> toggles);
 	[[nodiscard]] auto starsReactionsValue() const
 		-> rpl::producer<Ui::SendStarButtonState>;
-	[[nodiscard]] auto starsReactionsEffects() const
-		-> rpl::producer<SendStarButtonEffect>;
 	void setStarsReactionIncrements(rpl::producer<int> increments);
 
 	void unfocusReply();
@@ -358,7 +354,6 @@ private:
 	MsgId _commentsLastId = 0;
 	rpl::variable<int> _starsReactions;
 	rpl::variable<bool> _starsReactionHighlighted;
-	rpl::event_stream<SendStarButtonEffect> _starsReactionEffects;
 
 	std::vector<CachedSource> _cachedSourcesList;
 	int _cachedSourceIndex = -1;

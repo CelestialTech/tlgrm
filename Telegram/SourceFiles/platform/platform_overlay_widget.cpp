@@ -85,12 +85,12 @@ object_ptr<Ui::AbstractButton> DefaultOverlayWidgetHelper::Buttons::create(
 	rpl::merge(
 		_masterOpacity.changes() | rpl::to_empty,
 		_maximized.changes() | rpl::to_empty
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		raw->update();
 	}, raw->lifetime());
 
 	_clearStateRequests.events(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		raw->clearState();
 		raw->update();
 		state->over = raw->isOver();
@@ -152,7 +152,7 @@ object_ptr<Ui::AbstractButton> DefaultOverlayWidgetHelper::Buttons::create(
 	};
 
 	raw->paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateOver();
 		prepareFrame();
 

@@ -7,8 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "base/object_ptr.h"
-
 namespace st {
 extern const style::margins &giveawayGiftCodeLabelMargin;
 extern const style::margins &giveawayGiftCodeValueMargin;
@@ -23,7 +21,6 @@ namespace Ui {
 class RpWidget;
 class TableLayout;
 class FlatLabel;
-class RoundButton;
 class ImportantTooltip;
 
 void AddTableRow(
@@ -45,11 +42,7 @@ void AddTableRow(
 	PeerId id);
 
 
-struct ValueWithSmallButton {
-	object_ptr<RpWidget> widget;
-	not_null<RoundButton*> button;
-};
-[[nodiscard]] ValueWithSmallButton MakeValueWithSmallButton(
+[[nodiscard]] object_ptr<RpWidget> MakeValueWithSmallButton(
 	not_null<TableLayout*> table,
 	not_null<RpWidget*> value,
 	rpl::producer<QString> buttonText,
@@ -80,7 +73,7 @@ void ShowTableRowTooltip(
 	int duration,
 	const Text::MarkedContext &context = {});
 
-[[nodiscard]] ValueWithSmallButton MakeTableValueWithTooltip(
+[[nodiscard]] object_ptr<RpWidget> MakeTableValueWithTooltip(
 	not_null<TableLayout*> table,
 	std::shared_ptr<TableRowTooltipData> data,
 	TextWithEntities price,

@@ -166,9 +166,9 @@ public:
 	void setAllowedReactions(Data::AllowedReactions value);
 	[[nodiscard]] const Data::AllowedReactions &allowedReactions() const;
 
-	[[nodiscard]] MTPlong inputChat() const;
-
 	// Still public data members.
+	const MTPlong inputChat;
+
 	int count = 0;
 	TimeId date = 0;
 	UserId creator = 0;

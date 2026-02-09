@@ -223,7 +223,7 @@ EmojiSelector::EmojiSelector(
 , _controller(controller) {
 	std::move(
 		recent
-	) | rpl::on_next([=](std::vector<DocumentId> ids) {
+	) | rpl::start_with_next([=](std::vector<DocumentId> ids) {
 		_lastRecent = std::move(ids);
 		_recentChanges.fire({});
 	}, lifetime());
@@ -254,11 +254,11 @@ EmojiSelector::Selector EmojiSelector::createEmojiList(
 	const auto footer = list->createFooter().data();
 	list->refreshEmoji();
 	list->customChosen(
-	) | rpl::on_next([=](const ChatHelpers::FileChosen &chosen) {
+	) | rpl::start_with_next([=](const ChatHelpers::FileChosen &chosen) {
 		_chosen.fire_copy(chosen.document);
 	}, list->lifetime());
 	_recentChanges.events(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		createSelector(Type::Emoji);
 	}, list->lifetime());
 	list->setAllowWithoutPremium(true);
@@ -276,7 +276,7 @@ EmojiSelector::Selector EmojiSelector::createStickersList(
 	const auto footer = list->createFooter().data();
 	list->refreshRecent();
 	list->chosen(
-	) | rpl::on_next([=](const ChatHelpers::FileChosen &chosen) {
+	) | rpl::start_with_next([=](const ChatHelpers::FileChosen &chosen) {
 		_chosen.fire_copy(chosen.document);
 	}, list->lifetime());
 	return { list, footer };
@@ -292,7 +292,7 @@ void EmojiSelector::createSelector(Type type) {
 	const auto container = _container.get();
 	container->show();
 	sizeValue(
-	) | rpl::on_next([=](const QSize &s) {
+	) | rpl::start_with_next([=](const QSize &s) {
 		container->setGeometry(Rect(s));
 	}, container->lifetime());
 
@@ -312,7 +312,7 @@ void EmojiSelector::createSelector(Type type) {
 			+ QSize(pos.x() * 2, pos.y() * 2));
 		toggleButton->show();
 		toggleButton->paintRequest(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			auto p = QPainter(toggleButton);
 			const auto r = toggleButton->rect()
 				- QMargins(pos.x(), pos.y(), pos.x(), pos.y());
@@ -332,20 +332,20 @@ void EmojiSelector::createSelector(Type type) {
 	rpl::combine(
 		scroll->scrollTopValue(),
 		scroll->heightValue()
-	) | rpl::on_next([=](int scrollTop, int scrollHeight) {
+	) | rpl::start_with_next([=](int scrollTop, int scrollHeight) {
 		const auto scrollBottom = scrollTop + scrollHeight;
 		selector.list->setVisibleTopBottom(scrollTop, scrollBottom);
 	}, selector.list->lifetime());
 
 	selector.list->scrollToRequests(
-	) | rpl::on_next([=](int y) {
+	) | rpl::start_with_next([=](int y) {
 		scroll->scrollToY(y);
 		// _shadow->update();
 	}, selector.list->lifetime());
 
 	const auto separator = Ui::CreateChild<Ui::RpWidget>(container);
 	separator->paintRequest(
-	) | rpl::on_next([=](const QRect &r) {
+	) | rpl::start_with_next([=](const QRect &r) {
 		auto p = QPainter(separator);
 		p.fillRect(r, st::shadowFg);
 	}, separator->lifetime());
@@ -356,7 +356,7 @@ void EmojiSelector::createSelector(Type type) {
 
 	const auto scrollWidth = stScroll.width;
 	sizeValue(
-	) | rpl::on_next([=](const QSize &s) {
+	) | rpl::start_with_next([=](const QSize &s) {
 		const auto left = st::userpicBuilderEmojiSelectorLeft;
 		const auto mostTop = st::userpicBuilderEmojiSelectorLeft;
 
@@ -506,7 +506,7 @@ not_null<Ui::VerticalLayout*> CreateUserpicBuilder(
 		state->circleButtons[current]->clicked({}, Qt::LeftButton);
 	}
 	paletteBg->sizeValue(
-	) | rpl::on_next([=](const QSize &s) {
+	) | rpl::start_with_next([=](const QSize &s) {
 		palette->setGeometry(Ui::BubbleWrapInnerRect(Rect(s))
 			- st::userpicBuilderEmojiBubblePalettePadding);
 		AlignChildren(palette, palette->width());
@@ -530,18 +530,18 @@ not_null<Ui::VerticalLayout*> CreateUserpicBuilder(
 		controller,
 		base::take(data.documents));
 	selector->chosen(
-	) | rpl::on_next([=](not_null<DocumentData*> document) {
+	) | rpl::start_with_next([=](not_null<DocumentData*> document) {
 		state->gradientEditorStartData.documentId = document->id;
 		preview->setDocument(document);
 	}, preview->lifetime());
 	selectorBg->sizeValue(
-	) | rpl::on_next([=](const QSize &s) {
+	) | rpl::start_with_next([=](const QSize &s) {
 		selector->setGeometry(Ui::BubbleWrapInnerRect(Rect(s)));
 	}, selector->lifetime());
 
 	base::take(
 		communication.triggers
-	) | rpl::on_next([=, done = base::take(communication.result)] {
+	) | rpl::start_with_next([=, done = base::take(communication.result)] {
 		preview->result(Editor::kProfilePhotoSize, [=](Result result) {
 			done(std::move(result));
 		});
@@ -563,12 +563,12 @@ not_null<Ui::RpWidget*> CreateEmojiUserpic(
 		isForum);
 	std::move(
 		document
-	) | rpl::on_next([=](not_null<DocumentData*> d) {
+	) | rpl::start_with_next([=](not_null<DocumentData*> d) {
 		widget->setDocument(d);
 	}, widget->lifetime());
 	std::move(
 		colorIndex
-	) | rpl::on_next([=](int index) {
+	) | rpl::start_with_next([=](int index) {
 		widget->setGradientColors(
 			paletteGradients[index % paletteGradients.size()]);
 	}, widget->lifetime());

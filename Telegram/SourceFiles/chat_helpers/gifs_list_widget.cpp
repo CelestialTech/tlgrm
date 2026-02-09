@@ -126,24 +126,24 @@ GifsListWidget::GifsListWidget(
 		[=] { sendInlineRequest(); });
 
 	session().data().stickers().savedGifsUpdated(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		refreshSavedGifs();
 	}, lifetime());
 
 	session().downloaderTaskFinished(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateInlineItems();
 	}, lifetime());
 
 	_show->pauseChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (!paused()) {
 			updateInlineItems();
 		}
 	}, lifetime());
 
 	sizeValue(
-	) | rpl::on_next([=](const QSize &s) {
+	) | rpl::start_with_next([=](const QSize &s) {
 		_mosaic.setFullWidth(s.width());
 	}, lifetime());
 
@@ -181,13 +181,13 @@ object_ptr<TabbedSelector::InnerFooter> GifsListWidget::createFooter() {
 
 	GifSectionsValue(
 		&session()
-	) | rpl::on_next([=](std::vector<GifSection> &&list) {
+	) | rpl::start_with_next([=](std::vector<GifSection> &&list) {
 		_sections = std::move(list);
 		refreshIcons();
 	}, _footer->lifetime());
 
 	_footer->setChosen(
-	) | rpl::on_next([=](uint64 setId) {
+	) | rpl::start_with_next([=](uint64 setId) {
 		if (_search) {
 			_search->cancel();
 		}
@@ -518,8 +518,7 @@ void GifsListWidget::selectInlineResult(
 			|| (media && media->image(PhotoSize::Large))) {
 			_photoChosen.fire({
 				.photo = photo,
-				.options = options
-			});
+				.options = options });
 		} else if (!photo->loading(PhotoSize::Thumbnail)) {
 			photo->load(PhotoSize::Thumbnail, Data::FileOrigin());
 		}
@@ -952,8 +951,8 @@ void GifsListWidget::sendInlineRequest() {
 	_search->setLoading(true);
 	_inlineRequestId = _api.request(MTPmessages_GetInlineBotResults(
 		MTP_flags(0),
-		_searchBot->inputUser(),
-		_inlineQueryPeer->input(),
+		_searchBot->inputUser,
+		_inlineQueryPeer->input,
 		MTPInputGeoPoint(),
 		MTP_string(_inlineQuery),
 		MTP_string(nextOffset)

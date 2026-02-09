@@ -17,21 +17,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_icon.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
-#include "settings/sections/settings_premium.h"
+#include "settings/settings_premium.h"
 #include "ui/controls/feature_list.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/popup_menu.h"
-#include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/painter.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "styles/style_media_view.h"
-#include "styles/style_media_stories.h"
 #include "styles/style_layers.h"
-#include "styles/style_menu_icons.h"
 
 namespace Media::Stories {
 namespace {
@@ -43,7 +39,6 @@ struct State {
 	Data::StealthMode mode;
 	TimeId now = 0;
 	bool premium = false;
-	bool hasCallback = false;
 };
 
 [[nodiscard]] Ui::Toast::Config ToastAlready(TimeId left) {
@@ -53,7 +48,7 @@ struct State {
 			tr::now,
 			lt_left,
 			TextWithEntities{ TimeLeftText(left) },
-			tr::rich),
+			Ui::Text::RichLangValue),
 		.st = &st::storiesStealthToast,
 		.adaptive = true,
 		.duration = kAlreadyToastDuration,
@@ -65,7 +60,7 @@ struct State {
 		.title = tr::lng_stealth_mode_enabled_tip_title(tr::now),
 		.text = tr::lng_stealth_mode_enabled_tip(
 			tr::now,
-			tr::rich),
+			Ui::Text::RichLangValue),
 		.st = &st::storiesStealthToast,
 		.adaptive = true,
 		.duration = kAlreadyToastDuration,
@@ -76,7 +71,7 @@ struct State {
 	return {
 		.text = tr::lng_stealth_mode_cooldown_tip(
 			tr::now,
-			tr::rich),
+			Ui::Text::RichLangValue),
 		.st = &st::storiesStealthToast,
 		.adaptive = true,
 		.duration = kAlreadyToastDuration,
@@ -84,12 +79,11 @@ struct State {
 }
 
 [[nodiscard]] rpl::producer<State> StateValue(
-		not_null<Main::Session*> session,
-		bool hasCallback = false) {
+		not_null<Main::Session*> session) {
 	return rpl::combine(
 		session->data().stories().stealthModeValue(),
 		Data::AmPremiumValue(session)
-	) | rpl::map([=](Data::StealthMode mode, bool premium) {
+	) | rpl::map([](Data::StealthMode mode, bool premium) {
 		return rpl::make_producer<State>([=](auto consumer) {
 			struct Info {
 				base::Timer timer;
@@ -122,8 +116,7 @@ struct State {
 					info->timer.callOnce(left * crl::time(1000));
 				}
 				if (send) {
-					consumer.put_next(
-						State{ mode, now, premium, hasCallback });
+					consumer.put_next(State{ mode, now, premium });
 				}
 				if (left <= 0) {
 					consumer.put_done();
@@ -136,29 +129,25 @@ struct State {
 	}) | rpl::flatten_latest();
 }
 
-[[nodiscard]] Ui::FeatureListEntry FeaturePast(
-		const style::StealthBoxStyle &st) {
+[[nodiscard]] Ui::FeatureListEntry FeaturePast() {
 	return {
-		.icon = st.featurePastIcon,
+		.icon = st::storiesStealthFeaturePastIcon,
 		.title = tr::lng_stealth_mode_past_title(tr::now),
 		.about = { tr::lng_stealth_mode_past_about(tr::now) },
 	};
 }
 
-[[nodiscard]] Ui::FeatureListEntry FeatureNext(
-		const style::StealthBoxStyle &st) {
+[[nodiscard]] Ui::FeatureListEntry FeatureNext() {
 	return {
-		.icon = st.featureNextIcon,
+		.icon = st::storiesStealthFeatureNextIcon,
 		.title = tr::lng_stealth_mode_next_title(tr::now),
 		.about = { tr::lng_stealth_mode_next_about(tr::now) },
 	};
 }
 
-[[nodiscard]] object_ptr<Ui::RpWidget> MakeLogo(
-		QWidget *parent,
-		const style::StealthBoxStyle &st) {
+[[nodiscard]] object_ptr<Ui::RpWidget> MakeLogo(QWidget *parent) {
 	const auto add = st::storiesStealthLogoAdd;
-	const auto icon = &st.logoIcon;
+	const auto icon = &st::storiesStealthLogoIcon;
 	const auto size = QSize(2 * add, 2 * add) + icon->size();
 	auto result = object_ptr<Ui::PaddingWrap<Ui::RpWidget>>(
 		parent,
@@ -167,10 +156,10 @@ struct State {
 	const auto inner = result->entity();
 	inner->resize(size);
 	inner->paintRequest(
-	) | rpl::on_next([=, &st] {
+	) | rpl::start_with_next([=] {
 		auto p = QPainter(inner);
 		auto hq = PainterHighQualityEnabler(p);
-		p.setBrush(st.logoBg);
+		p.setBrush(st::storiesComposeBlue);
 		p.setPen(Qt::NoPen);
 		const auto left = (inner->width() - size.width()) / 2;
 		const auto top = (inner->height() - size.height()) / 2;
@@ -181,22 +170,19 @@ struct State {
 	return result;
 }
 
-[[nodiscard]] object_ptr<Ui::RpWidget> MakeTitle(
-		QWidget *parent,
-		const style::StealthBoxStyle &st) {
+[[nodiscard]] object_ptr<Ui::RpWidget> MakeTitle(QWidget *parent) {
 	return object_ptr<Ui::PaddingWrap<Ui::FlatLabel>>(
 		parent,
 		object_ptr<Ui::FlatLabel>(
 			parent,
 			tr::lng_stealth_mode_title(tr::now),
-			st.box.title),
+			st::storiesStealthBox.title),
 		st::storiesStealthTitleMargin);
 }
 
 [[nodiscard]] object_ptr<Ui::RpWidget> MakeAbout(
 		QWidget *parent,
-		rpl::producer<State> state,
-		const style::StealthBoxStyle &st) {
+		rpl::producer<State> state) {
 	auto text = std::move(state) | rpl::map([](const State &state) {
 		return state.premium
 			? tr::lng_stealth_mode_about(tr::now)
@@ -207,21 +193,18 @@ struct State {
 		object_ptr<Ui::FlatLabel>(
 			parent,
 			std::move(text),
-			st.about),
+			st::storiesStealthAbout),
 		st::storiesStealthAboutMargin);
 }
 
 [[nodiscard]] object_ptr<Ui::RoundButton> MakeButton(
 		QWidget *parent,
-		rpl::producer<State> state,
-		const style::StealthBoxStyle &st) {
+		rpl::producer<State> state) {
 	auto text = rpl::duplicate(state) | rpl::map([](const State &state) {
 		if (!state.premium) {
 			return tr::lng_stealth_mode_unlock();
 		} else if (state.mode.cooldownTill <= state.now) {
-			return state.hasCallback
-				? tr::lng_stealth_mode_enable_and_open()
-				: tr::lng_stealth_mode_enable();
+			return tr::lng_stealth_mode_enable();
 		}
 		return rpl::single(
 			rpl::empty
@@ -234,38 +217,38 @@ struct State {
 				tr::now,
 				lt_left,
 				TimeLeftText(left));
-		}) | rpl::type_erased;
+		}) | rpl::type_erased();
 	}) | rpl::flatten_latest();
 
 	auto result = object_ptr<Ui::RoundButton>(
 		parent,
 		rpl::single(QString()),
-		st.box.button);
+		st::storiesStealthBox.button);
 	const auto raw = result.data();
 
 	const auto label = Ui::CreateChild<Ui::FlatLabel>(
 		raw,
 		std::move(text),
-		st.buttonLabel);
+		st::storiesStealthButtonLabel);
 	label->setAttribute(Qt::WA_TransparentForMouseEvents);
 	label->show();
 
 	const auto lock = Ui::CreateChild<Ui::RpWidget>(raw);
 	lock->setAttribute(Qt::WA_TransparentForMouseEvents);
-	lock->resize(st.lockIcon.size());
+	lock->resize(st::storiesStealthLockIcon.size());
 	lock->paintRequest(
-	) | rpl::on_next([=, &st] {
+	) | rpl::start_with_next([=] {
 		auto p = QPainter(lock);
-		st.lockIcon.paintInCenter(p, lock->rect());
+		st::storiesStealthLockIcon.paintInCenter(p, lock->rect());
 	}, lock->lifetime());
 
-	const auto lockLeft = -st.buttonLabel.style.font->height;
-	const auto updateLabelLockGeometry = [=, &st] {
+	const auto lockLeft = -st::storiesStealthButtonLabel.style.font->height;
+	const auto updateLabelLockGeometry = [=] {
 		const auto outer = raw->width();
-		const auto added = -st.box.button.width;
+		const auto added = -st::storiesStealthBox.button.width;
 		const auto skip = lock->isHidden() ? 0 : (lockLeft + lock->width());
 		const auto width = outer - added - skip;
-		const auto top = st.box.button.textTop;
+		const auto top = st::storiesStealthBox.button.textTop;
 		label->resizeToWidth(width);
 		label->move(added / 2, top);
 		const auto inner = std::min(label->textMaxWidth(), width);
@@ -274,7 +257,7 @@ struct State {
 		lock->move(right + lockLeft, top + lockTop);
 	};
 
-	std::move(state) | rpl::on_next([=](const State &state) {
+	std::move(state) | rpl::start_with_next([=](const State &state) {
 		const auto cooldown = state.premium
 			&& (state.mode.cooldownTill > state.now);
 		label->setOpacity(cooldown ? kCooldownButtonLabelOpacity : 1.);
@@ -283,49 +266,47 @@ struct State {
 	}, label->lifetime());
 
 	raw->widthValue(
-	) | rpl::on_next(updateLabelLockGeometry, label->lifetime());
+	) | rpl::start_with_next(updateLabelLockGeometry, label->lifetime());
 
 	return result;
 }
 
 [[nodiscard]] object_ptr<Ui::BoxContent> StealthModeBox(
-		std::shared_ptr<ChatHelpers::Show> show,
-		Fn<void()> onActivated,
-		const style::StealthBoxStyle &st) {
+		std::shared_ptr<ChatHelpers::Show> show) {
 	return Box([=](not_null<Ui::GenericBox*> box) {
 		struct Data {
 			rpl::variable<State> state;
 			bool requested = false;
 		};
 		const auto data = box->lifetime().make_state<Data>();
-		data->state = StateValue(&show->session(), onActivated != nullptr);
+		data->state = StateValue(&show->session());
 		box->setWidth(st::boxWideWidth);
-		box->setStyle(st.box);
-		box->addRow(MakeLogo(box, st));
-		box->addRow(MakeTitle(box, st), style::al_top);
-		box->addRow(MakeAbout(box, data->state.value(), st), style::al_top);
+		box->setStyle(st::storiesStealthBox);
+		box->addRow(MakeLogo(box));
+		box->addRow(MakeTitle(box), style::al_top);
+		box->addRow(MakeAbout(box, data->state.value()), style::al_top);
 		const auto make = [&](const Ui::FeatureListEntry &entry) {
 			return Ui::MakeFeatureListEntry(
 				box,
 				entry,
 				{},
-				st.featureTitle,
-				st.featureAbout);
+				st::storiesStealthFeatureTitle,
+				st::storiesStealthFeatureAbout);
 		};
-		box->addRow(make(FeaturePast(st)));
+		box->addRow(make(FeaturePast()));
 		box->addRow(
-			make(FeatureNext(st)),
+			make(FeatureNext()),
 			(st::boxRowPadding
 				+ QMargins(0, 0, 0, st::storiesStealthBoxBottom)));
 		box->setNoContentMargin(true);
-		box->addTopButton(st.boxClose, [=] {
+		box->addTopButton(st::storiesStealthBoxClose, [=] {
 			box->closeBox();
 		});
 		const auto button = box->addButton(
-			MakeButton(box, data->state.value(), st));
+			MakeButton(box, data->state.value()));
 		button->resizeToWidth(st::boxWideWidth
-			- st.box.buttonPadding.left()
-			- st.box.buttonPadding.right());
+			- st::storiesStealthBox.buttonPadding.left()
+			- st::storiesStealthBox.buttonPadding.right());
 		button->setClickedCallback([=] {
 			const auto now = data->state.current();
 			if (now.mode.enabledTill > now.now) {
@@ -348,58 +329,23 @@ struct State {
 		});
 		data->state.value() | rpl::filter([](const State &state) {
 			return state.mode.enabledTill > state.now;
-		}) | rpl::on_next([=] {
+		}) | rpl::start_with_next([=] {
 			box->closeBox();
 			show->showToast(ToastActivated());
-			if (onActivated) {
-				onActivated();
-			}
 		}, box->lifetime());
 	});
 }
 
 } // namespace
 
-void SetupStealthMode(
-		std::shared_ptr<ChatHelpers::Show> show,
-		StealthModeDescriptor descriptor) {
-	const auto onActivated = descriptor.onActivated;
-	const auto st = descriptor.st;
+void SetupStealthMode(std::shared_ptr<ChatHelpers::Show> show) {
 	const auto now = base::unixtime::now();
 	const auto mode = show->session().data().stories().stealthMode();
 	if (const auto left = mode.enabledTill - now; left > 0) {
 		show->showToast(ToastAlready(left));
-		if (onActivated) {
-			onActivated();
-		}
 	} else {
-		const auto &style = st ? *st : st::storiesStealthStyle;
-		show->show(StealthModeBox(show, onActivated, style));
+		show->show(StealthModeBox(show));
 	}
-}
-
-void AddStealthModeMenu(
-		const Ui::Menu::MenuCallback &add,
-		not_null<PeerData*> peer,
-		not_null<Window::SessionController*> controller) {
-	if (!peer->session().premiumPossible() || !peer->isUser()) {
-		return;
-	}
-	const auto now = base::unixtime::now();
-	const auto stealth = peer->owner().stories().stealthMode();
-	add(
-		tr::lng_stories_view_anonymously(tr::now),
-		[=] {
-			SetupStealthMode(
-				controller->uiShow(),
-				StealthModeDescriptor{
-					[=] { controller->openPeerStories(peer->id); },
-					&st::storiesStealthStyleDefault,
-				});
-		},
-		((peer->session().premium() || (stealth.enabledTill > now))
-			? &st::menuIconStealth
-			: &st::menuIconStealthLocked));
 }
 
 QString TimeLeftText(int left) {

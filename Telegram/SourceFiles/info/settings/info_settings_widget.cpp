@@ -8,9 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/settings/info_settings_widget.h"
 
 #include "info/info_memento.h"
-#include "settings/sections/settings_main.h"
-#include "settings/sections/settings_information.h"
-#include "settings/settings_common_session.h"
+#include "settings/settings_main.h"
+#include "settings/settings_information.h"
 #include "ui/ui_utility.h"
 
 namespace Info {
@@ -63,19 +62,19 @@ Widget::Widget(
 , _pinnedToTop(_inner->createPinnedToTop(this))
 , _pinnedToBottom(_inner->createPinnedToBottom(this)) {
 	_inner->sectionShowOther(
-	) | rpl::on_next([=](Type type) {
+	) | rpl::start_with_next([=](Type type) {
 		controller->showSettings(type);
 	}, _inner->lifetime());
 
 	_inner->sectionShowBack(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		controller->showBackFromStack();
 	}, _inner->lifetime());
 
 	_inner->setStepDataReference(controller->stepDataReference());
 
 	_removesFromStack.events(
-	) | rpl::on_next([=](const std::vector<Type> &types) {
+	) | rpl::start_with_next([=](const std::vector<Type> &types) {
 		const auto sections = ranges::views::all(
 			types
 		) | ranges::views::transform([](Type type) {
@@ -86,13 +85,13 @@ Widget::Widget(
 
 	if (_pinnedToTop) {
 		_inner->widthValue(
-		) | rpl::on_next([=](int w) {
+		) | rpl::start_with_next([=](int w) {
 			_pinnedToTop->resizeToWidth(w);
 			setScrollTopSkip(_pinnedToTop->height());
 		}, _pinnedToTop->lifetime());
 
 		_pinnedToTop->heightValue(
-		) | rpl::on_next([=](int h) {
+		) | rpl::start_with_next([=](int h) {
 			setScrollTopSkip(h);
 		}, _pinnedToTop->lifetime());
 	}
@@ -106,7 +105,7 @@ Widget::Widget(
 		};
 
 		_inner->sizeValue(
-		) | rpl::on_next([=](const QSize &s) {
+		) | rpl::start_with_next([=](const QSize &s) {
 			_pinnedToBottom->resizeToWidth(s.width());
 			//processHeight();
 		}, _pinnedToBottom->lifetime());
@@ -114,7 +113,7 @@ Widget::Widget(
 		rpl::combine(
 			_pinnedToBottom->heightValue(),
 			heightValue()
-		) | rpl::on_next(processHeight, _pinnedToBottom->lifetime());
+		) | rpl::start_with_next(processHeight, _pinnedToBottom->lifetime());
 	}
 
 	if (_pinnedToTop
@@ -128,12 +127,12 @@ Widget::Widget(
 		rpl::combine(
 			_pinnedToTop->heightValue(),
 			_inner->heightValue()
-		) | rpl::on_next([=](int, int h) {
+		) | rpl::start_with_next([=](int, int h) {
 			_flexibleScroll.contentHeightValue.fire(h + heightDiff());
 		}, _pinnedToTop->lifetime());
 
 		scrollTopValue(
-		) | rpl::on_next([=](int top) {
+		) | rpl::start_with_next([=](int top) {
 			if (!_pinnedToTop) {
 				return;
 			}
@@ -145,7 +144,7 @@ Widget::Widget(
 		}, _inner->lifetime());
 
 		_flexibleScroll.fillerWidthValue.events(
-		) | rpl::on_next([=](int w) {
+		) | rpl::start_with_next([=](int w) {
 			_inner->resizeToWidth(w);
 		}, _inner->lifetime());
 
@@ -203,8 +202,8 @@ const Ui::RoundRect *Widget::bottomSkipRounding() const {
 }
 
 rpl::producer<bool> Widget::desiredShadowVisibility() const {
-	return (_type == ::Settings::MainId()
-		|| _type == ::Settings::InformationId())
+	return (_type == ::Settings::Main::Id()
+		|| _type == ::Settings::Information::Id())
 		? ContentWidget::desiredShadowVisibility()
 		: rpl::single(true);
 }

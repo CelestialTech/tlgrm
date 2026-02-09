@@ -54,11 +54,11 @@ Widget::Widget(QWidget *parent, not_null<Controller*> controller)
 		controller->poll(),
 		controller->pollContextId()))) {
 	_inner->showPeerInfoRequests(
-	) | rpl::on_next([=](not_null<PeerData*> peer) {
+	) | rpl::start_with_next([=](not_null<PeerData*> peer) {
 		controller->showPeerInfo(peer);
 	}, _inner->lifetime());
 	_inner->scrollToRequests(
-	) | rpl::on_next([=](const Ui::ScrollToRequest &request) {
+	) | rpl::start_with_next([=](const Ui::ScrollToRequest &request) {
 		scrollTo(request);
 	}, _inner->lifetime());
 }

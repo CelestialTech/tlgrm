@@ -9,10 +9,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class DocumentData;
 
-namespace Data {
-struct DiceGameOptions;
-} // namespace Data
-
 namespace Main {
 class Session;
 } // namespace Main
@@ -55,16 +51,10 @@ public:
 
 	[[nodiscard]] DocumentData *lookup(const QString &emoji, int value);
 
-	void resolveGameOptions(Fn<void(const Data::DiceGameOptions &)> done);
-	void apply(const MTPDupdateEmojiGameInfo &update);
-
 private:
 	const not_null<Main::Session*> _session;
 
 	base::flat_map<QString, std::unique_ptr<DicePack>> _packs;
-
-	mtpRequestId _resolveGameOptionsRequestId = 0;
-	Fn<void(const Data::DiceGameOptions &)> _resolveGameOptionsCallback;
 
 };
 

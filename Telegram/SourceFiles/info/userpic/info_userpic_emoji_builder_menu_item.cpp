@@ -97,7 +97,7 @@ void StickerProvider::processDocumentIndex(int documentIndex) {
 		_resolvingLifetime.destroy();
 		_owner->customEmojiManager().resolve(
 			document->id
-		) | rpl::on_next([=](not_null<DocumentData*> d) {
+		) | rpl::start_with_next([=](not_null<DocumentData*> d) {
 			_resolvingLifetime.destroy();
 			_downloadFinishedLifetime.destroy();
 
@@ -111,7 +111,7 @@ void StickerProvider::processDocumentIndex(int documentIndex) {
 				rpl::empty_value()
 			) | rpl::then(
 				_owner->session().downloaderTaskFinished()
-			) | rpl::on_next([=] {
+			) | rpl::start_with_next([=] {
 				if (mediaView->loaded()) {
 					_timer.callOnce(kTimeout);
 					_documentChanged.fire_copy(mediaView->owner());
@@ -175,7 +175,7 @@ void AddEmojiBuilderAction(
 	};
 	const auto state = menu->lifetime().make_state<State>(controller);
 	auto item = base::make_unique_q<Ui::Menu::Action>(
-		menu->menu(),
+		menu.get(),
 		menu->st().menu,
 		Ui::Menu::CreateAction(
 			menu.get(),
@@ -203,14 +203,11 @@ void AddEmojiBuilderAction(
 
 	rpl::duplicate(
 		documents
-	) | rpl::on_next([=](std::vector<DocumentId> documents) {
+	) | rpl::start_with_next([=](std::vector<DocumentId> documents) {
 		state->manager.setDocuments(std::move(documents));
 	}, item->lifetime());
 
-	const auto action = menu->addAction(std::move(item));
-	action->setProperty(
-		"highlight-control-id",
-		u"profile-photo/use-emoji"_q);
+	menu->addAction(std::move(item));
 }
 
 } // namespace UserpicBuilder

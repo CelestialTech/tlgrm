@@ -38,7 +38,7 @@ SignupWidget::SignupWidget(
 	_photo->showCustomOnChosen();
 
 	Lang::Updated(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		refreshLang();
 	}, lifetime());
 

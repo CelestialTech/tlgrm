@@ -34,7 +34,7 @@ EmailWidget::EmailWidget(
 : Step(parent, account, data)
 , _inner(this) {
 	const auto content = _inner.get();
-	widthValue() | rpl::on_next([=](int w) {
+	widthValue() | rpl::start_with_next([=](int w) {
 		content->resizeToWidth(st::introNextButton.width);
 		content->moveToLeft((w - content->width()) / 2, contentTop());
 	}, content->lifetime());
@@ -64,7 +64,7 @@ EmailWidget::EmailWidget(
 			style::margins());
 		content->add(std::move(icon.widget));
 		_showFinished.events(
-		) | rpl::on_next([animate = std::move(icon.animate)] {
+		) | rpl::start_with_next([animate = std::move(icon.animate)] {
 			animate(anim::repeat::once);
 		}, lifetime());
 	}
@@ -75,17 +75,14 @@ EmailWidget::EmailWidget(
 		QString());
 	Ui::AddSkip(content);
 	const auto error = Settings::CloudPassword::AddError(content, nullptr);
-	newInput->changes() | rpl::on_next([=] {
+	newInput->changes() | rpl::start_with_next([=] {
 		error->hide();
-	}, newInput->lifetime());
-	newInput->submits() | rpl::on_next([=] {
-		submit();
 	}, newInput->lifetime());
 	newInput->setText(getData()->email);
 	if (newInput->hasText()) {
 		newInput->selectAll();
 	}
-	_setFocus.events() | rpl::on_next([=] {
+	_setFocus.events() | rpl::start_with_next([=] {
 		newInput->setFocus();
 	}, newInput->lifetime());
 
@@ -96,7 +93,7 @@ EmailWidget::EmailWidget(
 			const auto done = [=](int length, const QString &pattern) {
 				_sentRequest = 0;
 				getData()->codeLength = length;
-				getData()->emailPatternSetup = pattern;
+				getData()->emailPattern = pattern;
 				goNext<CodeWidget>();
 			};
 			const auto fail = [=](const QString &type) {

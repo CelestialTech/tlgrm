@@ -156,7 +156,7 @@ ConnectionState::Widget::ProxyIcon::ProxyIcon(QWidget *parent) : RpWidget(parent
 			st::connectingProxyOn.height()));
 
 	style::PaletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		refreshCacheImages();
 	}, lifetime());
 
@@ -227,7 +227,7 @@ ConnectionState::ConnectionState(
 	rpl::combine(
 		std::move(shown),
 		visibility()
-	) | rpl::on_next([=](bool shown, float64 visible) {
+	) | rpl::start_with_next([=](bool shown, float64 visible) {
 		if (!shown || visible == 0.) {
 			_widget = nullptr;
 		} else if (!_widget) {
@@ -240,7 +240,7 @@ ConnectionState::ConnectionState(
 		rpl::merge(
 			rpl::single(rpl::empty),
 			checker.ready()
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			refreshState();
 		}, _lifetime);
 	}
@@ -248,7 +248,7 @@ ConnectionState::ConnectionState(
 	rpl::combine(
 		Core::App().settings().proxy().connectionTypeValue(),
 		rpl::single(QRect()) | rpl::then(_parent->paintRequest())
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		refreshState();
 	}, _lifetime);
 }
@@ -263,7 +263,7 @@ void ConnectionState::createWidget() {
 		visibility(),
 		_parent->heightValue(),
 		_bottomSkip.value()
-	) | rpl::on_next([=](float64 visible, int height, int skip) {
+	) | rpl::start_with_next([=](float64 visible, int height, int skip) {
 		_widget->moveToLeft(0, anim::interpolate(
 			height - st::connectingMargin.top(),
 			height - _widget->height() - skip,
@@ -271,7 +271,7 @@ void ConnectionState::createWidget() {
 	}, _widget->lifetime());
 
 	_widget->refreshStateRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		refreshState();
 	}, _widget->lifetime());
 }
@@ -510,7 +510,7 @@ ConnectionState::Widget::Widget(
 	});
 
 	_progress->animationStepRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_refreshStateRequests.fire({});
 	}, _progress->lifetime());
 }

@@ -97,8 +97,7 @@ constexpr auto kRequestTimeLimit = 60 * crl::time(1000);
 			(data.vsuggested_post()
 				? *data.vsuggested_post()
 				: MTPSuggestedPost()),
-			MTP_int(data.vschedule_repeat_period().value_or_empty()),
-			MTP_string(qs(data.vsummary_from_language().value_or_empty())));
+			MTP_int(data.vschedule_repeat_period().value_or_empty()));
 	});
 }
 
@@ -115,7 +114,7 @@ ShortcutMessages::ShortcutMessages(not_null<Session*> owner)
 	owner->itemRemoved(
 	) | rpl::filter([](not_null<const HistoryItem*> item) {
 		return item->isBusinessShortcut();
-	}) | rpl::on_next([=](not_null<const HistoryItem*> item) {
+	}) | rpl::start_with_next([=](not_null<const HistoryItem*> item) {
 		remove(item);
 	}, _lifetime);
 }

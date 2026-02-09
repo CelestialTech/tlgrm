@@ -842,9 +842,6 @@ dialogsTopBarSuggestionTitleStyle: TextStyle(defaultTextStyle) {
 dialogsTopBarSuggestionAboutStyle: TextStyle(defaultTextStyle) {
 	font: font(11px);
 }
-dialogsSuggestionDeniedAuthLottie: size(70px, 70px);
-dialogsSuggestionDeniedAuthLottieCircle: size(90px, 90px);
-dialogsSuggestionDeniedAuthLottieMargins: margins(10px, 10px, 10px, 10px);
 
 dialogsMiniQuoteIcon: icon{{ "chat/mini_quote", dialogsTextFg }};
 

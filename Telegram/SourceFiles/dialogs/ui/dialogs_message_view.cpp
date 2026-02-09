@@ -320,7 +320,7 @@ void MessageView::prepare(
 		if (!_loadingContext) {
 			_loadingContext = std::make_unique<LoadingContext>();
 			item->history()->session().downloaderTaskFinished(
-			) | rpl::on_next([=] {
+			) | rpl::start_with_next([=] {
 				_textCachedFor = nullptr;
 			}, _loadingContext->lifetime);
 		}

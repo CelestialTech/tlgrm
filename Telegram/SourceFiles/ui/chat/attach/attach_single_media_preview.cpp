@@ -126,7 +126,7 @@ void SingleMediaPreview::prepareAnimatedPreview(
 			Lottie::ReadContent(QByteArray(), animatedPreviewPath),
 			Lottie::FrameRequest{ box });
 		_lottiePreview->updates(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			update();
 		}, lifetime());
 	} else if (!animatedPreviewPath.isEmpty()) {

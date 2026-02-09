@@ -21,24 +21,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QStandardPaths>
-#include <QtCore/QLibraryInfo>
 
 namespace Core {
 namespace {
 
 uint64 InstallationTag = 0;
-
-base::options::toggle OptionHighDpiDownscale({
-	.id = kOptionHighDpiDownscale,
-	.name = "High DPI downscale",
-	.description = "Follow system interface scale settings exactly"
-		" (another approach, likely better quality).",
-	.scope = [] {
-		return !Platform::IsMac()
-			&& QLibraryInfo::version() >= QVersionNumber(6, 4);
-	},
-	.restartRequired = true,
-});
 
 base::options::toggle OptionFreeType({
 	.id = kOptionFreeType,
@@ -74,8 +61,18 @@ FilteredCommandLineArguments::FilteredCommandLineArguments(
 		pushArgument(argv[i]);
 	}
 
+	// Preserve --mcp flag if present (for MCP server integration)
+	for (auto i = 1; i < argc; ++i) {
+		if (std::strcmp(argv[i], "--mcp") == 0) {
+			pushArgument("--mcp");
+			fprintf(stderr, "[MCP] FilteredCommandLineArguments: Preserved --mcp flag\n");
+			fflush(stderr);
+			break;
+		}
+	}
+
 #if defined Q_OS_WIN || defined Q_OS_MAC
-	if (OptionFreeType.value() || OptionHighDpiDownscale.value()) {
+	if (OptionFreeType.value()) {
 		pushArgument("-platform");
 #ifdef Q_OS_WIN
 		pushArgument("windows:fontengine=freetype");
@@ -307,7 +304,6 @@ base::options::toggle OptionFractionalScalingEnabled({
 } // namespace
 
 const char kOptionFractionalScalingEnabled[] = "fractional-scaling-enabled";
-const char kOptionHighDpiDownscale[] = "high-dpi-downscale";
 const char kOptionFreeType[] = "freetype";
 
 Launcher *Launcher::InstanceSetter::Instance = nullptr;
@@ -359,14 +355,7 @@ void Launcher::initHighDpi() {
 	QApplication::setAttribute(Qt::AA_EnableHighDpiScaling, true);
 #endif // Qt < 6.0.0
 
-	if (OptionHighDpiDownscale.value()) {
-		qputenv("QT_WIDGETS_HIGHDPI_DOWNSCALE", "1");
-		qputenv("QT_WIDGETS_RHI", "1");
-		qputenv("QT_WIDGETS_RHI_BACKEND", "opengl");
-	}
-
-	if (OptionFractionalScalingEnabled.value()
-			|| OptionHighDpiDownscale.value()) {
+	if (OptionFractionalScalingEnabled.value()) {
 		QApplication::setHighDpiScaleFactorRoundingPolicy(
 			Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
 	} else {
@@ -435,13 +424,18 @@ int Launcher::exec() {
 
 bool Launcher::validateCustomWorkingDir() {
 	if (customWorkingDir()) {
+		LOG(("TData: Validating custom working directory: %1").arg(_customWorkingDir));
 		if (_customWorkingDir == cWorkingDir()) {
+			LOG(("TData: Custom working directory same as current, ignoring"));
 			_customWorkingDir = QString();
 			return false;
 		}
+		LOG(("TData: Setting working directory to: %1").arg(_customWorkingDir));
 		cForceWorkingDir(_customWorkingDir);
+		LOG(("TData: Working directory set successfully"));
 		return true;
 	}
+	LOG(("TData: No custom working directory specified"));
 	return false;
 }
 
@@ -607,7 +601,20 @@ void Launcher::processArguments() {
 	gQuit = parseResult.contains("-quit");
 	_customWorkingDir = parseResult.value("-workdir", {}).join(QString());
 	if (!_customWorkingDir.isEmpty()) {
+		LOG(("TData: Custom working directory requested: %1").arg(_customWorkingDir));
 		_customWorkingDir = QDir(_customWorkingDir).absolutePath() + '/';
+		LOG(("TData: Custom working directory (absolute): %1").arg(_customWorkingDir));
+	} else {
+		// Auto-detect tdata directory in home directory
+		const auto homeDir = QDir::homePath();
+		const auto homeTdataPath = homeDir + "/tdata";
+		if (QDir(homeTdataPath).exists()) {
+			LOG(("TData: Auto-detected tdata directory at: %1").arg(homeTdataPath));
+			_customWorkingDir = homeDir + '/';
+			LOG(("TData: Auto-setting working directory to home: %1").arg(_customWorkingDir));
+		} else {
+			LOG(("TData: No tdata found in home directory, using default working directory"));
+		}
 	}
 
 	const auto startUrls = parseResult.value("--", {});

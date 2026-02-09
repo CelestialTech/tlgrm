@@ -119,7 +119,7 @@ private:
 
 };
 
-class ChatIntro final : public Section<ChatIntro> {
+class ChatIntro final : public BusinessSection<ChatIntro> {
 public:
 	ChatIntro(
 		QWidget *parent,
@@ -175,7 +175,7 @@ rpl::producer<std::shared_ptr<StickerPlayer>> IconPlayerValue(
 	media->goodThumbnailWanted();
 
 	return rpl::single() | rpl::then(
-		sticker->session().downloaderTaskFinished()
+		sticker->owner().session().downloaderTaskFinished()
 	) | rpl::filter([=] {
 		return media->loaded();
 	}) | rpl::take(1) | rpl::map([=] {
@@ -231,20 +231,20 @@ rpl::producer<std::shared_ptr<StickerPlayer>> IconPlayerValue(
 	};
 	const auto state = right->lifetime().make_state<State>();
 	state->panel.someCustomChosen(
-	) | rpl::on_next([=](StickerPanel::CustomChosen chosen) {
+	) | rpl::start_with_next([=](StickerPanel::CustomChosen chosen) {
 		stickerChosen(chosen.sticker);
 	}, raw->lifetime());
 
 	std::move(
 		stickerValue
-	) | rpl::on_next([=](DocumentData *sticker) {
+	) | rpl::start_with_next([=](DocumentData *sticker) {
 		state->sticker = sticker;
 		if (sticker) {
 			right->resize(button.emojiWidth + button.added, right->height());
 			IconPlayerValue(
 				sticker,
 				[=] { right->update(); }
-			) | rpl::on_next([=](
+			) | rpl::start_with_next([=](
 					std::shared_ptr<StickerPlayer> player) {
 				state->player = std::move(player);
 				right->update();
@@ -260,14 +260,14 @@ rpl::producer<std::shared_ptr<StickerPlayer>> IconPlayerValue(
 	rpl::combine(
 		raw->sizeValue(),
 		right->widthValue()
-	) | rpl::on_next([=](QSize outer, int width) {
+	) | rpl::start_with_next([=](QSize outer, int width) {
 		right->resize(width, outer.height());
 		const auto skip = st::settingsButton.padding.right();
 		right->moveToRight(skip - button.added, 0, outer.width());
 	}, right->lifetime());
 
 	right->paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		auto p = QPainter(right);
 		const auto height = right->height();
 		if (state->player) {
@@ -352,13 +352,13 @@ PreviewWrap::PreviewWrap(
 	_style->apply(_theme.get());
 
 	session->data().viewRepaintRequest(
-	) | rpl::on_next([=](Data::RequestViewRepaint data) {
-		if (data.view == _view->view()) {
+	) | rpl::start_with_next([=](not_null<const Element*> view) {
+		if (view == _view->view()) {
 			update();
 		}
 	}, lifetime());
 
-	session->downloaderTaskFinished() | rpl::on_next([=] {
+	session->downloaderTaskFinished() | rpl::start_with_next([=] {
 		update();
 	}, lifetime());
 
@@ -374,7 +374,7 @@ void PreviewWrap::prepare(rpl::producer<Data::ChatIntro> value) {
 		_history.get(),
 		_delegate.get());
 
-	std::move(value) | rpl::on_next([=](Data::ChatIntro intro) {
+	std::move(value) | rpl::start_with_next([=](Data::ChatIntro intro) {
 		_view->make(std::move(intro), true);
 		if (width() >= st::msgMinWidth) {
 			resizeTo(width());
@@ -385,7 +385,7 @@ void PreviewWrap::prepare(rpl::producer<Data::ChatIntro> value) {
 	widthValue(
 	) | rpl::filter([=](int width) {
 		return width >= st::msgMinWidth;
-	}) | rpl::on_next([=](int width) {
+	}) | rpl::start_with_next([=](int width) {
 		resizeTo(width);
 	}, lifetime());
 }
@@ -416,7 +416,6 @@ void PreviewWrap::paintEvent(QPaintEvent *e) {
 	auto context = _theme->preparePaintContext(
 		_style.get(),
 		rect(),
-		rect(),
 		e->rect(),
 		!window()->isActiveWindow());
 	p.translate(_position);
@@ -434,7 +433,7 @@ void StickerPanel::show(Descriptor &&descriptor) {
 		_panel->shownValue(
 		) | rpl::filter([=] {
 			return (_panelButton != nullptr);
-		}) | rpl::on_next([=](bool shown) {
+		}) | rpl::start_with_next([=](bool shown) {
 			if (shown) {
 				_panelButton->installEventFilter(_panel.get());
 			} else {
@@ -488,7 +487,7 @@ void StickerPanel::create(const Descriptor &descriptor) {
 	_panel->hide();
 
 	_panel->selector()->fileChosen(
-	) | rpl::on_next([=](ChatHelpers::FileChosen data) {
+	) | rpl::start_with_next([=](ChatHelpers::FileChosen data) {
 		_someCustomChosen.fire({ data.document });
 		_panel->hideAnimated();
 	}, _panel->lifetime());
@@ -497,7 +496,7 @@ void StickerPanel::create(const Descriptor &descriptor) {
 ChatIntro::ChatIntro(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
-: Section(parent, controller) {
+: BusinessSection(parent, controller) {
 	setupContent(controller);
 }
 
@@ -586,13 +585,13 @@ void ChatIntro::setupContent(
 		}));
 	Ui::AddSkip(content);
 
-	title->changes() | rpl::on_next([=] {
+	title->changes() | rpl::start_with_next([=] {
 		change([&](Data::ChatIntro &intro) {
 			intro.title = title->getLastText();
 		});
 	}, title->lifetime());
 
-	description->changes() | rpl::on_next([=] {
+	description->changes() | rpl::start_with_next([=] {
 		change([&](Data::ChatIntro &intro) {
 			intro.description = description->getLastText();
 		});

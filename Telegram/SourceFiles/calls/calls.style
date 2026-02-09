@@ -671,7 +671,7 @@ groupCallInnerDropdown: InnerDropdown(defaultInnerDropdown) {
 	animation: groupCallPanelAnimation;
 	bg: groupCallMenuBg;
 	scroll: defaultSolidScroll;
-	scrollPadding: margins(0px, 7px, 0px, 7px);
+	scrollPadding: margins(0px, 4px, 0px, 4px);
 }
 groupCallDropdownMenu: DropdownMenu(defaultDropdownMenu) {
 	wrap: groupCallInnerDropdown;
@@ -1698,7 +1698,6 @@ groupCallMessagesScroll: ScrollArea(defaultScrollArea) {
 	barHidden: true;
 }
 groupCallMessagePadding: margins(8px, 3px, 8px, 2px);
-groupCallPricePadding: margins(5px, 0px, 5px, 0px);
 groupCallMessageSkip: 8px;
 groupCallMessagePalette: TextPalette(defaultTextPalette) {
 	linkFg: radialFg;
@@ -1722,17 +1721,20 @@ groupCallUserpicPadding: margins(2px, 2px, 4px, 2px);
 groupCallPinnedPadding: margins(10px, 4px, 10px, 2px);
 groupCallPinnedMaxWidth: 96px;
 groupCallPinnedUserpic: 22px;
-groupCallEffectPadding: margins(3px, 1px, 3px, 1px);
-groupCallEffectUserpicPadding: margins(1px, 1px, 3px, 1px);
 
 groupCallTopReactorBadge: RoundCheckbox(defaultRoundCheckbox) {
 	width: 1px;
 	border: groupCallMembersBg;
 }
 
-groupCallLinkMenu: IconButton(boxTitleMenu) {
+groupCallLinkMenu: IconButton {
+	width: 44px;
+	height: 44px;
 	icon: icon {{ "title_menu_dots", groupCallMemberInactiveIcon }};
 	iconOver: icon {{ "title_menu_dots", groupCallMemberInactiveIcon }};
+	iconPosition: point(14px, 14px);
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 44px;
 	ripple: RippleAnimation(defaultRippleAnimation) {
 		color: groupCallMembersBgOver;
 	}

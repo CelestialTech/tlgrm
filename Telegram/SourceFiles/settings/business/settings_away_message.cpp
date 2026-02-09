@@ -31,7 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Settings {
 namespace {
 
-class AwayMessage final : public Section<AwayMessage> {
+class AwayMessage final : public BusinessSection<AwayMessage> {
 public:
 	AwayMessage(
 		QWidget *parent,
@@ -106,7 +106,7 @@ void AddAwayScheduleSelector(
 	const auto customInner = customWrap->entity();
 	customWrap->toggleOn(group->value() | rpl::map(_1 == Type::Custom));
 
-	group->changes() | rpl::on_next([=](Type value) {
+	group->changes() | rpl::start_with_next([=](Type value) {
 		auto copy = data->current();
 		copy.type = value;
 		*data = copy;
@@ -190,7 +190,7 @@ void AddAwayScheduleSelector(
 AwayMessage::AwayMessage(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
-: Section(parent, controller) {
+: BusinessSection(parent, controller) {
 	setupContent(controller);
 }
 
@@ -238,7 +238,7 @@ void AwayMessage::setupContent(
 		.lottieSize = st::settingsCloudPasswordIconSize,
 		.lottieMargins = st::peerAppearanceIconPadding,
 		.showFinished = showFinishes(),
-		.about = tr::lng_away_about(tr::marked),
+		.about = tr::lng_away_about(Ui::Text::WithEntities),
 		.aboutMargins = st::peerAppearanceCoverLabelMargin,
 	});
 
@@ -262,7 +262,7 @@ void AwayMessage::setupContent(
 	)));
 
 	_enabled = enabled->toggledValue();
-	_enabled.value() | rpl::filter(_1) | rpl::on_next([=] {
+	_enabled.value() | rpl::filter(_1) | rpl::start_with_next([=] {
 		if (!_canHave.current()) {
 			controller->showToast({
 				.text = { tr::lng_away_limit_reached(tr::now) },

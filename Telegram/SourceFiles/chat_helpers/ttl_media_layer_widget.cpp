@@ -143,7 +143,7 @@ PreviewWrap::PreviewWrap(
 	const auto closeCallback = [=] { _closeRequests.fire({}); };
 	HistoryView::TTLVoiceStops(
 		item->fullId()
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_lastFrameCache = Ui::GrabWidgetToImage(this, _elementGeometry);
 		closeCallback();
 	}, lifetime());
@@ -155,20 +155,20 @@ PreviewWrap::PreviewWrap(
 
 	std::move(
 		theme
-	) | rpl::on_next([=](std::shared_ptr<Ui::ChatTheme> theme) {
+	) | rpl::start_with_next([=](std::shared_ptr<Ui::ChatTheme> theme) {
 		_theme = std::move(theme);
 		_style->apply(_theme.get());
 	}, lifetime());
 
 	const auto session = &_item->history()->session();
 	session->data().viewRepaintRequest(
-	) | rpl::on_next([=](Data::RequestViewRepaint data) {
-		if (data.view == _element.get()) {
+	) | rpl::start_with_next([=](not_null<const HistoryView::Element*> view) {
+		if (view == _element.get()) {
 			update(_elementGeometry);
 		}
 	}, lifetime());
 	session->data().itemViewRefreshRequest(
-	) | rpl::on_next([=](not_null<const HistoryItem*> item) {
+	) | rpl::start_with_next([=](not_null<const HistoryItem*> item) {
 		if (item == _item) {
 			if (goodItem()) {
 				createView();
@@ -180,13 +180,13 @@ PreviewWrap::PreviewWrap(
 		}
 	}, lifetime());
 	session->data().itemDataChanges(
-	) | rpl::on_next([=](not_null<HistoryItem*> item) {
+	) | rpl::start_with_next([=](not_null<HistoryItem*> item) {
 		if (item == _item) {
 			_element->itemDataChanged();
 		}
 	}, lifetime());
 	session->data().itemRemoved(
-	) | rpl::on_next([=](not_null<const HistoryItem*> item) {
+	) | rpl::start_with_next([=](not_null<const HistoryItem*> item) {
 		if (item == _item) {
 			_closeRequests.fire({});
 		}
@@ -206,7 +206,7 @@ PreviewWrap::PreviewWrap(
 		rpl::combine(
 			sizeValue(),
 			_elementInner.value()
-		) | rpl::on_next([=](QSize size, QRect inner) {
+		) | rpl::start_with_next([=](QSize size, QRect inner) {
 			close->moveToLeft(
 				inner.x() + (inner.width() - close->width()) / 2,
 				(size.height()
@@ -226,11 +226,11 @@ PreviewWrap::PreviewWrap(
 					lt_user,
 					rpl::single(
 						item->history()->peer->shortName()
-					) | rpl::map(tr::rich),
-					tr::rich)
+					) | Ui::Text::ToRichLangValue(),
+					Ui::Text::RichLangValue)
 			: (isRound
 				? tr::lng_ttl_round_tooltip_in
-				: tr::lng_ttl_voice_tooltip_in)(tr::rich);
+				: tr::lng_ttl_voice_tooltip_in)(Ui::Text::RichLangValue);
 		const auto tooltip = Ui::CreateChild<Ui::ImportantTooltip>(
 			this,
 			object_ptr<Ui::PaddingWrap<Ui::FlatLabel>>(
@@ -246,7 +246,7 @@ PreviewWrap::PreviewWrap(
 		_elementInner.value(
 		) | rpl::filter([](const QRect &inner) {
 			return !inner.isEmpty();
-		}) | rpl::on_next([=](const QRect &inner) {
+		}) | rpl::start_with_next([=](const QRect &inner) {
 			tooltip->pointAt(inner, RectPart::Top, [=](QSize size) {
 				return QPoint{
 					inner.x() + (inner.width() - size.width()) / 2,
@@ -281,7 +281,7 @@ void PreviewWrap::createView() {
 	rpl::combine(
 		sizeValue(),
 		_globalViewport.value()
-	) | rpl::on_next([=](QSize outer, QRect globalViewport) {
+	) | rpl::start_with_next([=](QSize outer, QRect globalViewport) {
 		_viewport = globalViewport.isEmpty()
 			? rect()
 			: mapFromGlobal(globalViewport);
@@ -322,7 +322,6 @@ void PreviewWrap::paintEvent(QPaintEvent *e) {
 	} else {
 		auto context = _theme->preparePaintContext(
 			_style.get(),
-			Rect(_element->currentSize()),
 			Rect(_element->currentSize()),
 			Rect(_element->currentSize()),
 			!window()->isActiveWindow());
@@ -372,7 +371,7 @@ void ShowTTLMediaLayerWidget(
 			controller,
 			item->history()->peer));
 	preview->closeRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		show->hideLayer();
 	}, preview->lifetime());
 	auto layer = std::make_unique<Editor::LayerWidget>(

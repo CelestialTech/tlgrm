@@ -154,6 +154,7 @@ private:
 	void setupActions(not_null<Window::SessionController*> controller);
 	void setupButtons(
 		not_null<Window::SessionController*> controller,
+		rpl::producer<bool> backToggles,
 		Source source);
 	void setupShowLastSeen(not_null<Window::SessionController*> controller);
 	void setupUniqueBadgeTooltip();
@@ -256,7 +257,6 @@ private:
 
 	base::unique_qptr<Ui::IconButton> _close;
 	base::unique_qptr<Ui::FadeWrap<Ui::IconButton>> _back;
-	rpl::variable<bool> _backToggles;
 
 	rpl::event_stream<> _backClicks;
 

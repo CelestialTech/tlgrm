@@ -82,6 +82,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
+#include "mcp/mcp_server.h"
+#include "mcp/mcp_bridge.h"
 #include "boxes/abstract_box.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
@@ -176,7 +178,7 @@ Application::Application()
 	_platformIntegration->init();
 
 	passcodeLockChanges(
-	) | rpl::on_next([=](bool locked) {
+	) | rpl::start_with_next([=](bool locked) {
 		_shouldLockAt = 0;
 		if (locked) {
 			closeAdditionalWindows();
@@ -184,20 +186,24 @@ Application::Application()
 	}, _lifetime);
 
 	passcodeLockChanges(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_notifications->updateAll();
 		updateWindowTitles();
 	}, _lifetime);
 
 	settings().windowTitleContentChanges(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateWindowTitles();
 	}, _lifetime);
 
 	_domain->activeSessionChanges(
-	) | rpl::on_next([=](Main::Session *session) {
+	) | rpl::start_with_next([=](Main::Session *session) {
 		if (session && !UpdaterDisabled()) { // #TODO multi someSessionValue
 			UpdateChecker().setMtproto(session);
+		}
+		// Pass active session to MCP server for live data access
+		if (_mcpServer) {
+			_mcpServer->setSession(session);
 		}
 	}, _lifetime);
 }
@@ -213,6 +219,10 @@ void Application::closeAdditionalWindows() {
 }
 
 Application::~Application() {
+	// Stop MCP bridge and server before other cleanup
+	_mcpBridge = nullptr;
+	_mcpServer = nullptr;
+
 	if (_saveSettingsTimer && _saveSettingsTimer->isActive()) {
 		Local::writeSettings();
 	}
@@ -305,12 +315,12 @@ void Application::run() {
 	rpl::combine(
 		_batterySaving->value(),
 		settings().ignoreBatterySavingValue()
-	) | rpl::on_next([=](bool saving, bool ignore) {
+	) | rpl::start_with_next([=](bool saving, bool ignore) {
 		PowerSaving::SetForceAll(saving && !ignore);
 	}, _lifetime);
 
 	style::ShortAnimationPlaying(
-	) | rpl::on_next([=](bool playing) {
+	) | rpl::start_with_next([=](bool playing) {
 		if (playing) {
 			MTP::details::pause();
 		} else {
@@ -335,7 +345,7 @@ void Application::run() {
 	_windowInSettings = _lastActivePrimaryWindow = _lastActiveWindow;
 
 	_domain->activeChanges(
-	) | rpl::on_next([=](not_null<Main::Account*> account) {
+	) | rpl::start_with_next([=](not_null<Main::Account*> account) {
 		showAccount(account);
 	}, _lifetime);
 
@@ -351,7 +361,7 @@ void Application::run() {
 			? _domain->activeChanges()
 			: rpl::never<not_null<Main::Account*>>();
 	}) | rpl::flatten_latest(
-	) | rpl::on_next([=](not_null<Main::Account*> account) {
+	) | rpl::start_with_next([=](not_null<Main::Account*> account) {
 		const auto ordered = _domain->orderedAccounts();
 		const auto it = ranges::find(ordered, account);
 		if (_lastActivePrimaryWindow && it != end(ordered)) {
@@ -367,7 +377,7 @@ void Application::run() {
 	QCoreApplication::instance()->installEventFilter(this);
 
 	appDeactivatedValue(
-	) | rpl::on_next([=](bool deactivated) {
+	) | rpl::start_with_next([=](bool deactivated) {
 		if (deactivated) {
 			handleAppDeactivated();
 		} else {
@@ -403,7 +413,7 @@ void Application::run() {
 	}
 
 	_openInMediaViewRequests.events(
-	) | rpl::on_next([=](Media::View::OpenRequest &&request) {
+	) | rpl::start_with_next([=](Media::View::OpenRequest &&request) {
 		if (_mediaView) {
 			_mediaView->show(std::move(request));
 		}
@@ -414,6 +424,50 @@ void Application::run() {
 		countries->lifetime().add([=] {
 			[[maybe_unused]] const auto countriesCopy = countries;
 		});
+	}
+
+	// Start MCP server and IPC bridge if --mcp flag is present
+	const auto args = QCoreApplication::arguments();
+
+	// DEBUG: Print all arguments
+	fprintf(stderr, "[MCP] Command-line arguments (%lld total):\n", (long long)args.size());
+	for (int i = 0; i < args.size(); i++) {
+		fprintf(stderr, "[MCP]   [%d]: %s\n", i, args.at(i).toUtf8().constData());
+	}
+	fflush(stderr);
+
+	bool hasMcpFlag = args.contains(u"--mcp"_q);
+	fprintf(stderr, "[MCP] --mcp flag detected: %s\n", hasMcpFlag ? "YES" : "NO");
+	fflush(stderr);
+
+	if (hasMcpFlag) {
+		_mcpServer = std::make_unique<MCP::Server>();
+		if (_mcpServer->start(MCP::TransportType::Stdio)) {
+			DEBUG_LOG(("MCP: Server started successfully"));
+
+			// Subscribe to domain's active session changes
+			domain().activeSessionValue(
+			) | rpl::start_with_next([=](Main::Session *session) {
+				if (session && _mcpServer) {
+					_mcpServer->setSession(session);
+					fprintf(stderr, "[MCP] Session integrated with MCP server\n");
+					fflush(stderr);
+				}
+			}, _lifetime);
+
+			// Start IPC bridge for Python integration
+			_mcpBridge = std::make_unique<MCP::Bridge>();
+			if (_mcpBridge->start("/tmp/tdesktop_mcp.sock")) {
+				_mcpBridge->setServer(_mcpServer.get());
+				DEBUG_LOG(("MCP: IPC Bridge started on /tmp/tdesktop_mcp.sock"));
+			} else {
+				LOG(("MCP Error: Failed to start IPC bridge"));
+				_mcpBridge = nullptr;
+			}
+		} else {
+			LOG(("MCP Error: Failed to start server"));
+			_mcpServer = nullptr;
+		}
 	}
 
 	processCreatedWindow(_lastActivePrimaryWindow);
@@ -509,7 +563,7 @@ void Application::startSystemDarkModeViewer() {
 	rpl::merge(
 		settings().systemDarkModeChanges() | rpl::to_empty,
 		settings().systemDarkModeEnabledChanges() | rpl::to_empty
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		checkSystemDarkMode();
 	}, _lifetime);
 }
@@ -564,18 +618,18 @@ void Application::createTray() {
 	using WindowRaw = not_null<Window::Controller*>;
 	_tray->create();
 	_tray->aboutToShowRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		enumerateWindows([&](WindowRaw w) { w->updateIsActive(); });
 		_tray->updateMenuText();
 	}, _lifetime);
 
 	_tray->showFromTrayRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		activate();
 	}, _lifetime);
 
 	_tray->hideToTrayRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		enumerateWindows([&](WindowRaw w) {
 			w->widget()->minimizeToTray();
 		});
@@ -813,7 +867,7 @@ void Application::badMtprotoConfigurationError() {
 		_badProxyDisableBox = Ui::show(
 			Ui::MakeInformBox(Lang::Hard::ProxyConfigError()));
 		_badProxyDisableBox->boxClosing(
-		) | rpl::on_next(
+		) | rpl::start_with_next(
 			disableCallback,
 			_badProxyDisableBox->lifetime());
 	}
@@ -823,7 +877,7 @@ void Application::startLocalStorage() {
 	Ui::GL::DetectLastCheckCrash();
 	Local::start();
 	_saveSettingsTimer.emplace([=] { saveSettings(); });
-	settings().saveDelayedRequests() | rpl::on_next([=] {
+	settings().saveDelayedRequests() | rpl::start_with_next([=] {
 		saveSettingsDelayed();
 	}, _lifetime);
 }
@@ -837,7 +891,7 @@ void Application::startEmojiImageLoader() {
 	});
 
 	settings().largeEmojiChanges(
-	) | rpl::on_next([=](bool large) {
+	) | rpl::start_with_next([=](bool large) {
 		if (large) {
 			_clearEmojiImageLoaderTimer.cancel();
 		} else {
@@ -847,7 +901,7 @@ void Application::startEmojiImageLoader() {
 	}, _lifetime);
 
 	Ui::Emoji::Updated(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_emojiImageLoader.with([
 			source = prepareEmojiSourceImages()
 		](Stickers::EmojiImageLoader &loader) mutable {
@@ -1107,21 +1161,6 @@ void Application::checkStartUrls() {
 }
 
 bool Application::openLocalUrl(const QString &url, QVariant context) {
-	const auto urlTrimmed = url.trimmed();
-	const auto protocol = u"tg://"_q;
-	if (urlTrimmed.startsWith(protocol, Qt::CaseInsensitive)
-		&& !passcodeLocked()) {
-		const auto command = urlTrimmed.mid(protocol.size());
-		const auto my = context.value<ClickHandlerContext>();
-		const auto controller = my.sessionWindow.get()
-			? my.sessionWindow.get()
-			: _lastActivePrimaryWindow
-			? _lastActivePrimaryWindow->sessionController()
-			: nullptr;
-		if (TryRouterForLocalUrl(controller, command)) {
-			return true;
-		}
-	}
 	return openCustomUrl("tg://", LocalUrlHandlers(), url, context);
 }
 
@@ -1500,7 +1539,7 @@ void Application::setLastActiveWindow(Window::Controller *window) {
 		return;
 	}
 	window->floatPlayerDelegateValue(
-	) | rpl::on_next([=](Media::Player::FloatDelegate *value) {
+	) | rpl::start_with_next([=](Media::Player::FloatDelegate *value) {
 		if (!value) {
 			_floatPlayers = nullptr;
 		} else if (_floatPlayers) {
@@ -1827,12 +1866,12 @@ void Application::startShortcuts() {
 	Shortcuts::Start();
 
 	_domain->activeSessionChanges(
-	) | rpl::on_next([=](Main::Session *session) {
+	) | rpl::start_with_next([=](Main::Session *session) {
 		refreshApplicationIcon(session);
 	}, _lifetime);
 
 	Shortcuts::Requests(
-	) | rpl::on_next([=](not_null<Shortcuts::Request*> request) {
+	) | rpl::start_with_next([=](not_null<Shortcuts::Request*> request) {
 		using Command = Shortcuts::Command;
 		request->check(Command::Quit) && request->handle([] {
 			Quit();

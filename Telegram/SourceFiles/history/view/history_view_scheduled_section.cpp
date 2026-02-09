@@ -169,14 +169,14 @@ ScheduledWidget::ScheduledWidget(
 	controller->chatStyle(),
 	static_cast<HistoryView::CornerButtonsDelegate*>(this)) {
 	controller->chatStyle()->paletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_scroll->updateBars();
 	}, _scroll->lifetime());
 
 	Window::ChatThemeValueFromPeer(
 		controller,
 		history->peer
-	) | rpl::on_next([=](std::shared_ptr<Ui::ChatTheme> &&theme) {
+	) | rpl::start_with_next([=](std::shared_ptr<Ui::ChatTheme> &&theme) {
 		_theme = std::move(theme);
 		controller->setChatStyleTheme(_theme);
 	}, lifetime());
@@ -194,21 +194,21 @@ ScheduledWidget::ScheduledWidget(
 	_topBar->show();
 
 	_topBar->sendNowSelectionRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		confirmSendNowSelected();
 	}, _topBar->lifetime());
 	_topBar->deleteSelectionRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		confirmDeleteSelected();
 	}, _topBar->lifetime());
 	_topBar->clearSelectionRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		clearSelected();
 	}, _topBar->lifetime());
 
 	_topBarShadow->raise();
 	controller->adaptive().value(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateAdaptiveLayout();
 	}, lifetime());
 
@@ -219,12 +219,12 @@ ScheduledWidget::ScheduledWidget(
 	_scroll->move(0, _topBar->height());
 	_scroll->show();
 	_scroll->scrolls(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		onScroll();
 	}, lifetime());
 
 	_inner->editMessageRequested(
-	) | rpl::on_next([=](auto fullId) {
+	) | rpl::start_with_next([=](auto fullId) {
 		if (const auto item = session().data().message(fullId)) {
 			const auto media = item->media();
 			if (!media || media->webpage() || media->allowsEditCaption()) {
@@ -242,7 +242,7 @@ ScheduledWidget::ScheduledWidget(
 			_inner,
 			controller->chatStyle(),
 			st::msgServicePadding);
-		const auto emptyText = tr::semibold(
+		const auto emptyText = Ui::Text::Semibold(
 			tr::lng_scheduled_messages_empty(tr::now));
 		emptyInfo->setText(emptyText);
 		_inner->setEmptyInfoWidget(std::move(emptyInfo));
@@ -308,7 +308,7 @@ void ScheduledWidget::setupComposeControls() {
 					.type = Controls::WriteRestrictionType::Rights,
 					.boostsToLift = text.boostsToLift,
 				} : Controls::WriteRestriction();
-			}) | rpl::type_erased;
+			}) | rpl::type_erased();
 		}()
 		: [&] {
 			return rpl::combine(
@@ -342,7 +342,7 @@ void ScheduledWidget::setupComposeControls() {
 					.type = Controls::WriteRestrictionType::Rights,
 					.boostsToLift = text.boostsToLift,
 				} : Controls::WriteRestriction();
-			}) | rpl::type_erased;
+			}) | rpl::type_erased();
 		}();
 	_composeControls->setHistory({
 		.history = _history.get(),
@@ -350,7 +350,7 @@ void ScheduledWidget::setupComposeControls() {
 	});
 
 	_composeControls->height(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		const auto wasMax = (_scroll->scrollTopMax() == _scroll->scrollTop());
 		updateControlsGeometry();
 		if (wasMax) {
@@ -359,28 +359,28 @@ void ScheduledWidget::setupComposeControls() {
 	}, lifetime());
 
 	_composeControls->cancelRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		listCancelRequest();
 	}, lifetime());
 
 	_composeControls->sendRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		send();
 	}, lifetime());
 
 	_composeControls->sendVoiceRequests(
-	) | rpl::on_next([=](ComposeControls::VoiceToSend &&data) {
+	) | rpl::start_with_next([=](ComposeControls::VoiceToSend &&data) {
 		sendVoice(std::move(data));
 	}, lifetime());
 
 	_composeControls->sendCommandRequests(
-	) | rpl::on_next([=](const QString &command) {
+	) | rpl::start_with_next([=](const QString &command) {
 		listSendBotCommand(command, FullMsgId());
 	}, lifetime());
 
 	const auto saveEditMsgRequestId = lifetime().make_state<mtpRequestId>(0);
 	_composeControls->editRequests(
-	) | rpl::on_next([=](auto data) {
+	) | rpl::start_with_next([=](auto data) {
 		if (const auto item = session().data().message(data.fullId)) {
 			if (item->isScheduled()) {
 				const auto spoiler = data.spoilered;
@@ -394,7 +394,7 @@ void ScheduledWidget::setupComposeControls() {
 	_composeControls->attachRequests(
 	) | rpl::filter([=] {
 		return !_choosingAttach;
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		_choosingAttach = true;
 		base::call_delayed(
 			st::historyAttach.ripple.hideDuration,
@@ -403,7 +403,7 @@ void ScheduledWidget::setupComposeControls() {
 	}, lifetime());
 
 	_composeControls->fileChosen(
-	) | rpl::on_next([=](ChatHelpers::FileChosen data) {
+	) | rpl::start_with_next([=](ChatHelpers::FileChosen data) {
 		controller()->hideLayer(anim::type::normal);
 		const auto document = data.document;
 		const auto callback = crl::guard(this, [=](Api::SendOptions options) {
@@ -417,17 +417,17 @@ void ScheduledWidget::setupComposeControls() {
 	}, lifetime());
 
 	_composeControls->photoChosen(
-	) | rpl::on_next([=](ChatHelpers::PhotoChosen chosen) {
+	) | rpl::start_with_next([=](ChatHelpers::PhotoChosen chosen) {
 		sendExistingPhoto(chosen.photo);
 	}, lifetime());
 
 	_composeControls->inlineResultChosen(
-	) | rpl::on_next([=](ChatHelpers::InlineChosen chosen) {
+	) | rpl::start_with_next([=](ChatHelpers::InlineChosen chosen) {
 		sendInlineResult(chosen.result, chosen.bot);
 	}, lifetime());
 
 	_composeControls->jumpToItemRequests(
-	) | rpl::on_next([=](FullReplyTo to) {
+	) | rpl::start_with_next([=](FullReplyTo to) {
 		if (const auto item = session().data().message(to.messageId)) {
 			if (item->isScheduled() && item->history() == _history) {
 				showAtPosition(item->position());
@@ -441,12 +441,12 @@ void ScheduledWidget::setupComposeControls() {
 	rpl::merge(
 		_composeControls->scrollKeyEvents(),
 		_inner->scrollKeyEvents()
-	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
+	) | rpl::start_with_next([=](not_null<QKeyEvent*> e) {
 		_scroll->keyPressEvent(e);
 	}, lifetime());
 
 	_composeControls->editLastMessageRequests(
-	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
+	) | rpl::start_with_next([=](not_null<QKeyEvent*> e) {
 		if (!_inner->lastMessageEditRequestNotify()) {
 			_scroll->keyPressEvent(e);
 		}
@@ -467,13 +467,13 @@ void ScheduledWidget::setupComposeControls() {
 	});
 
 	_composeControls->lockShowStarts(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_cornerButtons.updateJumpDownVisibility();
 		_cornerButtons.updateUnreadThingsVisibility();
 	}, lifetime());
 
 	_composeControls->viewportEvents(
-	) | rpl::on_next([=](not_null<QEvent*> e) {
+	) | rpl::start_with_next([=](not_null<QEvent*> e) {
 		_scroll->viewportEvent(e);
 	}, lifetime());
 }
@@ -1233,7 +1233,7 @@ void ScheduledWidget::initProcessingVideoView(not_null<Element*> view) {
 	_processingVideoView = view;
 
 	controller()->session().data().sentFromScheduled(
-	) | rpl::on_next([=](const Data::SentFromScheduled &value) {
+	) | rpl::start_with_next([=](const Data::SentFromScheduled &value) {
 		if (value.item->position() == _processingVideoPosition) {
 			controller()->showPeerHistory(
 				value.item->history(),
@@ -1243,7 +1243,7 @@ void ScheduledWidget::initProcessingVideoView(not_null<Element*> view) {
 	}, _processingVideoLifetime);
 
 	controller()->session().data().viewRemoved(
-	) | rpl::on_next([=](not_null<const Element*> view) {
+	) | rpl::start_with_next([=](not_null<const Element*> view) {
 		if (view == _processingVideoView.get()) {
 			const auto position = _processingVideoPosition;
 			if (const auto now = _inner->viewByPosition(position)) {
@@ -1256,7 +1256,7 @@ void ScheduledWidget::initProcessingVideoView(not_null<Element*> view) {
 	}, _processingVideoLifetime);
 
 	controller()->session().data().viewResizeRequest(
-	) | rpl::on_next([this](not_null<const Element*> view) {
+	) | rpl::start_with_next([this](not_null<const Element*> view) {
 		if (view->delegate() == _inner.data()) {
 			if (!_processingVideoUpdateScheduled) {
 				if (const auto tooltip = _processingVideoTooltip.get()) {
@@ -1337,7 +1337,7 @@ void ScheduledWidget::showProcessingVideoTooltip() {
 		_inner.data(),
 		Ui::MakeNiceTooltipLabel(
 			_inner.data(),
-			tr::lng_scheduled_video_tip(tr::marked),
+			tr::lng_scheduled_video_tip(Ui::Text::WithEntities),
 			st::processingVideoTipMaxWidth,
 			st::defaultImportantTooltipLabel),
 		st::defaultImportantTooltip);
@@ -1729,7 +1729,7 @@ bool ShowScheduledVideoPublished(
 
 	const auto text = tr::lng_scheduled_video_published(
 		tr::now,
-		tr::bold);
+		Ui::Text::Bold);
 	const auto &st = st::processingVideoToast;
 	const auto skip = st::processingVideoPreviewSkip;
 	const auto size = st.style.font->height * 2;
@@ -1781,7 +1781,7 @@ bool ShowScheduledVideoPublished(
 	rpl::combine(
 		widget->sizeValue(),
 		button->sizeValue()
-	) | rpl::on_next([=](QSize outer, QSize inner) {
+	) | rpl::start_with_next([=](QSize outer, QSize inner) {
 		button->moveToRight(
 			0,
 			(outer.height() - inner.height()) / 2,
@@ -1800,7 +1800,7 @@ bool ShowScheduledVideoPublished(
 		preview->update();
 	});
 	preview->paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		auto p = QPainter(preview);
 		const auto image = Images::Round(
 			thumbnail->image(size),

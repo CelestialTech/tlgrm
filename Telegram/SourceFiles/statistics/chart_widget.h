@@ -179,6 +179,4 @@ private:
 
 };
 
-void FixCacheForHighDPIChartWidget(not_null<Ui::RpWidget*> container);
-
 } // namespace Statistic

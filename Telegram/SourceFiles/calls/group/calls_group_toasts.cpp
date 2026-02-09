@@ -50,14 +50,14 @@ void Toasts::setupJoinAsChanged() {
 		return _call->stateValue() | rpl::filter([](State state) {
 			return (state == State::Joined);
 		}) | rpl::take(1);
-	}) | rpl::flatten_latest() | rpl::on_next([=] {
+	}) | rpl::flatten_latest() | rpl::start_with_next([=] {
 		_panel->uiShow()->showToast((_call->peer()->isBroadcast()
 			? tr::lng_group_call_join_as_changed_channel
 			: tr::lng_group_call_join_as_changed)(
 			tr::now,
 			lt_name,
-			tr::bold(_call->joinAs()->name()),
-			tr::marked));
+			Ui::Text::Bold(_call->joinAs()->name()),
+			Ui::Text::WithEntities));
 	}, _lifetime);
 }
 
@@ -70,20 +70,20 @@ void Toasts::setupTitleChanged() {
 		return peer->groupCall()->title().isEmpty()
 			? peer->name()
 			: peer->groupCall()->title();
-	}) | rpl::on_next([=](const QString &title) {
+	}) | rpl::start_with_next([=](const QString &title) {
 		_panel->uiShow()->showToast((_call->peer()->isBroadcast()
 			? tr::lng_group_call_title_changed_channel
 			: tr::lng_group_call_title_changed)(
 			tr::now,
 			lt_title,
-			tr::bold(title),
-			tr::marked));
+			Ui::Text::Bold(title),
+			Ui::Text::WithEntities));
 	}, _lifetime);
 }
 
 void Toasts::setupAllowedToSpeak() {
 	_call->allowedToSpeakNotifications(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (_panel->isActive()) {
 			_panel->uiShow()->showToast(
 				tr::lng_group_call_can_speak_here(tr::now));
@@ -96,8 +96,8 @@ void Toasts::setupAllowedToSpeak() {
 				.text = tr::lng_group_call_can_speak(
 					tr::now,
 					lt_chat,
-					tr::bold(name),
-					tr::marked),
+					Ui::Text::Bold(name),
+					Ui::Text::WithEntities),
 			});
 		}
 	}, _lifetime);
@@ -112,7 +112,7 @@ void Toasts::setupPinnedVideo() {
 	}) | rpl::flatten_latest(
 	) | rpl::filter([=] {
 		return (_call->shownVideoTracks().size() > 1);
-	}) | rpl::on_next([=](const VideoEndpoint &endpoint) {
+	}) | rpl::start_with_next([=](const VideoEndpoint &endpoint) {
 		const auto pinned = _call->videoEndpointPinned();
 		const auto peer = endpoint.peer;
 		if (!peer) {
@@ -147,7 +147,7 @@ void Toasts::setupPinnedVideo() {
 void Toasts::setupRequestedToSpeak() {
 	_call->mutedValue(
 	) | rpl::combine_previous(
-	) | rpl::on_next([=](MuteState was, MuteState now) {
+	) | rpl::start_with_next([=](MuteState was, MuteState now) {
 		if (was == MuteState::ForceMuted && now == MuteState::RaisedHand) {
 			_panel->uiShow()->showToast(
 				tr::lng_group_call_tooltip_raised_hand(tr::now));
@@ -157,7 +157,7 @@ void Toasts::setupRequestedToSpeak() {
 
 void Toasts::setupError() {
 	_call->errors(
-	) | rpl::on_next([=](Error error) {
+	) | rpl::start_with_next([=](Error error) {
 		const auto key = [&] {
 			switch (error) {
 			case Error::NoCamera: return tr::lng_call_error_no_camera;

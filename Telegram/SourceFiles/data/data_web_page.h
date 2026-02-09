@@ -90,6 +90,9 @@ struct WebPageStickerSet {
 struct WebPageAuction {
 	std::shared_ptr<Data::StarGift> auctionGift;
 	TimeId endDate = 0;
+	QColor centerColor;
+	QColor edgeColor;
+	QColor textColor;
 };
 
 struct WebPageData {

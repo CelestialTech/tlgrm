@@ -23,7 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_memento.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
-#include "settings/sections/settings_premium.h"
+#include "settings/settings_premium.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/effects/ripple_animation.h"
@@ -70,11 +70,11 @@ using Channels = Api::ChatParticipants::Peers;
 						lt_count,
 						upto,
 						lt_link,
-						tr::link(
-							tr::bold(
+						Ui::Text::Link(
+							Ui::Text::Bold(
 								tr::lng_similar_channels_premium_all_link(
 									tr::now))),
-						tr::rich),
+						Ui::Text::RichLangValue),
 					u"similar_channels"_q);
 				return;
 			}

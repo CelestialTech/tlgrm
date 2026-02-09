@@ -66,18 +66,18 @@ void ForwardPanel::update(
 		Assert(to != nullptr);
 
 		_data.items.front()->history()->owner().itemRemoved(
-		) | rpl::on_next([=](not_null<const HistoryItem*> item) {
+		) | rpl::start_with_next([=](not_null<const HistoryItem*> item) {
 			itemRemoved(item);
 		}, _dataLifetime);
 
 		if (const auto topic = _to->asTopic()) {
 			topic->destroyed(
-			) | rpl::on_next([=] {
+			) | rpl::start_with_next([=] {
 				update(nullptr, {});
 			}, _dataLifetime);
 		} else if (const auto sublist = _to->asSublist()) {
 			sublist->destroyed(
-			) | rpl::on_next([=] {
+			) | rpl::start_with_next([=] {
 				update(nullptr, {});
 			}, _dataLifetime);
 		}
@@ -353,7 +353,7 @@ void ClearDraftReplyTo(
 		.topicRootId = topicRootId,
 		.monoforumPeerId = monoforumPeerId,
 	};
-	draft.suggest = SuggestOptions();
+	draft.suggest = SuggestPostOptions();
 	if (Data::DraftIsNull(&draft)) {
 		history->clearLocalDraft(topicRootId, monoforumPeerId);
 	} else {
@@ -408,7 +408,7 @@ void EditWebPageOptions(
 		});
 
 		state->result.value(
-		) | rpl::on_next([=](const Data::WebPageDraft &draft) {
+		) | rpl::start_with_next([=](const Data::WebPageDraft &draft) {
 			state->large->setColorOverride(draft.forceLargeMedia
 				? st::windowActiveTextFg->c
 				: std::optional<QColor>());

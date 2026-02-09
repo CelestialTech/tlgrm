@@ -16,7 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/wrap/vertical_layout.h"
-#include "ui/text/text_utilities.h" // tr::rich
+#include "ui/text/text_utilities.h" // Ui::Text::RichLangValue
 #include "boxes/peer_list_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "boxes/add_contact_box.h"
@@ -81,7 +81,7 @@ Controller::Controller(
 		Data::PeerUpdate::Flag::FullInfo
 	) | rpl::filter([=](const Data::PeerUpdate &update) {
 		return (update.peer == _waitForFull);
-	}) | rpl::on_next([=](const Data::PeerUpdate &update) {
+	}) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
 		choose(std::exchange(_waitForFull, nullptr));
 	}, lifetime());
 }
@@ -146,10 +146,10 @@ void Controller::choose(not_null<ChannelData*> chat) {
 	auto text = tr::lng_manage_discussion_group_sure(
 		tr::now,
 		lt_group,
-		tr::bold(chat->name()),
+		Ui::Text::Bold(chat->name()),
 		lt_channel,
-		tr::bold(_channel->name()),
-		tr::marked);
+		Ui::Text::Bold(_channel->name()),
+		Ui::Text::WithEntities);
 	if (!_channel->isPublic()) {
 		text.append(
 			"\n\n" + tr::lng_manage_linked_channel_private(tr::now));
@@ -161,7 +161,7 @@ void Controller::choose(not_null<ChannelData*> chat) {
 			text.append("\n\n");
 			text.append(tr::lng_manage_discussion_group_warning(
 				tr::now,
-				tr::rich));
+				Ui::Text::RichLangValue));
 		}
 	}
 	const auto sure = [=](Fn<void()> &&close) {
@@ -180,10 +180,10 @@ void Controller::choose(not_null<ChatData*> chat) {
 	auto text = tr::lng_manage_discussion_group_sure(
 		tr::now,
 		lt_group,
-		tr::bold(chat->name()),
+		Ui::Text::Bold(chat->name()),
 		lt_channel,
-		tr::bold(_channel->name()),
-		tr::marked);
+		Ui::Text::Bold(_channel->name()),
+		Ui::Text::WithEntities);
 	if (!_channel->isPublic()) {
 		text.append("\n\n" + tr::lng_manage_linked_channel_private(tr::now));
 	}
@@ -191,7 +191,7 @@ void Controller::choose(not_null<ChatData*> chat) {
 	text.append("\n\n");
 	text.append(tr::lng_manage_discussion_group_warning(
 		tr::now,
-		tr::rich));
+		Ui::Text::RichLangValue));
 	const auto sure = [=](Fn<void()> &&close) {
 		close();
 		const auto done = [=](not_null<ChannelData*> chat) {
@@ -213,15 +213,15 @@ void Controller::choose(not_null<ChatData*> chat) {
 	if (!channel->isBroadcast()) {
 		return tr::lng_manage_linked_channel_about(
 			lt_channel,
-			rpl::single(tr::bold(chat->name())),
-			tr::marked);
+			rpl::single(Ui::Text::Bold(chat->name())),
+			Ui::Text::WithEntities);
 	} else if (chat != nullptr) {
 		return tr::lng_manage_discussion_group_about_chosen(
 			lt_group,
-			rpl::single(tr::bold(chat->name())),
-			tr::marked);
+			rpl::single(Ui::Text::Bold(chat->name())),
+			Ui::Text::WithEntities);
 	}
-	return tr::lng_manage_discussion_group_about(tr::marked);
+	return tr::lng_manage_discussion_group_about(Ui::Text::WithEntities);
 }
 
 [[nodiscard]] object_ptr<Ui::BoxContent> EditDiscussionLinkBox(
@@ -361,5 +361,5 @@ void ShowForumForDiscussionError(
 	navigation->showToast(
 		tr::lng_forum_topics_no_discussion(
 			tr::now,
-			tr::rich));
+			Ui::Text::RichLangValue));
 }

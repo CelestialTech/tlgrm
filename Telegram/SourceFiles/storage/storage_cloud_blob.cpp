@@ -131,12 +131,12 @@ void BlobLoader::setImplementation(
 		return BlobState(state);
 	});
 	_implementation->failed(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		fail();
 	}, _implementation->lifetime());
 
 	_implementation->ready(
-	) | rpl::on_next([=](const QString &filepath) {
+	) | rpl::start_with_next([=](const QString &filepath) {
 		unpack(filepath);
 	}, _implementation->lifetime());
 

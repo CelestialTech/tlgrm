@@ -97,7 +97,7 @@ WeakInstance::WeakInstance(base::weak_ptr<Main::Session> session)
 	_session->account().sessionChanges(
 	) | rpl::filter([](Main::Session *session) {
 		return !session;
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		die();
 	}, _lifetime);
 }

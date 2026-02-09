@@ -239,20 +239,20 @@ void AboutRatingBox(
 		? tr::lng_stars_rating_about(
 			lt_name,
 			rpl::single(TextWithEntities{ name }),
-			tr::rich) | rpl::type_erased
+			Text::RichLangValue) | rpl::type_erased()
 		: tr::lng_stars_rating_about_your(
-			tr::rich) | rpl::type_erased;
+			Text::RichLangValue) | rpl::type_erased();
 
 	if (data.level < 0) {
 		auto text = (data.stars < 0)
 			? tr::lng_stars_rating_negative_your(
 				lt_count_decimal,
 				rpl::single(-data.stars * 1.),
-				tr::rich)
+				Text::RichLangValue)
 			: tr::lng_stars_rating_negative(
 				lt_name,
 				rpl::single(TextWithEntities{ name }),
-				tr::rich);
+				Text::RichLangValue);
 		box->addRow(
 			object_ptr<FlatLabel>(
 				box,
@@ -289,8 +289,8 @@ void AboutRatingBox(
 						tr::now,
 						lt_arrow,
 						Text::IconEmoji(&st::textMoreIconEmoji),
-						tr::marked)),
-				tr::rich);
+						Text::WithEntities)),
+				Text::RichLangValue);
 		});
 		const auto aboutPending = box->addRow(
 			object_ptr<FlatLabel>(
@@ -326,7 +326,7 @@ void AboutRatingBox(
 			const QString &text,
 			const style::RoundButton &st) {
 		return helper.paletteDependent(
-			Text::CustomEmojiTextBadge(text.toUpper(), st));
+			Text::CustomEmojiTextBadge(text, st));
 	};
 	const auto makeActive = [&](const QString &text) {
 		return makeBadge(text, st::customEmojiTextBadge);
@@ -342,7 +342,7 @@ void AboutRatingBox(
 				tr::now,
 				lt_emoji,
 				makeActive(tr::lng_stars_rating_added(tr::now)),
-				tr::rich),
+				Text::RichLangValue),
 		},
 		{
 			st::menuIconRatingUsers,
@@ -351,7 +351,7 @@ void AboutRatingBox(
 				tr::now,
 				lt_emoji,
 				makeActive(tr::lng_stars_rating_added(tr::now)),
-				tr::rich),
+				Text::RichLangValue),
 		},
 		{
 			st::menuIconRatingRefund,
@@ -360,7 +360,7 @@ void AboutRatingBox(
 				tr::now,
 				lt_emoji,
 				makeInactive(tr::lng_stars_rating_deducted(tr::now)),
-				tr::rich),
+				Text::RichLangValue),
 		},
 	};
 	const auto context = helper.context();
@@ -431,7 +431,7 @@ StarsRating::~StarsRating() = default;
 void StarsRating::init() {
 	_widget->setPointerCursor(true);
 
-	_widget->paintRequest() | rpl::on_next([=] {
+	_widget->paintRequest() | rpl::start_with_next([=] {
 		auto p = QPainter(_widget.get());
 		paint(p);
 	}, lifetime());
@@ -447,7 +447,7 @@ void StarsRating::init() {
 
 	_widget->resize(_widget->width(), st::level1.icon.height());
 
-	_value.value() | rpl::on_next([=](Counters rating) {
+	_value.value() | rpl::start_with_next([=](Counters rating) {
 		updateData(rating);
 	}, lifetime());
 }

@@ -14,7 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Api {
 
-MTPSuggestedPost SuggestToMTP(SuggestOptions suggest) {
+MTPSuggestedPost SuggestToMTP(SuggestPostOptions suggest) {
 	using Flag = MTPDsuggestedPost::Flag;
 	return suggest.exists
 		? MTP_suggestedPost(

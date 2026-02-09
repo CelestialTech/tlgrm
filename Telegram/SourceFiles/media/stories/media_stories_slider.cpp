@@ -49,7 +49,7 @@ void Slider::show(SliderData data) {
 
 	raw->widthValue() | rpl::filter([=](int width) {
 		return (width >= st::storiesSliderWidth);
-	}) | rpl::on_next([=](int width) {
+	}) | rpl::start_with_next([=](int width) {
 		layout(width);
 	}, raw->lifetime());
 
@@ -57,7 +57,7 @@ void Slider::show(SliderData data) {
 	) | rpl::filter([=] {
 		return !_data.videoStream
 			&& (raw->width() >= st::storiesSliderWidth);
-	}) | rpl::on_next([=](QRect clip) {
+	}) | rpl::start_with_next([=](QRect clip) {
 		paint(QRectF(clip));
 	}, raw->lifetime());
 
@@ -69,7 +69,7 @@ void Slider::show(SliderData data) {
 	});
 
 	_controller->layoutValue(
-	) | rpl::on_next([=](const Layout &layout) {
+	) | rpl::start_with_next([=](const Layout &layout) {
 		raw->setGeometry(layout.slider - st::storiesSliderMargin);
 	}, raw->lifetime());
 }

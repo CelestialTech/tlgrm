@@ -22,7 +22,7 @@ struct HistoryMessageMarkupData;
 struct HistoryMessageReplyMarkup;
 struct HistoryMessageTranslation;
 struct HistoryMessageForwarded;
-struct HistoryMessageSuggestion;
+struct HistoryMessageSuggestedPost;
 struct HistoryServiceDependentData;
 struct HistoryServiceTodoCompletions;
 enum class HistorySelfDestructType;
@@ -31,10 +31,6 @@ struct MessageFactcheck;
 class ReplyKeyboard;
 struct LanguageId;
 enum class SuggestionActions : uchar;
-
-namespace Api {
-struct SummaryEntry;
-} // namespace Api
 
 namespace base {
 template <typename Enum>
@@ -96,7 +92,6 @@ struct HistoryItemCommonFields {
 	HistoryMessageSuggestInfo suggest;
 	bool ignoreForwardFrom = false;
 	bool ignoreForwardCaptions = false;
-	bool mediaSpoiler = false;
 };
 
 enum class HistoryReactionSource : char {
@@ -217,11 +212,8 @@ public:
 	void setFactcheck(MessageFactcheck info);
 	[[nodiscard]] bool hasUnrequestedFactcheck() const;
 	[[nodiscard]] TextWithEntities factcheckText() const;
-	[[nodiscard]] const Api::SummaryEntry &summaryEntry() const;
-	void setHasSummaryEntry();
 
 	[[nodiscard]] not_null<Data::Thread*> notificationThread() const;
-	[[nodiscard]] Data::Thread *maybeNotificationThread() const;
 	[[nodiscard]] not_null<History*> history() const {
 		return _history;
 	}
@@ -336,9 +328,6 @@ public:
 	}
 	[[nodiscard]] bool showSimilarChannels() const {
 		return _flags & MessageFlag::ShowSimilarChannels;
-	}
-	[[nodiscard]] bool canBeSummarized() const {
-		return _flags & MessageFlag::CanBeSummarized;
 	}
 	[[nodiscard]] bool hasRealFromId() const;
 	[[nodiscard]] bool isPostHidingAuthor() const;
@@ -588,11 +577,10 @@ public:
 
 	[[nodiscard]] SuggestionActions computeSuggestionActions() const;
 	[[nodiscard]] SuggestionActions computeSuggestionActions(
-		const HistoryMessageSuggestion *suggest) const;
+		const HistoryMessageSuggestedPost *suggest) const;
 	[[nodiscard]] SuggestionActions computeSuggestionActions(
 		bool accepted,
-		bool rejected,
-		TimeId giftOfferExpiresAt) const;
+		bool rejected) const;
 
 	[[nodiscard]] bool needsUpdateForVideoQualities(const MTPMessage &data);
 
@@ -632,7 +620,7 @@ private:
 	void setReplyMarkup(
 		HistoryMessageMarkupData &&markup,
 		bool ignoreSuggestButtons = false);
-	void updateSuggestControls(const HistoryMessageSuggestion *suggest);
+	void updateSuggestControls(const HistoryMessageSuggestedPost *suggest);
 
 	void changeReplyToTopCounter(
 		not_null<HistoryMessageReply*> reply,

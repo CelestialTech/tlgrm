@@ -523,7 +523,7 @@ void EmojiKeywords::handleSessionChanges() {
 	Core::App().domain().activeSessionValue( // #TODO multi someSessionValue
 	) | rpl::map([](Main::Session *session) {
 		return session ? &session->api() : nullptr;
-	}) | rpl::on_next([=](ApiWrap *api) {
+	}) | rpl::start_with_next([=](ApiWrap *api) {
 		apiChanged(api);
 	}, _lifetime);
 }
@@ -536,7 +536,7 @@ void EmojiKeywords::apiChanged(ApiWrap *api) {
 			) | rpl::filter([=] {
 				// Refresh with the suggested language if we already were asked.
 				return !_data.empty();
-			}) | rpl::on_next([=] {
+			}) | rpl::start_with_next([=] {
 				refresh();
 			}, _suggestedChangeLifetime);
 		}));

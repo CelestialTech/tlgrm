@@ -203,16 +203,16 @@ rpl::producer<UserPhotosSlice> UserPhotosViewer(
 				photoId);
 		};
 		builder->insufficientPhotosAround()
-			| rpl::on_next(std::move(requestPhotosAround), lifetime);
+			| rpl::start_with_next(std::move(requestPhotosAround), lifetime);
 
 		session->storage().userPhotosSliceUpdated()
-			| rpl::on_next(applyUpdate, lifetime);
+			| rpl::start_with_next(applyUpdate, lifetime);
 
 		session->storage().query(Storage::UserPhotosQuery(
 			key,
 			limitBefore,
 			limitAfter
-		)) | rpl::on_next_done(
+		)) | rpl::start_with_next_done(
 			applyUpdate,
 			[=] { builder->checkInsufficientPhotos(); },
 			lifetime);
@@ -247,7 +247,7 @@ std::optional<PhotoId> SyncUserFallbackPhotoViewer(not_null<UserData*> user) {
 		Storage::UserPhotosKey(peerToUser(user->id), true),
 		kFallbackCount,
 		kFallbackCount
-	)) | rpl::on_next([&](Storage::UserPhotosResult &&slice) {
+	)) | rpl::start_with_next([&](Storage::UserPhotosResult &&slice) {
 		if (slice.photoIds.empty()) {
 			return;
 		}

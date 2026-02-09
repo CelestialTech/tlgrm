@@ -21,11 +21,6 @@ namespace Payments {
 struct CreditsFormData;
 } // namespace Payments
 
-namespace Settings {
-enum class SmallBalanceResult;
-struct SmallBalanceSource;
-} // namespace Settings
-
 namespace Ui {
 
 class RpWidget;
@@ -35,7 +30,7 @@ class FlatLabel;
 void SendCreditsBox(
 	not_null<Ui::GenericBox*> box,
 	std::shared_ptr<Payments::CreditsFormData> data,
-	Fn<void(Settings::SmallBalanceResult)> sent);
+	Fn<void()> sent);
 
 [[nodiscard]] TextWithEntities CreditsEmoji();
 
@@ -59,8 +54,5 @@ void SendStarsForm(
 	not_null<Main::Session*> session,
 	std::shared_ptr<Payments::CreditsFormData> data,
 	Fn<void(std::optional<QString>)> done);
-
-[[nodiscard]] Settings::SmallBalanceSource SmallBalanceSourceFromForm(
-	std::shared_ptr<Payments::CreditsFormData> form);
 
 } // namespace Ui

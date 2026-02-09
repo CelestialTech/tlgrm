@@ -103,17 +103,17 @@ EmojiPack::EmojiPack(not_null<Main::Session*> session)
 	session->data().viewRemoved(
 	) | rpl::filter([](not_null<const ViewElement*> view) {
 		return view->isIsolatedEmoji() || view->isOnlyCustomEmoji();
-	}) | rpl::on_next([=](not_null<const ViewElement*> item) {
+	}) | rpl::start_with_next([=](not_null<const ViewElement*> item) {
 		remove(item);
 	}, _lifetime);
 
 	Core::App().settings().largeEmojiChanges(
-	) | rpl::on_next([=](bool large) {
+	) | rpl::start_with_next([=](bool large) {
 		refreshAll();
 	}, _lifetime);
 
 	Ui::Emoji::Updated(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_images.clear();
 		refreshAll();
 	}, _lifetime);

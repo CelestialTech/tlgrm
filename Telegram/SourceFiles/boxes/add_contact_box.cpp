@@ -126,7 +126,7 @@ void ChatCreateDone(
 void MustBePublicDestroy(not_null<ChannelData*> channel) {
 	const auto session = &channel->session();
 	session->api().request(MTPchannels_DeleteChannel(
-		channel->inputChannel()
+		channel->inputChannel
 	)).done([=](const MTPUpdates &result) {
 		session->api().applyUpdates(result);
 	}).send();
@@ -160,7 +160,7 @@ void MustBePublicFailed(
 TextWithEntities PeerFloodErrorText(
 		not_null<Main::Session*> session,
 		PeerFloodType type) {
-	const auto link = tr::link(
+	const auto link = Ui::Text::Link(
 		tr::lng_cant_more_info(tr::now),
 		session->createInternalLinkFull(u"spambot"_q));
 	return ((type == PeerFloodType::InviteGroup)
@@ -169,7 +169,7 @@ TextWithEntities PeerFloodErrorText(
 			tr::now,
 			lt_more_info,
 			link,
-			tr::marked);
+			Ui::Text::WithEntities);
 }
 
 void ShowAddParticipantsError(
@@ -324,9 +324,9 @@ void AddContactBox::prepare() {
 
 	const auto submitted = [=] { submit(); };
 	_first->submits(
-	) | rpl::on_next(submitted, _first->lifetime());
+	) | rpl::start_with_next(submitted, _first->lifetime());
 	_last->submits(
-	) | rpl::on_next(submitted, _last->lifetime());
+	) | rpl::start_with_next(submitted, _last->lifetime());
 	connect(_phone, &Ui::PhoneInput::submitted, [=] { submit(); });
 
 	setDimensions(
@@ -598,13 +598,13 @@ void GroupInfoBox::prepare() {
 			Core::App().settings().sendSubmitWay());
 
 		_description->heightChanges(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			descriptionResized();
 		}, _description->lifetime());
 		_description->submits(
-		) | rpl::on_next([=] { submit(); }, _description->lifetime());
+		) | rpl::start_with_next([=] { submit(); }, _description->lifetime());
 		_description->cancelled(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			closeBox();
 		}, _description->lifetime());
 
@@ -614,7 +614,7 @@ void GroupInfoBox::prepare() {
 			&_navigation->session());
 	}
 	_title->submits(
-	) | rpl::on_next([=] { submitName(); }, _title->lifetime());
+	) | rpl::start_with_next([=] { submitName(); }, _title->lifetime());
 
 	addButton(
 		((_type != Type::Group || _canAddBot)
@@ -735,7 +735,7 @@ void GroupInfoBox::createGroup(
 		auto user = peer->asUser();
 		Assert(user != nullptr);
 		if (!user->isSelf()) {
-			inputs.push_back(user->inputUser());
+			inputs.push_back(user->inputUser);
 		}
 	}
 	_creationRequestId = _api.request(MTPmessages_CreateChat(
@@ -920,7 +920,7 @@ void GroupInfoBox::checkInviteLink() {
 		_createdChannel->session().changes().peerUpdates(
 			_createdChannel,
 			Data::PeerUpdate::Flag::FullInfo
-		) | rpl::take(1) | rpl::on_next([=] {
+		) | rpl::take(1) | rpl::start_with_next([=] {
 			checkInviteLink();
 		}, lifetime());
 	}
@@ -1034,7 +1034,7 @@ void SetupChannelBox::prepare() {
 	setMouseTracking(true);
 
 	_checkRequestId = _api.request(MTPchannels_CheckUsername(
-		_channel->inputChannel(),
+		_channel->inputChannel,
 		MTP_string("preston")
 	)).fail([=](const MTP::Error &error) {
 		_checkRequestId = 0;
@@ -1063,11 +1063,11 @@ void SetupChannelBox::prepare() {
 	_channel->session().changes().peerUpdates(
 		_channel,
 		Data::PeerUpdate::Flag::InviteLinks
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		rtlupdate(_invitationLink);
 	}, lifetime());
 
-	boxClosing() | rpl::on_next([=] {
+	boxClosing() | rpl::start_with_next([=] {
 		if (!_mustBePublic) {
 			AddParticipantsBoxController::Start(_navigation, _channel);
 		}
@@ -1281,7 +1281,7 @@ void SetupChannelBox::save() {
 	const auto saveUsername = [&](const QString &link) {
 		_sentUsername = link;
 		_saveRequestId = _api.request(MTPchannels_UpdateUsername(
-			_channel->inputChannel(),
+			_channel->inputChannel,
 			MTP_string(_sentUsername)
 		)).done([=] {
 			const auto done = _done;
@@ -1365,7 +1365,7 @@ void SetupChannelBox::check() {
 	if (link.size() >= Ui::EditPeer::kMinUsernameLength) {
 		_checkUsername = link;
 		_checkRequestId = _api.request(MTPchannels_CheckUsername(
-			_channel->inputChannel(),
+			_channel->inputChannel,
 			MTP_string(link)
 		)).done([=](const MTPBool &result) {
 			_checkRequestId = 0;
@@ -1495,7 +1495,7 @@ void SetupChannelBox::showRevokePublicLinkBoxForEdit() {
 		Box(PublicLinksLimitBox, navigation, callback));
 	const auto session = &navigation->session();
 	revoker->boxClosing(
-	) | rpl::on_next(crl::guard(session, [=] {
+	) | rpl::start_with_next(crl::guard(session, [=] {
 		base::call_delayed(200, session, [=] {
 			if (*revoked) {
 				return;
@@ -1529,10 +1529,7 @@ void SetupChannelBox::firstCheckFail(UsernameResult result) {
 	}
 }
 
-EditNameBox::EditNameBox(
-	QWidget*,
-	not_null<UserData*> user,
-	Focus focus)
+EditNameBox::EditNameBox(QWidget*, not_null<UserData*> user)
 : _user(user)
 , _api(&_user->session().mtp())
 , _first(
@@ -1545,8 +1542,7 @@ EditNameBox::EditNameBox(
 	st::defaultInputField,
 	tr::lng_signup_lastname(),
 	_user->lastName)
-, _invertOrder(langFirstNameGoesSecond())
-, _focus(focus) {
+, _invertOrder(langFirstNameGoesSecond()) {
 }
 
 void EditNameBox::prepare() {
@@ -1567,27 +1563,25 @@ void EditNameBox::prepare() {
 	_last->setMaxLength(Ui::EditPeer::kMaxUserFirstLastName);
 
 	_first->submits(
-	) | rpl::on_next([=] { submit(); }, _first->lifetime());
+	) | rpl::start_with_next([=] { submit(); }, _first->lifetime());
 	_last->submits(
-	) | rpl::on_next([=] { submit(); }, _last->lifetime());
+	) | rpl::start_with_next([=] { submit(); }, _last->lifetime());
 
 	_first->customTab(true);
 	_last->customTab(true);
 
 	_first->tabbed(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_last->setFocus();
 	}, _first->lifetime());
 	_last->tabbed(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_first->setFocus();
 	}, _last->lifetime());
 }
 
 void EditNameBox::setInnerFocus() {
-	const auto focusLast = (_focus == Focus::LastName)
-		|| (_focus == Focus::FirstName && _invertOrder);
-	(focusLast ? _last : _first)->setFocusFast();
+	(_invertOrder ? _last : _first)->setFocusFast();
 }
 
 void EditNameBox::submit() {

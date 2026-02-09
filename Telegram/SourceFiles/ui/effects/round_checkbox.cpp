@@ -34,7 +34,7 @@ public:
 		Expects(parent != nullptr);
 
 		style::PaletteChanged(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			_data.clear();
 		}, _lifetime);
 	}

@@ -12,8 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/stickers/data_stickers_set.h"
-#include "history/history.h"
-#include "history/history_item.h"
 #include "main/main_session.h"
 
 namespace Api {
@@ -49,23 +47,14 @@ using namespace TextUtilities;
 	if (!parsed.userId || parsed.selfId != session->userId().bare) {
 		return {};
 	}
-	const auto user = session->data().user(UserId(parsed.userId));
-	const auto item = user->isLoaded()
-		? nullptr
-		: user->owner().messageWithPeer(user->id);
-	const auto input = item
-		? MTP_inputUserFromMessage(
-			item->history()->peer->input(),
-			MTP_int(item->id.bare),
-			MTP_long(parsed.userId))
-		: (parsed.userId == parsed.selfId)
-		? MTP_inputUserSelf()
-		: user->isLoaded()
-		? user->inputUser()
-		: MTP_inputUser(
-			MTP_long(parsed.userId),
-			MTP_long(parsed.accessHash));
-	return MTP_inputMessageEntityMentionName(offset, length, input);
+	return MTP_inputMessageEntityMentionName(
+		offset,
+		length,
+		(parsed.userId == parsed.selfId
+			? MTP_inputUserSelf()
+			: MTP_inputUser(
+				MTP_long(parsed.userId),
+				MTP_long(parsed.accessHash))));
 }
 
 } // namespace

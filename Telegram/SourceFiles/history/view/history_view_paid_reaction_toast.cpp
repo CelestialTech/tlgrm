@@ -91,7 +91,7 @@ constexpr auto kPremiumToastDuration = 5 * crl::time(1000);
 		result->update();
 	};
 
-	result->paintRequest() | rpl::on_next([=] {
+	result->paintRequest() | rpl::start_with_next([=] {
 		auto p = QPainter(result);
 
 		const auto font = st::historyPremiumViewSet.style.font;
@@ -106,6 +106,7 @@ constexpr auto kPremiumToastDuration = 5 * crl::time(1000);
 			(result->height() - st::toastUndoDiameter) / 2,
 			st::toastUndoDiameter,
 			st::toastUndoDiameter);
+		p.setFont(st::toastUndoFont);
 		state->countdown.paint(
 			p,
 			inner.x() + (inner.width() - state->countdown.countWidth()) / 2,
@@ -124,7 +125,7 @@ constexpr auto kPremiumToastDuration = 5 * crl::time(1000);
 	}, result->lifetime());
 	result->resize(width, st::historyPremiumViewSet.height);
 
-	std::move(finish) | rpl::on_next([=](crl::time value) {
+	std::move(finish) | rpl::start_with_next([=](crl::time value) {
 		state->finish = value;
 		state->update();
 	}, result->lifetime());
@@ -149,7 +150,7 @@ PaidReactionToast::PaidReactionToast(
 	_owner->viewPaidReactionSent(
 	) | rpl::filter(
 		std::move(mine)
-	) | rpl::on_next([=](not_null<const Element*> view) {
+	) | rpl::start_with_next([=](not_null<const Element*> view) {
 		maybeShowFor(view->data());
 	}, _lifetime);
 }
@@ -165,7 +166,7 @@ PaidReactionToast::PaidReactionToast(
 	_owner->callPaidReactionSent(
 	) | rpl::filter(
 		std::move(mine)
-	) | rpl::on_next([=](not_null<Calls::GroupCall*> call) {
+	) | rpl::start_with_next([=](not_null<Calls::GroupCall*> call) {
 		maybeShowFor(call);
 	}, _lifetime);
 }
@@ -258,15 +259,15 @@ void PaidReactionToast::showFor(
 			tr::lng_paid_react_toast_anonymous(
 				lt_count,
 				_count.value() | tr::to_count(),
-				tr::bold),
+				Ui::Text::Bold),
 			tr::lng_paid_react_toast(
 				lt_count,
 				_count.value() | tr::to_count(),
-				tr::bold)),
+				Ui::Text::Bold)),
 		tr::lng_paid_react_toast_text(
 			lt_count_decimal,
 			_count.value() | tr::to_count(),
-			tr::rich)
+			Ui::Text::RichLangValue)
 	) | rpl::map([](TextWithEntities &&title, TextWithEntities &&body) {
 		title.append('\n').append(body);
 		return std::move(title);
@@ -297,7 +298,6 @@ void PaidReactionToast::showFor(
 		.padding = rpl::single(QMargins(leftSkip, 0, rightSkip, 0)),
 		.st = &st,
 		.attach = RectPart::Top,
-		.addToAttachSide = _topOffset.value(),
 		.acceptinput = true,
 		.infinite = true,
 	});
@@ -357,7 +357,7 @@ void PaidReactionToast::showFor(
 	rpl::combine(
 		widget->sizeValue(),
 		button->sizeValue()
-	) | rpl::on_next([=](QSize outer, QSize inner) {
+	) | rpl::start_with_next([=](QSize outer, QSize inner) {
 		button->moveToRight(
 			0,
 			(outer.height() - inner.height()) / 2,
@@ -412,7 +412,7 @@ void PaidReactionToast::setupLottiePreview(
 		Lottie::Quality::Default);
 
 	widget->paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (!player->ready()) {
 			return;
 		}
@@ -426,7 +426,7 @@ void PaidReactionToast::setupLottiePreview(
 	}, widget->lifetime());
 
 	player->updates(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		widget->update();
 	}, widget->lifetime());
 }

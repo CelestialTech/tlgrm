@@ -93,7 +93,7 @@ public:
 	using Data = WhoReactedEntryData;
 
 	WhoReactedEntryAction(
-		not_null<Ui::Menu::Menu*> parent,
+		not_null<RpWidget*> parent,
 		Text::CustomEmojiFactory factory,
 		const style::Menu &st,
 		Data &&data);

@@ -207,17 +207,18 @@ Action::Action(
 , _height(st::defaultWhoRead.itemPadding.top()
 		+ _st.itemStyle.font->height
 		+ st::defaultWhoRead.itemPadding.bottom()) {
+	const auto parent = parentMenu->menu();
 	const auto delay = anim::Disabled() ? 0 : parentMenu->st().duration;
 	const auto checkAppeared = [=, now = crl::now()](bool force = false) {
 		_appeared = force || ((crl::now() - now) >= delay);
 	};
 
 	setAcceptBoth(true);
-	fitToMenuWidth();
+	initResizeHook(parent->sizeValue());
 
 	std::move(
 		content
-	) | rpl::on_next([=](WhoReadContent &&content) {
+	) | rpl::start_with_next([=](WhoReadContent &&content) {
 		checkAppeared();
 		const auto changed = (_content.participants != content.participants)
 			|| (_content.state != content.state);
@@ -239,20 +240,20 @@ Action::Action(
 	resolveMinWidth();
 
 	_userpics->widthValue(
-	) | rpl::on_next([=](int width) {
+	) | rpl::start_with_next([=](int width) {
 		_userpicsWidth = width;
 		refreshDimensions();
 		update();
 	}, lifetime());
 
 	paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		Painter p(this);
 		paint(p);
 	}, lifetime());
 
 	clicks(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (_content.participants.size() == 1) {
 			if (const auto onstack = _participantChosen) {
 				onstack(_content.participants.front());
@@ -515,12 +516,14 @@ WhenAction::WhenAction(
 , _height(st::whenReadPadding.top()
 		+ st::whenReadStyle.font->height
 		+ st::whenReadPadding.bottom()) {
+	const auto parent = parentMenu->menu();
+
 	setAcceptBoth(true);
-	fitToMenuWidth();
+	initResizeHook(parent->sizeValue());
 
 	std::move(
 		content
-	) | rpl::on_next([=](WhoReadContent &&content) {
+	) | rpl::start_with_next([=](WhoReadContent &&content) {
 		_content = content;
 		refreshText();
 		refreshDimensions();
@@ -536,13 +539,13 @@ WhenAction::WhenAction(
 	refreshDimensions();
 
 	paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		Painter p(this);
 		paint(p);
 	}, lifetime());
 
 	clicks(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (_content.state == WhoReadState::MyHidden) {
 			if (const auto onstack = _showOrPremium) {
 				onstack();
@@ -721,7 +724,7 @@ int WhenAction::contentHeight() const {
 } // namespace
 
 WhoReactedEntryAction::WhoReactedEntryAction(
-	not_null<Ui::Menu::Menu*> parent,
+	not_null<RpWidget*> parent,
 	CustomEmojiFactory customEmojiFactory,
 	const style::Menu &st,
 	Data &&data)
@@ -732,11 +735,11 @@ WhoReactedEntryAction::WhoReactedEntryAction(
 , _height(st::defaultWhoRead.photoSkip * 2 + st::defaultWhoRead.photoSize) {
 	setAcceptBoth(true);
 
-	fitToMenuWidth();
+	initResizeHook(parent->sizeValue());
 	setData(std::move(data));
 
 	paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		paint(Painter(this));
 	}, lifetime());
 
@@ -756,7 +759,7 @@ int WhoReactedEntryAction::contentHeight() const {
 }
 
 void WhoReactedEntryAction::setData(Data &&data) {
-	setActionTriggered(std::move(data.callback));
+	setClickedCallback(std::move(data.callback));
 	_userpic = std::move(data.userpic);
 	_text.setMarkedText(_st.itemStyle, { data.text }, MenuTextOptions);
 	if (data.date.isEmpty()) {

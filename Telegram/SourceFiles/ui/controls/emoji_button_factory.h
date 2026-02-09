@@ -26,7 +26,6 @@ class InputField;
 	not_null<Ui::BoxContent*> box,
 	not_null<Window::SessionController*> controller,
 	not_null<ChatHelpers::TabbedPanel*> emojiPanel,
-	QPoint shift,
-	bool fadeOnFocusChange = true);
+	QPoint shift);
 
 } // namespace Ui

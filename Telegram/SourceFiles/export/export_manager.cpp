@@ -22,24 +22,7 @@ Manager::Manager() = default;
 Manager::~Manager() = default;
 
 void Manager::start(not_null<PeerData*> peer) {
-	start(&peer->session(), peer->input());
-}
-
-void Manager::startTopic(
-		not_null<PeerData*> peer,
-		MsgId topicRootId,
-		const QString &topicTitle) {
-	if (_panel) {
-		_panel->activatePanel();
-		return;
-	}
-	_controller = std::make_unique<Controller>(
-		&peer->session().mtp(),
-		peer->input(),
-		int32(topicRootId.bare),
-		uint64(peer->id.value),
-		topicTitle);
-	setupPanel(&peer->session());
+	start(&peer->session(), peer->input);
 }
 
 void Manager::start(
@@ -52,24 +35,20 @@ void Manager::start(
 	_controller = std::make_unique<Controller>(
 		&session->mtp(),
 		singlePeer);
-	setupPanel(session);
-}
-
-void Manager::setupPanel(not_null<Main::Session*> session) {
 	_panel = std::make_unique<View::PanelController>(
 		session,
 		_controller.get());
 	session->account().sessionChanges(
 	) | rpl::filter([=](Main::Session *value) {
 		return (value != session);
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		stop();
 	}, _panel->lifetime());
 
 	_viewChanges.fire(_panel.get());
 
 	_panel->stopRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		LOG(("Export Info: Stop requested."));
 		stop();
 	}, _controller->lifetime());

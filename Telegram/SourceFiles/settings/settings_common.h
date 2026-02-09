@@ -56,57 +56,13 @@ namespace Settings {
 
 using Button = Ui::SettingsButton;
 
-enum class HighlightShape {
-	Rect,
-	Ellipse,
-};
-
-struct HighlightArgs {
-	style::margins margin;
-	HighlightShape shape = HighlightShape::Rect;
-	int radius = 0;
-	const style::color *color = nullptr;
-	float64 opacity = 0.4;
-	bool below = false;
-	bool rippleShape = false;
-	bool scroll = true;
-	crl::time showDelay = 400;
-	crl::time showDuration = 600;
-	crl::time shownDuration = 400;
-	crl::time hideDuration = 600;
-};
-
-void HighlightWidget(QWidget *target, HighlightArgs &&args = {});
-void ScrollToWidget(not_null<QWidget*> target);
-
-[[nodiscard]] HighlightArgs SubsectionTitleHighlight();
-
-struct HighlightEntry {
-	QPointer<QWidget> widget;
-	HighlightArgs args;
-};
-
-using HighlightRegistry = std::vector<std::pair<QString, HighlightEntry>>;
-
-using SectionBuildMethod = Fn<void(
-	not_null<Ui::VerticalLayout*> container,
-	not_null<Window::SessionController*> controller,
-	Fn<void(Type)> showOther,
-	rpl::producer<> showFinished)>;
-
 class AbstractSection : public Ui::RpWidget {
 public:
-	AbstractSection(
-		QWidget *parent,
-		not_null<Window::SessionController*> controller);
-
-	[[nodiscard]] not_null<Window::SessionController*> controller() const {
-		return _controller;
-	}
+	using RpWidget::RpWidget;
 
 	[[nodiscard]] virtual Type id() const = 0;
 	[[nodiscard]] virtual rpl::producer<Type> sectionShowOther() {
-		return _showOtherRequests.events();
+		return nullptr;
 	}
 	[[nodiscard]] virtual rpl::producer<> sectionShowBack() {
 		return nullptr;
@@ -125,7 +81,6 @@ public:
 		done();
 	}
 	virtual void showFinished() {
-		_showFinished.fire({});
 	}
 	virtual void setInnerFocus() {
 		setFocus();
@@ -163,30 +118,6 @@ public:
 			QRect clip) {
 		return false;
 	}
-
-	[[nodiscard]] rpl::producer<> showFinishes() const {
-		return _showFinished.events();
-	}
-
-	void showOther(Type type) {
-		_showOtherRequests.fire_copy(type);
-	}
-	[[nodiscard]] Fn<void(Type)> showOtherMethod() {
-		return crl::guard(this, [=](Type type) {
-			showOther(type);
-		});
-	}
-
-protected:
-	void build(
-		not_null<Ui::VerticalLayout*> container,
-		SectionBuildMethod method);
-
-private:
-	const not_null<Window::SessionController*> _controller;
-	rpl::event_stream<Type> _showOtherRequests;
-	rpl::event_stream<> _showFinished;
-
 };
 
 enum class IconType {
@@ -288,16 +219,5 @@ struct SliderWithLabel {
 	int skip,
 	int minLabelWidth = 0,
 	bool ignoreWheel = false);
-
-void AddLottieIconWithCircle(
-	not_null<Ui::VerticalLayout*>,
-	object_ptr<Ui::RpWidget> icon,
-	QMargins iconPadding,
-	QSize circleSize);
-
-void AddPremiumStar(
-	not_null<Button*> button,
-	bool credits,
-	Fn<bool()> isPaused);
 
 } // namespace Settings

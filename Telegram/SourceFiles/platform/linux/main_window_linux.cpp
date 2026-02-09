@@ -374,6 +374,7 @@ void MainWindow::createGlobalMenu() {
 		QKeySequence(Qt::ControlModifier | Qt::Key_Comma));
 
 	prefs->setMenuRole(QAction::PreferencesRole);
+	prefs->setShortcutContext(Qt::WidgetShortcut);
 
 	auto tools = psMainMenu->addMenu(tr::lng_linux_menu_tools(tr::now));
 

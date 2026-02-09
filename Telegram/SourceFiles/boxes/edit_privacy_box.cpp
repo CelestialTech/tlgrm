@@ -19,10 +19,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
-#include "settings/settings_common.h"
-#include "settings/sections/settings_premium.h"
+#include "settings/settings_premium.h"
 #include "settings/settings_privacy_controllers.h"
-#include "settings/sections/settings_privacy_security.h"
+#include "settings/settings_privacy_security.h"
 #include "ui/boxes/peer_qr_box.h"
 #include "ui/controls/invite_link_buttons.h"
 #include "ui/controls/invite_link_label.h"
@@ -112,11 +111,11 @@ void CreateRadiobuttonLock(
 	lock->resize(st::defaultRadio.diameter, st::defaultRadio.diameter);
 
 	widget->sizeValue(
-	) | rpl::on_next([=, &st](QSize size) {
+	) | rpl::start_with_next([=, &st](QSize size) {
 		lock->move(st.checkPosition);
 	}, lock->lifetime());
 
-	lock->paintRequest() | rpl::on_next([=] {
+	lock->paintRequest() | rpl::start_with_next([=] {
 		auto p = QPainter(lock);
 		auto hq = PainterHighQualityEnabler(p);
 		const auto &icon = st::messagePrivacyLock;
@@ -139,7 +138,7 @@ void AddPremiumRequiredRow(
 	const auto row = Ui::CreateChild<Ui::AbstractButton>(widget.get());
 
 	widget->sizeValue(
-	) | rpl::on_next([=](const QSize &s) {
+	) | rpl::start_with_next([=](const QSize &s) {
 		row->resize(s);
 	}, row->lifetime());
 	row->setClickedCallback(std::move(clickedCallback));
@@ -148,7 +147,7 @@ void AddPremiumRequiredRow(
 
 	Data::AmPremiumValue(
 		session
-	) | rpl::on_next([=](bool premium) {
+	) | rpl::start_with_next([=](bool premium) {
 		row->setVisible(!premium);
 		if (!premium) {
 			setDefaultOption();
@@ -383,7 +382,7 @@ auto PrivacyExceptionsBoxController::prepareSpecialRowList(
 		tr::lng_edit_privacy_users_and_groups()));
 
 	controller->specialChanges(
-	) | rpl::on_next([=](bool chosen) {
+	) | rpl::start_with_next([=](bool chosen) {
 		if (type == SpecialRowType::Premiums) {
 			_selected.premiums = chosen;
 		} else {
@@ -392,7 +391,7 @@ auto PrivacyExceptionsBoxController::prepareSpecialRowList(
 	}, lifetime);
 
 	controller->rowSelectionChanges(
-	) | rpl::on_next([=](RowSelectionChange update) {
+	) | rpl::start_with_next([=](RowSelectionChange update) {
 		this->delegate()->peerListSetForeignRowChecked(
 			update.row,
 			update.checked,
@@ -544,7 +543,7 @@ auto PrivacyExceptionsBoxController::createRow(not_null<History*> history)
 		updateByValue(value);
 		valueFinished(value);
 	};
-	style::PaletteChanged() | rpl::on_next([=] {
+	style::PaletteChanged() | rpl::start_with_next([=] {
 		min->setTextColorOverride(st::windowSubTextFg->c);
 		max->setTextColorOverride(st::windowSubTextFg->c);
 	}, raw->lifetime());
@@ -560,7 +559,7 @@ auto PrivacyExceptionsBoxController::createRow(not_null<History*> history)
 		state->indexMin);
 	slider->resize(slider->width(), sliderStyle->seekSize.height());
 
-	raw->widthValue() | rpl::on_next([=](int width) {
+	raw->widthValue() | rpl::start_with_next([=](int width) {
 		labels->resizeToWidth(width);
 		updateByIndex();
 	}, slider->lifetime());
@@ -906,11 +905,9 @@ void EditPrivacyBox::setupContent() {
 		{ 0, st::settingsPrivacySkipTop, 0, 0 });
 	const auto always = addExceptionLink(Exception::Always);
 	const auto never = addExceptionLink(Exception::Never);
-	_always = always->entity();
-	_never = never->entity();
 	addLabel(
 		content,
-		_controller->exceptionsDescription() | rpl::map(tr::marked),
+		_controller->exceptionsDescription() | Ui::Text::ToWithEntities(),
 		st::defaultVerticalListSkip);
 
 	auto below = _controller->setupBelowWidget(
@@ -942,7 +939,7 @@ void EditPrivacyBox::setupContent() {
 		+ st::settingsButtonNoIcon.padding.bottom();
 
 	widthValue(
-	) | rpl::on_next([=](int width) {
+	) | rpl::start_with_next([=](int width) {
 		content->resizeToWidth(width);
 	}, content->lifetime());
 
@@ -950,21 +947,14 @@ void EditPrivacyBox::setupContent() {
 	) | rpl::map([=](int height) {
 		return height - always->height() - never->height() + 2 * linkHeight;
 	}) | rpl::distinct_until_changed(
-	) | rpl::on_next([=](int height) {
+	) | rpl::start_with_next([=](int height) {
 		setDimensions(st::boxWideWidth, height);
 	}, content->lifetime());
 }
 
-void EditPrivacyBox::showFinished() {
-	_window->checkHighlightControl(u"privacy/always"_q, _always.data());
-	_window->checkHighlightControl(u"privacy/never"_q, _never.data());
-	_controller->checkHighlightControls(_window);
-}
-
 void EditMessagesPrivacyBox(
 		not_null<Ui::GenericBox*> box,
-		not_null<Window::SessionController*> controller,
-		const QString &highlightControlId) {
+		not_null<Window::SessionController*> controller) {
 	box->setTitle(tr::lng_messages_privacy_title());
 	box->setWidth(st::boxWideWidth);
 
@@ -980,9 +970,6 @@ void EditMessagesPrivacyBox(
 	const auto privacy = &session->api().globalPrivacy();
 	const auto inner = box->verticalLayout();
 	inner->add(object_ptr<Ui::PlainShadow>(box));
-
-	auto highlightCharged = (Ui::RpWidget*)nullptr;
-	auto highlightRemoveFee = (Ui::RpWidget*)nullptr;
 
 	Ui::AddSkip(inner, st::messagePrivacyTopSkip);
 	Ui::AddSubsectionTitle(inner, tr::lng_messages_privacy_subtitle());
@@ -1033,7 +1020,6 @@ void EditMessagesPrivacyBox(
 				0,
 				st::messagePrivacyBottomSkip))
 		: nullptr;
-	highlightCharged = charged;
 
 	struct State {
 		rpl::variable<int> stars;
@@ -1083,7 +1069,6 @@ void EditMessagesPrivacyBox(
 			tr::lng_messages_privacy_remove_fee(),
 			std::move(label),
 			st::settingsButtonNoIcon);
-		highlightRemoveFee = exceptions;
 
 		const auto shower = exceptions->lifetime().make_state<rpl::lifetime>();
 		exceptions->setClickedCallback([=] {
@@ -1091,7 +1076,7 @@ void EditMessagesPrivacyBox(
 				key
 			) | rpl::take(
 				1
-			) | rpl::on_next([=](const Api::UserPrivacy::Rule &value) {
+			) | rpl::start_with_next([=](const Api::UserPrivacy::Rule &value) {
 				EditNoPaidMessagesExceptions(controller, value);
 			});
 		});
@@ -1107,15 +1092,15 @@ void EditMessagesPrivacyBox(
 	using WeakToast = base::weak_ptr<Ui::Toast::Instance>;
 	const auto toast = std::make_shared<WeakToast>();
 	const auto showToast = [=] {
-		auto link = tr::link(
-			tr::semibold(
+		auto link = Ui::Text::Link(
+			Ui::Text::Semibold(
 				tr::lng_messages_privacy_premium_link(tr::now)));
 		(*toast) = controller->showToast({
 			.text = tr::lng_messages_privacy_premium(
 				tr::now,
 				lt_link,
 				link,
-				tr::marked),
+				Ui::Text::WithEntities),
 			.filter = crl::guard(&controller->session(), [=](
 					const ClickHandlerPtr &,
 					Qt::MouseButton button) {
@@ -1180,18 +1165,6 @@ void EditMessagesPrivacyBox(
 		box->addButton(tr::lng_cancel(), [=] {
 			box->closeBox();
 		});
-	}
-
-	if (!highlightControlId.isEmpty()) {
-		box->showFinishes() | rpl::take(1) | rpl::on_next([=] {
-			if (highlightControlId == u"privacy/set-price"_q) {
-				Settings::HighlightWidget(
-					highlightCharged,
-					{ .radius = st::boxRadius });
-			} else if (highlightControlId == u"privacy/remove-fee"_q) {
-				Settings::HighlightWidget(highlightRemoveFee);
-			}
-		}, box->lifetime());
 	}
 }
 
@@ -1260,7 +1233,7 @@ rpl::producer<int> SetupChargeSlider(
 
 	const auto details = container->add(
 		object_ptr<Ui::VerticalLayout>(container));
-	state->stars.value() | rpl::on_next([=](int stars) {
+	state->stars.value() | rpl::start_with_next([=](int stars) {
 		while (details->count()) {
 			delete details->widgetAt(0);
 		}
@@ -1304,7 +1277,7 @@ void EditDirectMessagesPriceBox(
 		.lottieMargins = st::settingsFilterIconPadding,
 		.showFinished = box->showFinishes(),
 		.about = tr::lng_manage_monoforum_about(
-			tr::rich
+			Ui::Text::RichLangValue
 		),
 		.aboutMargins = st::settingsFilterDividerLabelPadding,
 	});
@@ -1340,7 +1313,7 @@ void EditDirectMessagesPriceBox(
 		savedValue,
 		channel->session().appConfig().paidMessageChannelStarsDefault(),
 		true
-	) | rpl::on_next([=](int stars) {
+	) | rpl::start_with_next([=](int stars) {
 		*result = stars;
 	}, box->lifetime());
 
@@ -1385,7 +1358,7 @@ void EditDirectMessagesPriceBox(
 			label->take(),
 			st::inviteLinkFieldPadding);
 
-		label->clicks() | rpl::on_next(copyLink, label->lifetime());
+		label->clicks() | rpl::start_with_next(copyLink, label->lifetime());
 
 		Ui::AddSkip(inner);
 

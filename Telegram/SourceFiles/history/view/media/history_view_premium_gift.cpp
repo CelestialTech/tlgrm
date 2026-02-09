@@ -26,9 +26,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_element.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
-#include "settings/sections/settings_credits.h" // Settings::CreditsId
+#include "settings/settings_credits.h" // Settings::CreditsId
 #include "settings/settings_credits_graphics.h" // GiftedCreditsBox
-#include "settings/sections/settings_premium.h" // Settings::ShowGiftPremium
+#include "settings/settings_premium.h" // Settings::ShowGiftPremium
 #include "ui/chat/chat_style.h"
 #include "ui/controls/ton_common.h" // kNanosInOne
 #include "ui/layers/generic_box.h"
@@ -278,7 +278,7 @@ ClickHandlerPtr PremiumGift::createViewLink() {
 						return window->session().credits().tonLoaded();
 					}
 					return false;
-				}) | rpl::take(1) | rpl::on_next([=] {
+				}) | rpl::take(1) | rpl::start_with_next([=] {
 					if (const auto window = weak.get()) {
 						window->showSettings(Settings::CurrencyId());
 					}
@@ -361,15 +361,11 @@ void PremiumGift::draw(
 QImage PremiumGift::cornerTag(const PaintContext &context) {
 	auto badge = Info::PeerGifts::GiftBadge();
 	if (_data.unique) {
-		const auto burned = _data.unique->burned;
-		const auto burnedBg = Info::PeerGifts::BurnedBadgeBg();
 		badge = {
-			.text = (burned
-				? tr::lng_gift_burned_tag(tr::now)
-				: tr::lng_gift_collectible_tag(tr::now)),
-			.bg1 = (burned ? burnedBg : _data.unique->backdrop.edgeColor),
-			.bg2 = (burned ? burnedBg : _data.unique->backdrop.patternColor),
-			.fg = (burned ? st::white->c : _data.unique->backdrop.textColor),
+			.text = tr::lng_gift_collectible_tag(tr::now),
+			.bg1 = _data.unique->backdrop.edgeColor,
+			.bg2 = _data.unique->backdrop.patternColor,
+			.fg = QColor(255, 255, 255),
 		};
 	} else if (const auto count = _data.limitedCount) {
 		badge = {
@@ -517,9 +513,6 @@ ClickHandlerPtr OpenStarGiftLink(not_null<HistoryItem*> item) {
 	}
 	const auto data = *gift;
 	const auto itemId = item->fullId();
-	const auto upgradedMsgId = data.upgraded
-		? data.realGiftMsgId
-		: MsgId(0);
 	const auto openInsteadId = data.realGiftMsgId
 		? Data::SavedStarGiftId::User(data.realGiftMsgId)
 		: (data.channel && data.channelSavedId)
@@ -532,9 +525,6 @@ ClickHandlerPtr OpenStarGiftLink(not_null<HistoryItem*> item) {
 		const auto controller = weak.get();
 		if (!controller) {
 			return;
-		} else if (data.unique && data.unique->burned) {
-			controller->showToast(tr::lng_gift_burned_message(tr::now));
-			return;
 		}
 		const auto quick = [=](not_null<Window::SessionController*> window) {
 			Settings::ShowStarGiftViewBox(window, data, itemId);
@@ -546,70 +536,33 @@ ClickHandlerPtr OpenStarGiftLink(not_null<HistoryItem*> item) {
 			return;
 		}
 		*requesting = true;
-		const auto requestSavedGift = [=] {
-			controller->session().api().request(MTPpayments_GetSavedStarGift(
-				MTP_vector<MTPInputSavedStarGift>(
-					1,
-					Api::InputSavedStarGiftId(openInsteadId))
-			)).done([=](const MTPpayments_SavedStarGifts &result) {
-				*requesting = false;
-				if (const auto window = weak.get()) {
-					const auto &data = result.data();
-					window->session().data().processUsers(data.vusers());
-					window->session().data().processChats(data.vchats());
-					const auto owner = openInsteadId.chat()
-						? openInsteadId.chat()
-						: window->session().user();
-					const auto &list = data.vgifts().v;
-					if (list.empty()) {
-						quick(window);
-					} else if (auto g = Api::FromTL(owner, list[0])) {
-						Settings::ShowSavedStarGiftBox(window, owner, *g);
-					}
-				}
-			}).fail([=](const MTP::Error &error) {
-				*requesting = false;
-				if (const auto window = weak.get()) {
-					window->showToast(error.type());
+		controller->session().api().request(MTPpayments_GetSavedStarGift(
+			MTP_vector<MTPInputSavedStarGift>(
+				1,
+				Api::InputSavedStarGiftId(openInsteadId))
+		)).done([=](const MTPpayments_SavedStarGifts &result) {
+			*requesting = false;
+			if (const auto window = weak.get()) {
+				const auto &data = result.data();
+				window->session().data().processUsers(data.vusers());
+				window->session().data().processChats(data.vchats());
+				const auto owner = openInsteadId.chat()
+					? openInsteadId.chat()
+					: window->session().user();
+				const auto &list = data.vgifts().v;
+				if (list.empty()) {
 					quick(window);
+				} else if (auto parsed = Api::FromTL(owner, list[0])) {
+					Settings::ShowSavedStarGiftBox(window, owner, *parsed);
 				}
-			}).send();
-		};
-		if (const auto msgId = upgradedMsgId) {
-			const auto session = &controller->session();
-			const auto owner = &controller->session().data();
-			const auto processItem = [=](not_null<HistoryItem*> item) {
-				const auto media = item->media();
-				if (!media || !media->gift() || !media->gift()->unique) {
-					*requesting = false;
-					if (const auto window = weak.get()) {
-						quick(window);
-					}
-					return;
-				}
-				// It is not possible to request a saved star gift
-				// when it is transferred and does not belong to you.
-				if (!media->gift()->transferred) {
-					return requestSavedGift();
-				}
-				*requesting = false;
-				const auto local = u"nft/"_q + media->gift()->unique->slug;
-				UrlClickHandler::Open(session->createInternalLinkFull(local));
-			};
-			if (const auto item = owner->nonChannelMessage(msgId)) {
-				processItem(item);
-			} else {
-				session->api().requestMessageData(nullptr, msgId, [=] {
-					if (const auto item = owner->nonChannelMessage(msgId)) {
-						processItem(item);
-					} else {
-						*requesting = false;
-					}
-				});
 			}
-		} else {
-			requestSavedGift();
-		}
+		}).fail([=](const MTP::Error &error) {
+			*requesting = false;
+			if (const auto window = weak.get()) {
+				window->showToast(error.type());
+				quick(window);
+			}
+		}).send();
 	});
 }
 

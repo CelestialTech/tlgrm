@@ -85,7 +85,7 @@ Memento::Memento(std::vector<std::shared_ptr<ContentMemento>> stack)
 	}
 	for (const auto &topic : topics) {
 		topic->destroyed(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			for (auto i = begin(_stack); i != end(_stack);) {
 				if (i->get()->topic() == topic) {
 					i = _stack.erase(i);
@@ -100,7 +100,7 @@ Memento::Memento(std::vector<std::shared_ptr<ContentMemento>> stack)
 	}
 	for (const auto &sublist : sublists) {
 		sublist->destroyed(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			for (auto i = begin(_stack); i != end(_stack);) {
 				if (i->get()->sublist() == sublist) {
 					i = _stack.erase(i);

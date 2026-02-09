@@ -802,7 +802,7 @@ Voice::Voice(
 	_data->loadThumbnail(parent->fullId());
 
 	updateName();
-	const auto dateText = tr::link(
+	const auto dateText = Ui::Text::Link(
 		langDateTime(base::unixtime::parse(parent->date()))); // Link 1.
 	_details.setMarkedText(
 		st::defaultTextStyle,
@@ -812,7 +812,7 @@ Voice::Voice(
 			dateText,
 			lt_duration,
 			{ .text = Ui::FormatDurationText(_data->duration() / 1000) },
-			tr::marked));
+			Ui::Text::WithEntities));
 	_details.setLink(1, JumpToMessageClickHandler(parent));
 }
 

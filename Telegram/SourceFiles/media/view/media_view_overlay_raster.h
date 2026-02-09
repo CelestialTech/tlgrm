@@ -33,8 +33,7 @@ private:
 	void paintTransformedImage(
 		const QImage &image,
 		QRect rect,
-		int rotation,
-		const QRectF &sourceRect = QRectF());
+		int rotation);
 	void paintControlsFade(QRect content, const ContentGeometry &geometry);
 	void paintRadialLoading(
 		QRect inner,

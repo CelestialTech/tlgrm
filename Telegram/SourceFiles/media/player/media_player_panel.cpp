@@ -158,7 +158,7 @@ void Panel::paintEvent(QPaintEvent *e) {
 		| RectPart::Bottom
 		| (rtl() ? RectPart::Left : RectPart::Right)
 		| RectPart::Top;
-	Ui::Shadow::paint(p, shadowedRect, width(), st::roundShadowRadius8px, shadowedSides);
+	Ui::Shadow::paint(p, shadowedRect, width(), st::defaultRoundShadow, shadowedSides);
 	Ui::FillRoundRect(p, shadowedRect, st::menuBg, Ui::MenuCorners);
 }
 
@@ -210,7 +210,7 @@ void Panel::ensureCreated() {
 
 	_refreshListLifetime = instance()->playlistChanges(
 		AudioMsgId::Type::Song
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		refreshList();
 	});
 	refreshList();
@@ -218,7 +218,7 @@ void Panel::ensureCreated() {
 	macWindowDeactivateEvents(
 	) | rpl::filter([=] {
 		return !isHidden();
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		leaveEvent(nullptr);
 	}, _refreshListLifetime);
 
@@ -277,19 +277,19 @@ void Panel::refreshList() {
 		updateControlsGeometry();
 
 		weak->checkForHide(
-		) | rpl::on_next([this] {
+		) | rpl::start_with_next([this] {
 			if (!rect().contains(mapFromGlobal(QCursor::pos()))) {
 				_hideTimer.callOnce(kDelayedHideTimeout);
 			}
 		}, weak->lifetime());
 
 		weak->heightValue(
-		) | rpl::on_next([this](int newHeight) {
+		) | rpl::start_with_next([this](int newHeight) {
 			listHeightUpdated(newHeight);
 		}, weak->lifetime());
 
 		weak->scrollToRequests(
-		) | rpl::on_next([this](int newScrollTop) {
+		) | rpl::start_with_next([this](int newScrollTop) {
 			_scroll->scrollToY(newScrollTop);
 		}, weak->lifetime());
 
@@ -298,7 +298,7 @@ void Panel::refreshList() {
 		rpl::combine(
 			_scroll->scrollTopValue(),
 			_scroll->heightValue()
-		) | rpl::on_next([=](int top, int height) {
+		) | rpl::start_with_next([=](int top, int height) {
 			const auto bottom = top + height;
 			weak->setVisibleTopBottom(top, bottom);
 		}, weak->lifetime());

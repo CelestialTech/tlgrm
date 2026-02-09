@@ -848,7 +848,7 @@ void SetupManagerList(
 		items
 	) | rpl::filter([=](HistoryItem *item) {
 		return (item != state->item);
-	}) | rpl::on_next([=](HistoryItem *item) {
+	}) | rpl::start_with_next([=](HistoryItem *item) {
 		state->item = item;
 		if (!item) {
 			return;
@@ -871,11 +871,11 @@ void SetupManagerList(
 				session
 			) | rpl::skip(
 				1
-			) | rpl::on_next(push, state->sessionLifetime);
+			) | rpl::start_with_next(push, state->sessionLifetime);
 
 			session->changes().messageUpdates(
 				Data::MessageUpdate::Flag::Destroyed
-			) | rpl::on_next([=](const Data::MessageUpdate &update) {
+			) | rpl::start_with_next([=](const Data::MessageUpdate &update) {
 				if (update.item == state->item) {
 					state->item = nullptr;
 					state->timer.cancel();
@@ -885,7 +885,7 @@ void SetupManagerList(
 			session->data().itemDataChanges(
 			) | rpl::filter([=](not_null<HistoryItem*> item) {
 				return (item == state->item);
-			}) | rpl::on_next(push, state->sessionLifetime);
+			}) | rpl::start_with_next(push, state->sessionLifetime);
 
 			const auto &reactions = session->data().reactions();
 			rpl::merge(
@@ -895,7 +895,7 @@ void SetupManagerList(
 				reactions.favoriteUpdates(),
 				reactions.myTagsUpdates(),
 				reactions.tagsUpdates()
-			) | rpl::on_next([=] {
+			) | rpl::start_with_next([=] {
 				if (!state->timer.isActive()) {
 					state->timer.callOnce(kRefreshListDelay);
 				}
@@ -906,7 +906,7 @@ void SetupManagerList(
 			state->peerLifetime = rpl::combine(
 				Data::PeerAllowedReactionsValue(peer),
 				Data::UniqueReactionsLimitValue(peer)
-			) | rpl::on_next(push);
+			) | rpl::start_with_next(push);
 		} else {
 			push();
 		}
@@ -915,7 +915,7 @@ void SetupManagerList(
 	manager->faveRequests(
 	) | rpl::filter([=] {
 		return (state->session != nullptr);
-	}) | rpl::on_next([=](const Data::ReactionId &id) {
+	}) | rpl::start_with_next([=](const Data::ReactionId &id) {
 		state->session->data().reactions().setFavorite(id);
 		manager->updateButton({});
 	}, manager->lifetime());

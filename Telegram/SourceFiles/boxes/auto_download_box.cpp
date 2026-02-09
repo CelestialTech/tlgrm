@@ -116,7 +116,7 @@ void AutoDownloadBox::setupContent() {
 		))->toggleOn(
 			rpl::single(value > 0)
 		)->toggledChanges(
-		) | rpl::on_next([=](bool enabled) {
+		) | rpl::start_with_next([=](bool enabled) {
 			(*values)[type] = enabled ? 1 : 0;
 		}, content->lifetime());
 		values->emplace(type, value);

@@ -181,5 +181,3 @@ private:
 [[nodiscard]] CreditsAmount CreditsAmountFromTL(
 	const MTPStarsAmount *amount);
 [[nodiscard]] MTPStarsAmount StarsAmountToTL(CreditsAmount amount);
-
-[[nodiscard]] QString PrepareCreditsAmountText(CreditsAmount amount);

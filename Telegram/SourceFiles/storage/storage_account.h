@@ -53,7 +53,7 @@ enum class StartResult : uchar;
 
 struct MessageDraft {
 	FullReplyTo reply;
-	SuggestOptions suggest;
+	SuggestPostOptions suggest;
 	TextWithTags textWithTags;
 	Data::WebPageDraft webpage;
 };

@@ -648,8 +648,7 @@ int ReadRotationFromMetadata(not_null<AVStream*> stream) {
 		AV_PKT_DATA_DISPLAYMATRIX);
 	auto theta = 0;
 	if (displaymatrix) {
-		const auto matrix = (int32_t*)displaymatrix->data;
-		theta = -round(av_display_rotation_get(matrix));
+		theta = -round(av_display_rotation_get((int32_t*)displaymatrix));
 	}
 	theta -= 360 * floor(theta / 360 + 0.9 / 360);
 	const auto result = int(base::SafeRound(theta));

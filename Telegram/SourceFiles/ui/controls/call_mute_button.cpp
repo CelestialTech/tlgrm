@@ -229,12 +229,12 @@ AnimatedLabel::AnimatedLabel(
 , _options({ 0, 0, 0, Qt::LayoutDirectionAuto }) {
 	std::move(
 		text
-	) | rpl::on_next([=](const QString &value) {
+	) | rpl::start_with_next([=](const QString &value) {
 		setText(value);
 	}, lifetime());
 
 	paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		Painter p(this);
 		const auto progress = _animation.value(1.);
 
@@ -347,7 +347,7 @@ BlobsWidget::BlobsWidget(
 
 	std::move(
 		hideBlobs
-	) | rpl::on_next([=](bool hide) {
+	) | rpl::start_with_next([=](bool hide) {
 		if (_hideBlobs != hide) {
 			const auto now = crl::now();
 			if ((now - _blobsScaleLastTime) >= kBlobsScaleEnterDuration) {
@@ -400,13 +400,13 @@ void BlobsWidget::init(int diameter) {
 	setDiameter(diameter);
 
 	sizeValue(
-	) | rpl::on_next([=](QSize size) {
+	) | rpl::start_with_next([=](QSize size) {
 		_center = size.width() / 2;
 		computeCircleRect();
 	}, lifetime());
 
 	paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		Painter p(this);
 		PainterHighQualityEnabler hq(p);
 
@@ -490,7 +490,7 @@ void BlobsWidget::init(int diameter) {
 		return true;
 	});
 	shownValue(
-	) | rpl::on_next([=](bool shown) {
+	) | rpl::start_with_next([=](bool shown) {
 		if (shown) {
 			_animation.start();
 		} else {
@@ -592,7 +592,7 @@ void CallMuteButton::refreshLabels() {
 	rpl::combine(
 		_content->geometryValue(),
 		_label->sizeValue()
-	) | rpl::on_next([=](QRect my, QSize size) {
+	) | rpl::start_with_next([=](QRect my, QSize size) {
 		updateLabelGeometry(my, size);
 	}, _label->lifetime());
 	_label->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -601,7 +601,7 @@ void CallMuteButton::refreshLabels() {
 	rpl::combine(
 		_content->geometryValue(),
 		_sublabel->sizeValue()
-	) | rpl::on_next([=](QRect my, QSize size) {
+	) | rpl::start_with_next([=](QRect my, QSize size) {
 		updateSublabelGeometry(my, size);
 	}, _sublabel->lifetime());
 	_sublabel->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -610,7 +610,7 @@ void CallMuteButton::refreshLabels() {
 	rpl::combine(
 		_content->geometryValue(),
 		_centerLabel->sizeValue()
-	) | rpl::on_next([=](QRect my, QSize size) {
+	) | rpl::start_with_next([=](QRect my, QSize size) {
 		updateCenterLabelGeometry(my, size);
 	}, _centerLabel->lifetime());
 	_centerLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -721,7 +721,7 @@ void CallMuteButton::init() {
 	_content->resize(button.width, button.height);
 
 	_content->events(
-	) | rpl::on_next([=](not_null<QEvent*> e) {
+	) | rpl::start_with_next([=](not_null<QEvent*> e) {
 		if (e->type() == QEvent::MouseMove) {
 			if (!_state.current().tooltip.isEmpty()) {
 				Ui::Tooltip::Show(1000, this);
@@ -734,7 +734,7 @@ void CallMuteButton::init() {
 	rpl::combine(
 		_radialInfo.rawShowProgress.value(),
 		anim::Disables()
-	) | rpl::on_next([=](float64 value, bool disabled) {
+	) | rpl::start_with_next([=](float64 value, bool disabled) {
 		auto &info = _radialInfo;
 		info.realShowProgress = (1. - value) / kRadialEndPartAnimation;
 
@@ -781,7 +781,7 @@ void CallMuteButton::init() {
 	_state.value(
 	) | rpl::map([](const CallMuteButtonState &state) {
 		return state.type;
-	}) | rpl::on_next([=](CallMuteButtonType type) {
+	}) | rpl::start_with_next([=](CallMuteButtonType type) {
 		const auto previous = *previousType;
 		*previousType = type;
 
@@ -839,7 +839,7 @@ void CallMuteButton::init() {
 
 	// Icon rect.
 	_content->sizeValue(
-	) | rpl::on_next([=](QSize size) {
+	) | rpl::start_with_next([=](QSize size) {
 		const auto icon = _lottieSize;
 		_muteIconRect = QRect(
 			(size.width() - icon.width()) / 2,
@@ -850,7 +850,7 @@ void CallMuteButton::init() {
 
 	// Paint.
 	_content->paintRequest(
-	) | rpl::on_next([=](QRect clip) {
+	) | rpl::start_with_next([=](QRect clip) {
 		Painter p(_content);
 
 		const auto expand = _state.current().expandType;

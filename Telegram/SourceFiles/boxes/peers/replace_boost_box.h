@@ -65,7 +65,6 @@ enum class UserpicsTransferType {
 	BoostReplace,
 	StarRefJoin,
 	AuctionRecipient,
-	ChannelFutureOwner,
 };
 [[nodiscard]] object_ptr<Ui::RpWidget> CreateUserpicsTransfer(
 	not_null<Ui::RpWidget*> parent,
@@ -83,15 +82,3 @@ enum class UserpicsTransferType {
 	not_null<Ui::RpWidget*> parent,
 	std::shared_ptr<Data::UniqueGift> unique,
 	not_null<PeerData*> to);
-
-using PaintRoundImageCallback = Fn<void(
-	Painter &p,
-	int x,
-	int y,
-	int outerWidth,
-	int size)>;
-
-[[nodiscard]] PaintRoundImageCallback GenerateGiftUniqueUserpicCallback(
-	not_null<Main::Session*> session,
-	std::shared_ptr<Data::UniqueGift> unique,
-	Fn<void()> update);

@@ -121,14 +121,14 @@ PinnedWidget::PinnedWidget(
 		controller->chatStyle(),
 		static_cast<HistoryView::CornerButtonsDelegate*>(this)) {
 	controller->chatStyle()->paletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_scroll->updateBars();
 	}, _scroll->lifetime());
 
 	Window::ChatThemeValueFromPeer(
 		controller,
 		thread->peer()
-	) | rpl::on_next([=](std::shared_ptr<Ui::ChatTheme> &&theme) {
+	) | rpl::start_with_next([=](std::shared_ptr<Ui::ChatTheme> &&theme) {
 		_theme = std::move(theme);
 		controller->setChatStyleTheme(_theme);
 	}, lifetime());
@@ -146,22 +146,22 @@ PinnedWidget::PinnedWidget(
 	_topBar->setCustomTitle(tr::lng_contacts_loading(tr::now));
 
 	_topBar->deleteSelectionRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		confirmDeleteSelected();
 	}, _topBar->lifetime());
 	_topBar->forwardSelectionRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		confirmForwardSelected();
 	}, _topBar->lifetime());
 	_topBar->clearSelectionRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		clearSelected();
 	}, _topBar->lifetime());
 
 	_translateBar->raise();
 	_topBarShadow->raise();
 	controller->adaptive().value(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateAdaptiveLayout();
 	}, lifetime());
 
@@ -172,12 +172,12 @@ PinnedWidget::PinnedWidget(
 	_scroll->move(0, _topBar->height());
 	_scroll->show();
 	_scroll->scrolls(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		onScroll();
 	}, lifetime());
 
 	_inner->scrollKeyEvents(
-	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
+	) | rpl::start_with_next([=](not_null<QKeyEvent*> e) {
 		_scroll->keyPressEvent(e);
 	}, lifetime());
 
@@ -191,7 +191,7 @@ PinnedWidget::~PinnedWidget() = default;
 void PinnedWidget::setupClearButton() {
 	Data::CanPinMessagesValue(
 		_history->peer
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		refreshClearButtonText();
 	}, _clearButton->lifetime());
 
@@ -214,7 +214,7 @@ void PinnedWidget::setupClearButton() {
 
 void PinnedWidget::setupTranslateBar() {
 	controller()->adaptive().oneColumnValue(
-	) | rpl::on_next([=, raw = _translateBar.get()](bool one) {
+	) | rpl::start_with_next([=, raw = _translateBar.get()](bool one) {
 		raw->setShadowGeometryPostprocess([=](QRect geometry) {
 			if (!one) {
 				geometry.setLeft(geometry.left() + st::lineWidth);
@@ -225,7 +225,7 @@ void PinnedWidget::setupTranslateBar() {
 
 	_translateBarHeight = 0;
 	_translateBar->heightValue(
-	) | rpl::on_next([=](int height) {
+	) | rpl::start_with_next([=](int height) {
 		if (const auto delta = height - _translateBarHeight) {
 			_translateBarHeight = height;
 			setGeometryWithTopMoved(geometry(), delta);

@@ -80,7 +80,7 @@ namespace HistoryView {
 					tr::now,
 					lt_user,
 					TextWithEntities{ peer->shortName() },
-					tr::marked),
+					Ui::Text::WithEntities),
 			st::birthdaySuggestTextPadding));
 
 		push(std::make_unique<BirthdayTable>(
@@ -112,7 +112,7 @@ BirthdayTable::BirthdayTable(Data::Birthday birthday, QMargins margins)
 			.label = Ui::Text::String(st::defaultTextStyle, label),
 			.value = Ui::Text::String(
 				st::defaultTextStyle,
-				tr::bold(value)),
+				Ui::Text::Bold(value)),
 		});
 	};
 	push(tr::lng_date_input_day(tr::now), QString::number(birthday.day()));

@@ -39,8 +39,8 @@ namespace {
 class ResolvePhoneAction final : public Ui::Menu::ItemBase {
 public:
 	ResolvePhoneAction(
-		not_null<Ui::Menu::Menu*> parent,
-		const style::PopupMenu &st,
+		not_null<Ui::RpWidget*> parent,
+		const style::Menu &st,
 		const QString &phone,
 		not_null<Window::SessionController*> controller);
 
@@ -79,19 +79,19 @@ private:
 };
 
 ResolvePhoneAction::ResolvePhoneAction(
-	not_null<Ui::Menu::Menu*> parent,
-	const style::PopupMenu &st,
+	not_null<Ui::RpWidget*> parent,
+	const style::Menu &st,
 	const QString &phone,
 	not_null<Window::SessionController*> controller)
-: ItemBase(parent, st.menu)
-, _dummyAction(Ui::CreateChild<QAction>(parent))
-, _st(st.menu)
+: ItemBase(parent, st)
+, _dummyAction(new QAction(parent))
+, _st(st)
 , _api(&controller->session().mtp())
 , _height(rect::m::sum::v(st::groupCallJoinAsPadding)
 	+ st::groupCallJoinAsPhotoSize) {
 	setAcceptBoth(true);
-	fitToMenuWidth();
-	setActionTriggered([=] {
+	initResizeHook(parent->sizeValue());
+	setClickedCallback([=] {
 		if (const auto peer = _peer.current()) {
 			controller->showPeerInfo(peer);
 		}
@@ -125,7 +125,7 @@ ResolvePhoneAction::ResolvePhoneAction(
 	}
 
 	paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		Painter p(this);
 		paint(p);
 	}, lifetime());
@@ -184,10 +184,10 @@ void ResolvePhoneAction::paint(Painter &p) {
 			width());
 	} else {
 		p.setPen(selected ? _st.itemFgShortcutOver : _st.itemFgShortcut);
-		const auto w = width() - rect::m::sum::h(padding);
+		const auto w = width() - padding.left() - padding.right();
 		_below.draw(p, Ui::Text::PaintContext{
 			.position = QPoint(
-				padding.left(),
+				(width() - w) / 2,
 				(height - _below.countHeight(w)) / 2),
 			.outerWidth = w,
 			.availableWidth = w,
@@ -213,7 +213,7 @@ void ResolvePhoneAction::prepare() {
 				? rpl::single(QString())
 				: tr::lng_contacts_loading();
 		}) | rpl::flatten_latest()
-	) | rpl::on_next([=](
+	) | rpl::start_with_next([=](
 			QString text,
 			QString name,
 			QString no,
@@ -332,8 +332,8 @@ void PhoneClickHandler::onClick(ClickContext context) const {
 	}, &st::menuIconCopy);
 
 	auto resolvePhoneAction = base::make_unique_q<ResolvePhoneAction>(
-		menu->menu(),
-		menu->st(),
+		menu,
+		menu->st().menu,
 		phone,
 		controller);
 

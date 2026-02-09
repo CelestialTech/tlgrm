@@ -38,7 +38,7 @@ PinnedBar::PinnedBar(
 	}));
 
 	_wrap.entity()->paintRequest(
-	) | rpl::on_next([=](QRect clip) {
+	) | rpl::start_with_next([=](QRect clip) {
 		QPainter(_wrap.entity()).fillRect(clip, st::historyPinnedBg);
 	}, lifetime());
 	_wrap.setAttribute(Qt::WA_OpaquePaintEvent);
@@ -46,7 +46,7 @@ PinnedBar::PinnedBar(
 	if (customEmojiPausedChanges) {
 		std::move(
 			customEmojiPausedChanges
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			_wrap.entity()->update();
 		}, lifetime());
 	}
@@ -67,7 +67,7 @@ void PinnedBar::setContent(rpl::producer<Ui::MessageBarContent> content) {
 		copy
 	) | rpl::filter([=](const MessageBarContent &content) {
 		return !content.title.isEmpty() || !content.text.text.isEmpty();
-	}) | rpl::on_next([=](MessageBarContent &&content) {
+	}) | rpl::start_with_next([=](MessageBarContent &&content) {
 		const auto creating = !_bar;
 		if (creating) {
 			createControls();
@@ -88,7 +88,7 @@ void PinnedBar::setContent(rpl::producer<Ui::MessageBarContent> content) {
 		copy
 	) | rpl::map([=](const MessageBarContent &content) {
 		return content.title.isEmpty() || content.text.text.isEmpty();
-	}) | rpl::on_next_done([=](bool hidden) {
+	}) | rpl::start_with_next_done([=](bool hidden) {
 		_shouldBeShown = !hidden;
 		if (!_forceHidden) {
 			_wrap.toggle(_shouldBeShown, anim::type::normal);
@@ -106,7 +106,7 @@ void PinnedBar::setRightButton(object_ptr<Ui::RpWidget> button) {
 	if (auto previous = _right.button.release()) {
 		using Unique = base::unique_qptr<Ui::FadeWrapScaled<Ui::RpWidget>>;
 		_right.previousButtonLifetime = previous->shownValue(
-		) | rpl::filter(!rpl::mappers::_1) | rpl::on_next([=] {
+		) | rpl::filter(!rpl::mappers::_1) | rpl::start_with_next([=] {
 			_right.previousButtonLifetime.destroy();
 		});
 		previous->hide(anim::type::normal);
@@ -189,7 +189,7 @@ void PinnedBar::createControls() {
 		_bar->widget()->height());
 
 	_wrap.geometryValue(
-	) | rpl::on_next([=](QRect rect) {
+	) | rpl::start_with_next([=](QRect rect) {
 		updateShadowGeometry(rect);
 		updateControlsGeometry(rect);
 	}, _bar->widget()->lifetime());
@@ -199,7 +199,7 @@ void PinnedBar::createControls() {
 		1
 	) | rpl::filter([=](bool shown) {
 		return !shown && !_forceHidden;
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		_bar = nullptr;
 	}, _bar->widget()->lifetime());
 
@@ -247,9 +247,6 @@ void PinnedBar::move(int x, int y) {
 
 void PinnedBar::resizeToWidth(int width) {
 	_wrap.entity()->resizeToWidth(width);
-	if (!_wrap.width()) {
-		_wrap.resizeToWidth(width);
-	}
 }
 
 int PinnedBar::height() const {

@@ -148,7 +148,7 @@ vec4 shadow() {
 Pip::RendererGL::RendererGL(not_null<Pip*> owner)
 : _owner(owner) {
 	style::PaletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_radialImage.invalidate();
 		_playbackImage.invalidate();
 		_volumeControllerImage.invalidate();

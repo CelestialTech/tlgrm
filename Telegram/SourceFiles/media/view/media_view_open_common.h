@@ -170,6 +170,4 @@ private:
 
 [[nodiscard]] TimeId ExtractVideoTimestamp(not_null<HistoryItem*> item);
 
-[[nodiscard]] TextWithEntities StripQuoteEntities(TextWithEntities text);
-
 } // namespace Media::View

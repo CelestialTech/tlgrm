@@ -743,14 +743,6 @@ QByteArray SerializeMessage(
 		if (const auto year = data.birthday.year()) {
 			push("year", year);
 		}
-	}, [&](const ActionNewCreatorPending &data) {
-		pushActor();
-		pushAction("new_creator_pending");
-		pushBare("new_creator", wrapUserName(data.newCreatorId));
-	}, [&](const ActionChangeCreator &data) {
-		pushActor();
-		pushAction("change_creator");
-		pushBare("new_creator", wrapUserName(data.newCreatorId));
 	}, [](v::null_t) {});
 
 	if (v::is_null(message.action.content)) {
@@ -760,7 +752,6 @@ QByteArray SerializeMessage(
 			pushBare(
 				"forwarded_from",
 				wrapPeerName(message.forwardedFromId));
-			push("forwarded_from_id", message.forwardedFromId);
 		} else if (!message.forwardedFromName.isEmpty()) {
 			pushBare(
 				"forwarded_from",

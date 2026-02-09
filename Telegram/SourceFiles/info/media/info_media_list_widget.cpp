@@ -38,7 +38,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_helpers.h"
 #include "media/stories/media_stories_controller.h" // ...TogglePinnedToast.
 #include "media/stories/media_stories_share.h" // PrepareShareBox.
-#include "media/stories/media_stories_stealth.h"
 #include "window/window_session_controller.h"
 #include "window/window_peer_menu.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
@@ -75,7 +74,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_credits.h" // giftBoxHiddenMark
 #include "styles/style_chat_helpers.h"
-#include "styles/style_media_stories.h"
 
 #include <QtWidgets/QApplication>
 #include <QtGui/QClipboard>
@@ -183,7 +181,7 @@ void ListWidget::start() {
 	_controller->setSearchEnabledByContent(false);
 
 	_provider->layoutRemoved(
-	) | rpl::on_next([=](not_null<BaseLayout*> layout) {
+	) | rpl::start_with_next([=](not_null<BaseLayout*> layout) {
 		if (_overLayout == layout) {
 			_overLayout = nullptr;
 		}
@@ -191,7 +189,7 @@ void ListWidget::start() {
 	}, lifetime());
 
 	_provider->refreshed(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		refreshRows();
 	}, lifetime());
 
@@ -199,7 +197,7 @@ void ListWidget::start() {
 		_provider->refreshViewer();
 
 		_controller->searchQueryValue(
-		) | rpl::on_next([this](QString &&query) {
+		) | rpl::start_with_next([this](QString &&query) {
 			_provider->setSearchQuery(std::move(query));
 		}, lifetime());
 	} else if (_controller->storiesPeer()) {
@@ -215,7 +213,7 @@ void ListWidget::start() {
 		(_controller->key().isGlobalMedia()
 			? _controller->searchQueryValue()
 			: _controller->mediaSourceQueryValue()
-		) | rpl::on_next([this] {
+		) | rpl::start_with_next([this] {
 			restart();
 		}, lifetime());
 
@@ -226,7 +224,7 @@ void ListWidget::start() {
 					const Data::Session::ItemVisibilityQuery &query) {
 				return _provider->isPossiblyMyItem(query.item)
 					&& isVisible();
-			}) | rpl::on_next([=](
+			}) | rpl::start_with_next([=](
 					const Data::Session::ItemVisibilityQuery &query) {
 				if (const auto found = findItemByItem(query.item)) {
 					if (itemVisible(found->layout)) {
@@ -244,27 +242,27 @@ void ListWidget::subscribeToSession(
 		not_null<Main::Session*> session,
 		rpl::lifetime &lifetime) {
 	session->downloaderTaskFinished(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		update();
 	}, lifetime);
 
 	session->data().itemLayoutChanged(
-	) | rpl::on_next([this](auto item) {
+	) | rpl::start_with_next([this](auto item) {
 		itemLayoutChanged(item);
 	}, lifetime);
 
 	session->data().itemRemoved(
-	) | rpl::on_next([this](auto item) {
+	) | rpl::start_with_next([this](auto item) {
 		itemRemoved(item);
 	}, lifetime);
 
 	session->data().itemRepaintRequest(
-	) | rpl::on_next([this](auto item) {
+	) | rpl::start_with_next([this](auto item) {
 		repaintItem(item);
 	}, lifetime);
 
 	session->data().itemDataChanges(
-	) | rpl::on_next([=](not_null<HistoryItem*> item) {
+	) | rpl::start_with_next([=](not_null<HistoryItem*> item) {
 		if (const auto found = findItemByItem(item)) {
 			found->layout->itemDataChanged();
 		}
@@ -275,7 +273,7 @@ void ListWidget::setupSelectRestriction() {
 	_provider->hasSelectRestrictionChanges(
 	) | rpl::filter([=] {
 		return _provider->hasSelectRestriction() && hasSelectedItems();
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		clearSelected();
 		if (_mouseAction == MouseAction::PrepareSelect) {
 			mouseActionCancel();
@@ -296,7 +294,7 @@ void ListWidget::setupStoriesTrackIds() {
 		stories->albumIdsChanged() | rpl::filter(
 			rpl::mappers::_1 == key
 		) | rpl::to_empty
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		const auto albumId = _storiesAddToAlbumId;
 		const auto &ids = stories->albumKnownInArchive(peerId, albumId);
 		if (_storiesInAlbum != ids) {
@@ -328,7 +326,7 @@ void ListWidget::setupStoriesTrackIds() {
 		stories->albumIdsChanged() | rpl::filter(
 			rpl::mappers::_1 == akey
 		) | rpl::to_empty
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_storiesAddToAlbumTotal = stories->albumIdsCount(
 			peerId,
 			_storiesAddToAlbumId);
@@ -646,7 +644,7 @@ void ListWidget::trackSession(not_null<Main::Session*> session) {
 	auto &lifetime = _trackedSessions.emplace(session).first->second;
 	subscribeToSession(session, lifetime);
 	session->account().sessionChanges(
-	) | rpl::take(1) | rpl::on_next([=] {
+	) | rpl::take(1) | rpl::start_with_next([=] {
 		_trackedSessions.remove(session);
 	}, lifetime);
 }
@@ -1329,10 +1327,6 @@ void ListWidget::showContextMenu(
 		}
 		if (const auto peer = _controller->key().storiesPeer()) {
 			if (!peer->isSelf() && IsStoryMsgId(globalId.itemId.msg)) {
-				::Media::Stories::AddStealthModeMenu(
-					Ui::Menu::CreateAddActionCallback(_contextMenu),
-					peer,
-					_controller->parentController());
 				const auto storyId = FullStoryId{
 					globalId.itemId.peer,
 					StoryIdFromMsgId(globalId.itemId.msg),
@@ -1625,7 +1619,7 @@ void ListWidget::deleteItems(SelectedItems &&items, Fn<void()> confirmed) {
 void ListWidget::setActionBoxWeak(base::weak_qptr<Ui::BoxContent> box) {
 	if ((_actionBoxWeak = box)) {
 		_actionBoxWeakLifetime = _actionBoxWeak->alive(
-		) | rpl::on_done([weak = base::make_weak(this)]{
+		) | rpl::start_with_done([weak = base::make_weak(this)]{
 			if (weak) {
 				weak->_checkForHide.fire({});
 			}

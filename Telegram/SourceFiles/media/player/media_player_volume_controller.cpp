@@ -43,7 +43,7 @@ VolumeController::VolumeController(
 		Core::App().saveSettingsDelayed();
 	});
 	Core::App().settings().songVolumeChanges(
-	) | rpl::on_next([=](float64 volume) {
+	) | rpl::start_with_next([=](float64 volume) {
 		if (!_slider->isChanging()) {
 			_slider->setValue(volume);
 		}
@@ -93,7 +93,7 @@ void PrepareVolumeDropdown(
 	volume->setIsVertical(true);
 
 	dropdown->sizeValue(
-	) | rpl::on_next([=](QSize size) {
+	) | rpl::start_with_next([=](QSize size) {
 		const auto rect = QRect(QPoint(), size);
 		const auto inner = rect.marginsRemoved(dropdown->getMargin());
 		volume->setGeometry(
@@ -108,7 +108,7 @@ void PrepareVolumeDropdown(
 
 	std::move(
 		outerWheelEvents
-	) | rpl::on_next([=](not_null<QWheelEvent*> e) {
+	) | rpl::start_with_next([=](not_null<QWheelEvent*> e) {
 		volume->outerWheelEvent(e);
 	}, volume->lifetime());
 }

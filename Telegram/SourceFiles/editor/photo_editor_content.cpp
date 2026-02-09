@@ -42,7 +42,7 @@ PhotoEditorContent::PhotoEditorContent(
 	rpl::combine(
 		_modifications.value(),
 		sizeValue()
-	) | rpl::on_next([=](
+	) | rpl::start_with_next([=](
 			const PhotoModifications &mods, const QSize &size) {
 		if (size.isEmpty()) {
 			return;
@@ -85,7 +85,7 @@ PhotoEditorContent::PhotoEditorContent(
 	}, lifetime());
 
 	paintRequest(
-	) | rpl::on_next([=](const QRect &clip) {
+	) | rpl::start_with_next([=](const QRect &clip) {
 		auto p = QPainter(this);
 
 		p.fillRect(clip, Qt::transparent);

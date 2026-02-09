@@ -29,12 +29,12 @@ Panel::Panel(not_null<PanelController*> controller)
 	_widget->setInnerSize(st::passportPanelSize);
 
 	_widget->closeRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_controller->cancelAuth();
 	}, _widget->lifetime());
 
 	_widget->closeEvents(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_controller->cancelAuthSure();
 	}, _widget->lifetime());
 }
@@ -76,7 +76,7 @@ void Panel::showCriticalError(const QString &error) {
 			st::passportErrorLabel),
 		style::margins(0, st::passportPanelSize.height() / 3, 0, 0));
 	container->widthValue(
-	) | rpl::on_next([label = container->entity()](int width) {
+	) | rpl::start_with_next([label = container->entity()](int width) {
 		label->resize(width, label->height());
 	}, container->lifetime());
 

@@ -1,86 +1,290 @@
-# [Telegram Desktop][telegram_desktop] – Official Messenger
+# Tlgrm - Telegram Desktop with MCP Integration
 
-This is the complete source code and the build instructions for the official [Telegram][telegram] messenger desktop client, based on the [Telegram API][telegram_api] and the [MTProto][telegram_proto] secure protocol.
+A custom fork of [Telegram Desktop](https://github.com/telegramdesktop/tdesktop) with an embedded Model Context Protocol (MCP) server, enabling AI assistants like Claude to interact directly with your Telegram data.
 
-[![Version](https://badge.fury.io/gh/telegramdesktop%2Ftdesktop.svg)](https://github.com/telegramdesktop/tdesktop/releases)
-[![Build Status](https://github.com/telegramdesktop/tdesktop/workflows/Windows./badge.svg)](https://github.com/telegramdesktop/tdesktop/actions)
-[![Build Status](https://github.com/telegramdesktop/tdesktop/workflows/MacOS./badge.svg)](https://github.com/telegramdesktop/tdesktop/actions)
-[![Build Status](https://github.com/telegramdesktop/tdesktop/workflows/Linux./badge.svg)](https://github.com/telegramdesktop/tdesktop/actions)
+## Features
 
-[![Preview of Telegram Desktop][preview_image]][preview_image_url]
+- **200+ MCP Tools** for interacting with Telegram data
+- **Direct local database access** - instant message reads without API rate limits
+- **Preconfigured profiles** - auto-detect and use existing session data from `~/tdata`
+- **Privacy controls** - manage who can see your data
+- **Message management** - send, edit, delete, forward, pin messages
+- **Analytics** - get statistics about your chats and usage
+- **Archive & Export** - backup and export chat histories
 
-The source code is published under GPLv3 with OpenSSL exception, the license is available [here][license].
+## Quick Start
 
-## Supported systems
+### Download Pre-built DMG
 
-The latest version is available for
+Download the latest release from the [Releases](../../releases) page.
 
-* [Windows 7 and above (64 bit)](https://telegram.org/dl/desktop/win64) ([portable](https://telegram.org/dl/desktop/win64_portable))
-* [Windows 7 and above (32 bit)](https://telegram.org/dl/desktop/win) ([portable](https://telegram.org/dl/desktop/win_portable))
-* [macOS 10.13 and above](https://telegram.org/dl/desktop/mac)
-* [Linux static build for 64 bit](https://telegram.org/dl/desktop/linux)
-* [Snap](https://snapcraft.io/telegram-desktop)
-* [Flatpak](https://flathub.org/apps/details/org.telegram.desktop)
+### Build from Source
 
-## Old system versions
+**Requirements:**
+- macOS Ventura (13.0+) or Sonoma (14.0+)
+- Xcode 14.0+ with Command Line Tools
+- Homebrew packages: `brew install git cmake python3 automake autoconf libtool pkg-config ninja wget meson nasm`
+- 50GB+ free disk space
+- Telegram API credentials from https://my.telegram.org
 
-Version **4.9.9** was the last that supports older systems
+**Build Steps:**
 
-* [macOS 10.12](https://updates.tdesktop.com/tmac/tsetup.4.9.9.dmg)
-* [Linux with glibc < 2.28 static build](https://updates.tdesktop.com/tlinux/tsetup.4.9.9.tar.xz)
+```bash
+# Clone the repository
+git clone --recursive https://github.com/pashaprig/tdesktop.git
+cd tdesktop
 
-Version **2.4.4** was the last that supports older systems
+# Build dependencies (takes 40-70 minutes)
+cd Telegram
+./build/prepare/mac.sh silent
 
-* [OS X 10.10 and 10.11](https://updates.tdesktop.com/tosx/tsetup-osx.2.4.4.dmg)
-* [Linux static build for 32 bit](https://updates.tdesktop.com/tlinux32/tsetup32.2.4.4.tar.xz)
+# Configure with your API credentials
+./configure.sh -D TDESKTOP_API_ID=YOUR_ID -D TDESKTOP_API_HASH=YOUR_HASH
 
-Version **1.8.15** was the last that supports older systems
+# Build (takes 10-20 minutes)
+cd ../out
+xcodebuild -project Telegram.xcodeproj -scheme Telegram -configuration Release build
+```
 
-* [Windows XP and Vista](https://updates.tdesktop.com/tsetup/tsetup.1.8.15.exe) ([portable](https://updates.tdesktop.com/tsetup/tportable.1.8.15.zip))
-* [OS X 10.8 and 10.9](https://updates.tdesktop.com/tmac/tsetup.1.8.15.dmg)
-* [OS X 10.6 and 10.7](https://updates.tdesktop.com/tmac32/tsetup32.1.8.15.dmg)
+The built app will be at `out/Release/Tlgrm.app`
 
-## Third-party
+## Preconfigured Profiles
 
-* Qt 6 ([LGPL](http://doc.qt.io/qt-6/lgpl.html)) and Qt 5.15 ([LGPL](http://doc.qt.io/qt-5/lgpl.html)) slightly patched
-* OpenSSL 3.2.1 ([Apache License 2.0](https://www.openssl.org/source/apache-license-2.0.txt))
-* WebRTC ([New BSD License](https://github.com/desktop-app/tg_owt/blob/master/LICENSE))
-* zlib ([zlib License](http://www.zlib.net/zlib_license.html))
-* LZMA SDK 9.20 ([public domain](http://www.7-zip.org/sdk.html))
-* liblzma ([public domain](http://tukaani.org/xz/))
-* Google Breakpad ([License](https://chromium.googlesource.com/breakpad/breakpad/+/master/LICENSE))
-* Google Crashpad ([Apache License 2.0](https://chromium.googlesource.com/crashpad/crashpad/+/master/LICENSE))
-* GYP ([BSD License](https://github.com/bnoordhuis/gyp/blob/master/LICENSE))
-* Ninja ([Apache License 2.0](https://github.com/ninja-build/ninja/blob/master/COPYING))
-* OpenAL Soft ([LGPL](https://github.com/kcat/openal-soft/blob/master/COPYING))
-* Opus codec ([BSD License](http://www.opus-codec.org/license/))
-* FFmpeg ([LGPL](https://www.ffmpeg.org/legal.html))
-* Guideline Support Library ([MIT License](https://github.com/Microsoft/GSL/blob/master/LICENSE))
-* Range-v3 ([Boost License](https://github.com/ericniebler/range-v3/blob/master/LICENSE.txt))
-* Open Sans font ([Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0.html))
-* Vazirmatn font ([SIL Open Font License 1.1](https://github.com/rastikerdar/vazirmatn/blob/master/OFL.txt))
-* Emoji alpha codes ([MIT License](https://github.com/emojione/emojione/blob/master/extras/alpha-codes/LICENSE.md))
-* xxHash ([BSD License](https://github.com/Cyan4973/xxHash/blob/dev/LICENSE))
-* QR Code generator ([MIT License](https://github.com/nayuki/QR-Code-generator#license))
-* CMake ([New BSD License](https://github.com/Kitware/CMake/blob/master/Copyright.txt))
-* Hunspell ([LGPL](https://github.com/hunspell/hunspell/blob/master/COPYING.LESSER))
-* Ada ([Apache License 2.0](https://github.com/ada-url/ada/blob/main/LICENSE-APACHE))
+Tlgrm supports using preconfigured Telegram session data, allowing you to distribute the app with pre-logged-in accounts.
 
-## Build instructions
+### What is tdata?
 
-* Windows [(32-bit)][win32] [(64-bit)][win64]
-* [macOS][mac]
-* [GNU/Linux using Docker][linux]
+The `tdata` directory is where Telegram Desktop stores all user session data:
 
-[//]: # (LINKS)
-[telegram]: https://telegram.org
-[telegram_desktop]: https://desktop.telegram.org
-[telegram_api]: https://core.telegram.org
-[telegram_proto]: https://core.telegram.org/mtproto
-[license]: LICENSE
-[win32]: docs/building-win.md
-[win64]: docs/building-win-x64.md
-[mac]: docs/building-mac.md
-[linux]: docs/building-linux.md
-[preview_image]: https://github.com/telegramdesktop/tdesktop/blob/dev/docs/assets/preview.png "Preview of Telegram Desktop"
-[preview_image_url]: https://raw.githubusercontent.com/telegramdesktop/tdesktop/dev/docs/assets/preview.png
+- **Session keys** - encrypted authentication credentials for your Telegram account
+- **Local cache** - cached messages, media thumbnails, and chat data
+- **Settings** - app preferences, notification settings, theme choices
+- **Encryption keys** - local encryption keys for the database
+
+The tdata directory contains everything needed to restore a logged-in Telegram session without re-authenticating. This is what makes preconfigured profiles possible.
+
+**Default location (macOS):**
+`~/Library/Application Support/Telegram Desktop/tdata`
+
+### How It Works
+
+On startup, Tlgrm automatically checks for a `tdata` directory in your home folder (`~/tdata`). If found, it uses that directory for session data instead of the default location.
+
+### Setup
+
+1. **Copy existing session data:**
+   ```bash
+   # Copy from official Telegram Desktop
+   cp -r ~/Library/Application\ Support/Telegram\ Desktop/tdata ~/tdata
+
+   # Or copy from another Tlgrm installation
+   cp -r /path/to/existing/tdata ~/tdata
+   ```
+
+2. **Launch Tlgrm** - it will automatically detect and use `~/tdata`
+
+3. **Verify** - check the logs for:
+   ```
+   TData: Auto-detected tdata directory at: /Users/yourname/tdata
+   ```
+
+### Use Cases
+
+- **Pre-configured deployments** - distribute Tlgrm with accounts already logged in
+- **Multiple accounts** - switch between different tdata directories
+- **MCP automation** - run Tlgrm with specific accounts for AI assistant access
+
+### Custom Working Directory
+
+You can also specify a custom working directory via command line:
+```bash
+./Tlgrm.app/Contents/MacOS/Tlgrm -workdir /path/to/custom/directory
+```
+
+## Using MCP Mode
+
+### Start Telegram in MCP Mode
+
+```bash
+./Tlgrm.app/Contents/MacOS/Tlgrm --mcp
+```
+
+This starts Telegram with the MCP server listening on a Unix socket at `/tmp/tdesktop_mcp.sock`.
+
+### Test the Connection
+
+```bash
+# Test ping
+echo '{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}' | nc -U /tmp/tdesktop_mcp.sock
+
+# List your chats
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_chats","arguments":{}}}' | nc -U /tmp/tdesktop_mcp.sock
+```
+
+### Configure Claude Desktop
+
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "telegram": {
+      "command": "/path/to/Tlgrm.app/Contents/MacOS/Tlgrm",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+## Available Tools
+
+### Core Messaging (6 tools)
+| Tool | Description |
+|------|-------------|
+| `list_chats` | Get all your Telegram chats |
+| `get_chat_info` | Get detailed info about a chat |
+| `read_messages` | Read messages from a chat |
+| `send_message` | Send a message |
+| `search_messages` | Search messages |
+| `get_user_info` | Get info about a user |
+
+### Message Operations (6 tools)
+| Tool | Description |
+|------|-------------|
+| `edit_message` | Edit a message |
+| `delete_message` | Delete a message |
+| `forward_message` | Forward a message |
+| `pin_message` | Pin a message |
+| `unpin_message` | Unpin a message |
+| `add_reaction` | Add a reaction |
+
+### Privacy & Security (14 tools)
+| Tool | Description |
+|------|-------------|
+| `get_privacy_settings` | Get current privacy settings |
+| `update_last_seen_privacy` | Set who can see your last seen |
+| `update_profile_photo_privacy` | Set who can see your photo |
+| `get_active_sessions` | List active sessions |
+| `terminate_session` | Log out a session |
+| `block_user` / `unblock_user` | Block/unblock users |
+
+### Profile Settings (5 tools)
+| Tool | Description |
+|------|-------------|
+| `get_profile_settings` | Get your profile info |
+| `update_profile_bio` | Update your bio |
+
+### Archive & Analytics (17 tools)
+Tools for archiving chats, exporting data, and getting statistics about your messaging patterns.
+
+### And 150+ More
+Including business features, wallet integration, star gifts, and more. See [CLAUDE.md](CLAUDE.md) for the complete list.
+
+## Architecture
+
+The MCP server is embedded directly in the Telegram Desktop process:
+
+```
+┌─────────────────────────────────────────┐
+│         Telegram Desktop                │
+│  ┌───────────────────────────────────┐  │
+│  │         MCP Server                │  │
+│  │  - JSON-RPC 2.0 protocol          │  │
+│  │  - Unix socket transport          │  │
+│  │  - Direct database access         │  │
+│  └───────────────────────────────────┘  │
+│                  │                      │
+│  ┌───────────────┴───────────────────┐  │
+│  │       Telegram APIs               │  │
+│  │  - Local SQLite database          │  │
+│  │  - MTProto API                    │  │
+│  │  - Data structures                │  │
+│  └───────────────────────────────────┘  │
+└─────────────────────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────┐
+│       AI Assistant (Claude)             │
+│  - Sends JSON-RPC requests              │
+│  - Receives chat/message data           │
+│  - Can send messages on your behalf     │
+└─────────────────────────────────────────┘
+```
+
+## Security
+
+- **Local only**: MCP server only accepts local Unix socket connections
+- **No network exposure**: Your data never leaves your machine
+- **Session required**: Tools only work when logged into Telegram
+- **Read your data**: AI can only access data you could access normally
+
+## Development
+
+### Project Structure
+
+```
+tdesktop/
+├── Telegram/
+│   ├── SourceFiles/
+│   │   ├── mcp/                    # MCP server implementation
+│   │   │   ├── mcp_server.h        # Server header (200+ tool declarations)
+│   │   │   ├── mcp_server_complete.cpp  # Tool implementations
+│   │   │   ├── mcp_bridge.h/cpp    # IPC bridge (optional)
+│   │   │   ├── mcp_helpers.h/cpp   # Helper functions
+│   │   │   └── cache_manager.h/cpp # LRU cache
+│   │   └── core/
+│   │       ├── application.h/cpp   # MCP integration point
+│   │       └── ...
+│   └── CMakeLists.txt              # Build configuration
+├── CLAUDE.md                       # AI assistant documentation
+└── README.md                       # This file
+```
+
+### Adding New Tools
+
+1. Declare in `mcp_server.h`:
+   ```cpp
+   QJsonObject toolYourTool(const QJsonObject &args);
+   ```
+
+2. Implement in `mcp_server_complete.cpp`:
+   ```cpp
+   QJsonObject Server::toolYourTool(const QJsonObject &args) {
+       if (!_session) return toolError("No session");
+       // Implementation
+       QJsonObject result;
+       result["success"] = true;
+       return result;
+   }
+   ```
+
+3. Register in `initializeToolHandlers()`
+
+4. Register metadata in `registerTools()`
+
+See [CLAUDE.md](CLAUDE.md) for detailed documentation.
+
+## Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test the build
+5. Submit a pull request
+
+## License
+
+This project is licensed under the same terms as Telegram Desktop. See [LICENSE](LICENSE) for details.
+
+## Credits
+
+- Based on [Telegram Desktop](https://github.com/telegramdesktop/tdesktop) by Telegram Messenger LLP
+- MCP integration developed with assistance from Claude (Anthropic)
+
+## Support
+
+- Issues: [GitHub Issues](../../issues)
+- Telegram Desktop docs: https://desktop.telegram.org
+- MCP Protocol: https://modelcontextprotocol.io

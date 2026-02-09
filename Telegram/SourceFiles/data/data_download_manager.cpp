@@ -61,7 +61,7 @@ constexpr auto ByDocument = [](const auto &entry) {
 	if (const auto user = peer->asUser()) {
 		return user->accessHash();
 	} else if (const auto channel = peer->asChannel()) {
-		return channel->accessHash();
+		return channel->access;
 	}
 	return 0;
 }
@@ -141,32 +141,32 @@ void DownloadManager::trackSession(not_null<Main::Session*> session) {
 	session->data().documentLoadProgress(
 	) | rpl::filter([=](not_null<DocumentData*> document) {
 		return _loadingDocuments.contains(document);
-	}) | rpl::on_next([=](not_null<DocumentData*> document) {
+	}) | rpl::start_with_next([=](not_null<DocumentData*> document) {
 		check(document);
 	}, data.lifetime);
 
 	session->data().itemLayoutChanged(
 	) | rpl::filter([=](not_null<const HistoryItem*> item) {
 		return _loading.contains(item);
-	}) | rpl::on_next([=](not_null<const HistoryItem*> item) {
+	}) | rpl::start_with_next([=](not_null<const HistoryItem*> item) {
 		check(item);
 	}, data.lifetime);
 
 	session->data().itemViewRefreshRequest(
-	) | rpl::on_next([=](not_null<const HistoryItem*> item) {
+	) | rpl::start_with_next([=](not_null<const HistoryItem*> item) {
 		changed(item);
 	}, data.lifetime);
 
 	session->changes().messageUpdates(
 		MessageUpdate::Flag::Destroyed
-	) | rpl::on_next([=](const MessageUpdate &update) {
+	) | rpl::start_with_next([=](const MessageUpdate &update) {
 		removed(update.item);
 	}, data.lifetime);
 
 	session->account().sessionChanges(
 	) | rpl::filter(
 		rpl::mappers::_1 != session
-	) | rpl::take(1) | rpl::on_next([=] {
+	) | rpl::take(1) | rpl::start_with_next([=] {
 		untrack(session);
 	}, data.lifetime);
 }
@@ -1137,7 +1137,7 @@ rpl::producer<Ui::DownloadBarContent> MakeDownloadBarContent() {
 				state->document->session().downloaderTaskFinished(
 				) | rpl::filter([=] {
 					return self(self);
-				}) | rpl::on_next(
+				}) | rpl::start_with_next(
 					state->push,
 					state->downloadTaskLifetime);
 			}
@@ -1199,7 +1199,7 @@ rpl::producer<Ui::DownloadBarContent> MakeDownloadBarContent() {
 		manager.loadingListChanges(
 		) | rpl::filter([=] {
 			return !state->scheduled;
-		}) | rpl::on_next(state->push, lifetime);
+		}) | rpl::start_with_next(state->push, lifetime);
 
 		notify();
 		return lifetime;

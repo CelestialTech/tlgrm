@@ -74,7 +74,7 @@ InviteLinkSubscriptionToggle FillCreateInviteLinkSubscriptionToggle(
 		tr::lng_group_invite_subscription_ph(),
 		QString(),
 		std::pow(QString::number(maxCredits).size(), 10));
-	wrap->toggledValue() | rpl::on_next([=](bool shown) {
+	wrap->toggledValue() | rpl::start_with_next([=](bool shown) {
 		if (shown) {
 			input->setFocus();
 		}
@@ -85,7 +85,7 @@ InviteLinkSubscriptionToggle FillCreateInviteLinkSubscriptionToggle(
 	const auto priceOverlay = Ui::CreateChild<Ui::RpWidget>(inputContainer);
 	priceOverlay->setAttribute(Qt::WA_TransparentForMouseEvents);
 	inputContainer->sizeValue(
-	) | rpl::on_next([=](const QSize &size) {
+	) | rpl::start_with_next([=](const QSize &size) {
 		input->resize(
 			size.width() - rect::m::sum::h(st::boxRowPadding),
 			st.heightMin);
@@ -104,7 +104,7 @@ InviteLinkSubscriptionToggle FillCreateInviteLinkSubscriptionToggle(
 		priceOverlay->update();
 	});
 	priceOverlay->paintRequest(
-	) | rpl::on_next([=, right = st::boxRowPadding.right()] {
+	) | rpl::start_with_next([=, right = st::boxRowPadding.right()] {
 		if (state->usdRate.current() <= 0) {
 			return;
 		}
@@ -135,13 +135,13 @@ InviteLinkSubscriptionToggle FillCreateInviteLinkSubscriptionToggle(
 			tr::lng_group_invite_subscription_about_link(
 				lt_emoji,
 				rpl::single(Ui::Text::IconEmoji(&st::textMoreIconEmoji)),
-				tr::rich
+				Ui::Text::RichLangValue
 			) | rpl::map([](TextWithEntities text) {
-				return tr::link(
+				return Ui::Text::Link(
 					std::move(text),
 					tr::lng_group_invite_subscription_about_url(tr::now));
 			}),
-			tr::rich),
+			Ui::Text::RichLangValue),
 		st::boxDividerLabel);
 	Ui::AddSkip(wrap->entity());
 	Ui::AddSkip(wrap->entity());

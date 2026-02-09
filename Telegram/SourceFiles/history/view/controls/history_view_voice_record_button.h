@@ -15,10 +15,6 @@ namespace style {
 struct RecordBar;
 } // namespace style
 
-namespace Lottie {
-class Icon;
-} // namespace Lottie
-
 namespace Ui::Paint {
 class Blobs;
 } // namespace Ui::Paint
@@ -51,10 +47,8 @@ public:
 
 private:
 	void init();
-	void initVoiceRoundIcon(int index);
 
 	std::unique_ptr<Ui::Paint::Blobs> _blobs;
-	std::array<std::unique_ptr<Lottie::Icon>, 2> _voiceRoundIcons;
 
 	crl::time _lastUpdateTime = 0;
 	crl::time _blobsHideLastTime = 0;

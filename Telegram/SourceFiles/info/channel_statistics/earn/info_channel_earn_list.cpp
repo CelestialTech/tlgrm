@@ -112,7 +112,7 @@ void ShowMenu(not_null<Ui::GenericBox*> box, const QString &text) {
 			Core::App().iv().show(controller, iv, QString());
 		} else {
 			resolver->resolved(
-			) | rpl::on_next([=](const QString &s) {
+			) | rpl::start_with_next([=](const QString &s) {
 				if (s == url) {
 					if (const auto d = resolver->lookup(url)) {
 						if (const auto iv = (*d)->iv.get()) {
@@ -155,7 +155,7 @@ void AddRecipient(not_null<Ui::GenericBox*> box, const TextWithEntities &t) {
 	label->setTryMakeSimilarLines(true);
 	label->resizeToWidth(container->width());
 	label->sizeValue(
-	) | rpl::on_next([=](const QSize &s) {
+	) | rpl::start_with_next([=](const QSize &s) {
 		const auto padding = QMargins(
 			st::chatGiveawayPeerPadding.right(),
 			st::chatGiveawayPeerPadding.top(),
@@ -246,7 +246,7 @@ void InnerWidget::load() {
 		state->apiCreditsLifetime.destroy();
 
 		_peer->session().account().mtpUpdates(
-		) | rpl::on_next([=, peerId = _peer->id](
+		) | rpl::start_with_next([=, peerId = _peer->id](
 				const MTPUpdates &updates) {
 			using TLCreditsUpdate = MTPDupdateStarsRevenueStatus;
 			using TLNotificationUpdate = MTPDupdateServiceNotification;
@@ -307,17 +307,17 @@ void InnerWidget::load() {
 	};
 
 	_showFinished.events(
-	) | rpl::take(1) | rpl::on_next([=] {
+	) | rpl::take(1) | rpl::start_with_next([=] {
 		const auto nextRequests = [=] {
 			state->apiCreditsHistory.request({}, [=](
 					const Data::CreditsStatusSlice &data) {
 				_state.creditsStatusSlice = data;
 				::Api::PremiumPeerBot(
 					&_peer->session()
-				) | rpl::on_next([=](not_null<PeerData*> bot) {
+				) | rpl::start_with_next([=](not_null<PeerData*> bot) {
 					_state.premiumBotId = bot->id;
 					state->apiCredits.request(
-					) | rpl::on_error_done([=](const QString &error) {
+					) | rpl::start_with_error_done([=](const QString &error) {
 						if (canViewCredits) {
 							fail(error);
 						} else {
@@ -334,7 +334,7 @@ void InnerWidget::load() {
 		};
 		const auto isMegagroup = _peer->isMegagroup();
 		state->api.request(
-		) | rpl::on_error_done([=](const QString &error) {
+		) | rpl::start_with_error_done([=](const QString &error) {
 			if (isMegagroup) {
 				_state.currencyEarn = {};
 				if (error == u"BROADCAST_REQUIRED"_q) {
@@ -357,7 +357,7 @@ void InnerWidget::fill() {
 		const auto empty = container->add(object_ptr<Dialogs::SearchEmpty>(
 			container,
 			Dialogs::SearchEmptyIcon::NoResults,
-			tr::lng_search_tab_no_results(tr::bold)));
+			tr::lng_search_tab_no_results(Ui::Text::Bold)));
 		empty->setMinimalHeight(st::normalBoxLottieSize.height());
 		empty->animate();
 		return;
@@ -393,7 +393,7 @@ void InnerWidget::fill() {
 	);
 
 	auto creditsStateValue = bot
-		? rpl::single(Data::CreditsEarnStatistics()) | rpl::type_erased
+		? rpl::single(Data::CreditsEarnStatistics()) | rpl::type_erased()
 		: rpl::single(creditsData) | rpl::then(
 			_stateUpdated.events(
 			) | rpl::map([this] { return _state.creditsEarn; })
@@ -419,11 +419,11 @@ void InnerWidget::fill() {
 				tr::lng_channel_earn_about_link(
 					lt_emoji,
 					rpl::single(Ui::Text::IconEmoji(&st::textMoreIconEmoji)),
-					tr::rich
+					Ui::Text::RichLangValue
 				) | rpl::map([](TextWithEntities text) {
-					return tr::link(std::move(text), 1);
+					return Ui::Text::Link(std::move(text), 1);
 				}),
-				tr::rich),
+				Ui::Text::RichLangValue),
 			st::boxDividerLabel);
 		label->setLink(1, std::make_shared<LambdaClickHandler>([=] {
 			_show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
@@ -452,7 +452,7 @@ void InnerWidget::fill() {
 						std::move(owned),
 						style::al_top);
 					widget->paintRequest(
-					) | rpl::on_next([=] {
+					) | rpl::start_with_next([=] {
 						auto p = Painter(widget);
 						auto hq = PainterHighQualityEnabler(p);
 						p.setPen(Qt::NoPen);
@@ -500,13 +500,13 @@ void InnerWidget::fill() {
 						const auto left = Ui::CreateChild<Ui::RpWidget>(
 							box->verticalLayout().get());
 						left->paintRequest(
-						) | rpl::on_next([=] {
+						) | rpl::start_with_next([=] {
 							auto p = Painter(left);
 							icon.paint(p, 0, 0, left->width());
 						}, left->lifetime());
 						left->resize(icon.size());
 						top->geometryValue(
-						) | rpl::on_next([=](const QRect &g) {
+						) | rpl::start_with_next([=](const QRect &g) {
 							left->moveToLeft(
 								(g.left() - left->width()) / 2,
 								g.top() + st::channelEarnHistoryThreeSkip);
@@ -542,8 +542,8 @@ void InnerWidget::fill() {
 							tr::lng_channel_earn_learn_coin_title(
 								lt_emoji,
 								rpl::single(
-									tr::link(bigCurrencyIcon, 1)),
-								tr::rich),
+									Ui::Text::Link(bigCurrencyIcon, 1)),
+								Ui::Text::RichLangValue),
 							st::boxTitle,
 							st::defaultPopupMenu,
 							emojiHelper.context()),
@@ -571,11 +571,11 @@ void InnerWidget::fill() {
 									lt_emoji,
 									rpl::single(Ui::Text::IconEmoji(
 										&st::textMoreIconEmoji)),
-									tr::rich
+									Ui::Text::RichLangValue
 								) | rpl::map([](TextWithEntities text) {
-									return tr::link(std::move(text), 1);
+									return Ui::Text::Link(std::move(text), 1);
 								}),
-								tr::rich),
+								Ui::Text::RichLangValue),
 							st::channelEarnLearnDescription));
 					label->resizeToWidth(box->width()
 						- rect::m::sum::h(st::boxRowPadding));
@@ -665,7 +665,6 @@ void InnerWidget::fill() {
 			}(), Type::StackBar);
 			widget->setTitle(tr::lng_bot_earn_chart_revenue());
 		}
-		Statistic::FixCacheForHighDPIChartWidget(container);
 	}
 	if (data.topHoursGraph.chart
 		|| data.revenueGraph.chart
@@ -735,7 +734,7 @@ void InnerWidget::fill() {
 				majorLabel->sizeValue(),
 				creditsLabel->sizeValue(),
 				std::move(creditsValue)
-			) | rpl::on_next([=](
+			) | rpl::start_with_next([=](
 					int available,
 					const QSize &size,
 					const QSize &creditsSize,
@@ -765,13 +764,13 @@ void InnerWidget::fill() {
 				creditsSecondLabel->resizeToWidth(
 					available - creditsSecondLabel->pos().x());
 				if (!showCredits) {
-					const auto x = std::numeric_limits<int>::max() / 2;
+					const auto x = std::numeric_limits<int>::max();
 					icon->moveToLeft(x, 0);
 					creditsLabel->moveToLeft(x, 0);
 					creditsSecondLabel->moveToLeft(x, 0);
 				}
 				if (!showCurrency) {
-					const auto x = std::numeric_limits<int>::max() / 2;
+					const auto x = std::numeric_limits<int>::max();
 					majorLabel->moveToLeft(x, 0);
 					minorLabel->moveToLeft(x, 0);
 					secondMinorLabel->moveToLeft(x, 0);
@@ -854,7 +853,7 @@ void InnerWidget::fill() {
 		rpl::combine(
 			majorLabel->sizeValue(),
 			minorLabel->sizeValue()
-		) | rpl::on_next([=](
+		) | rpl::start_with_next([=](
 				const QSize &majorSize,
 				const QSize &minorSize) {
 			labels->resize(
@@ -897,7 +896,7 @@ void InnerWidget::fill() {
 		rpl::combine(
 			button->sizeValue(),
 			label->sizeValue()
-		) | rpl::on_next([=](const QSize &b, const QSize &l) {
+		) | rpl::start_with_next([=](const QSize &b, const QSize &l) {
 			label->moveToLeft(
 				(b.width() - l.width()) / 2,
 				(b.height() - l.height()) / 2);
@@ -1049,7 +1048,7 @@ void InnerWidget::fill() {
 
 		rpl::single(slider->entity()->activeSection()) | rpl::then(
 			slider->entity()->sectionActivated()
-		) | rpl::on_next([=](int index) {
+		) | rpl::start_with_next([=](int index) {
 			if (index == 0) {
 				tabCurrencyList->toggle(true, anim::type::instant);
 				tabCreditsList->toggle(false, anim::type::instant);
@@ -1177,7 +1176,7 @@ void InnerWidget::fill() {
 					rpl::combine(
 						majorLabel->sizeValue(),
 						minorLabel->sizeValue()
-					) | rpl::on_next([=](
+					) | rpl::start_with_next([=](
 							const QSize &majorSize,
 							const QSize &minorSize) {
 						labels->resize(
@@ -1264,7 +1263,7 @@ void InnerWidget::fill() {
 					_show->showBox(Box(detailsBox));
 				});
 				wrap->geometryValue(
-				) | rpl::on_next([=](const QRect &g) {
+				) | rpl::start_with_next([=](const QRect &g) {
 					const auto &padding = st::boxRowPadding;
 					const auto majorTop = (g.height() - majorLabel->height())
 						/ 2;
@@ -1378,7 +1377,7 @@ void InnerWidget::fill() {
 		object_ptr<Ui::VerticalLayout>(container));
 	rpl::single(rpl::empty) | rpl::then(
 		_stateUpdated.events()
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		const auto listsContainer = historyContainer->add(
 			object_ptr<Ui::VerticalLayout>(container));
 		rebuildLists(_state, listsContainer, historyDividerContainer);
@@ -1416,7 +1415,7 @@ void InnerWidget::fill() {
 		button->setToggleLocked(isLocked);
 
 		button->toggledChanges(
-		) | rpl::on_next([=](bool value) {
+		) | rpl::start_with_next([=](bool value) {
 			if (isLocked && value) {
 				toggled->fire(false);
 				CheckBoostLevel(
@@ -1500,25 +1499,21 @@ void AddEmojiToMajor(
 		: TextWithEntities::Simple((*isIn) ? QChar('+') : kMinus);
 	std::move(
 		value
-	) | rpl::on_next([=](CreditsAmount v) {
+	) | rpl::start_with_next([=](CreditsAmount v) {
 		auto helper = Ui::Text::CustomEmojiHelper();
-		auto icon = helper.paletteDependent({
-			.factory = [=] {
-				return Ui::Earn::IconCurrencyColored(
-					st.style.font,
-					!isIn
-					? st::currencyFg->c
-					: (*isIn)
-					? st::boxTextFgGood->c
-					: st::menuIconAttentionColor->c);
-				},
-			.margin = margins
+		auto icon = helper.paletteDependent({ .factory = [=] {
+			return Ui::Earn::IconCurrencyColored(
+				st.style.font,
+				!isIn
+				? st::currencyFg->c
+				: (*isIn)
+				? st::boxTextFgGood->c
+				: st::menuIconAttentionColor->c);
+			}, .margin = margins
 				? *margins
-				: st::channelEarnCurrencyCommonMargins
-		});
-		auto value = MajorPart(v.abs());
+				: st::channelEarnCurrencyCommonMargins });
 		label->setMarkedText(
-			base::duplicate(prepended).append(icon).append(value),
+			base::duplicate(prepended).append(icon).append(MajorPart(v)),
 			helper.context());
 	}, label->lifetime());
 }

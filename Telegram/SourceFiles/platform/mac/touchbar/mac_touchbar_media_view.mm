@@ -161,7 +161,7 @@ const auto kSeekItemIdentifier = @"seekBar";
 	std::move(
 		display
 	) | rpl::distinct_until_changed(
-	) | rpl::on_next([=](ItemType type) {
+	) | rpl::start_with_next([=](ItemType type) {
 		TouchBar::CustomEnterToCocoaEventLoop([=] {
 			self.defaultItemIdentifiers = items(type);
 		});

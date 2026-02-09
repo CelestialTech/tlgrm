@@ -11,8 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_premium.h" // MessageMoneyRestriction.
 #include "base/random.h"
 #include "boxes/filters/edit_filter_chats_list.h"
-#include "settings/settings_common.h"
-#include "settings/sections/settings_premium.h"
+#include "settings/settings_premium.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/effects/round_checkbox.h"
 #include "ui/text/text_utilities.h"
@@ -63,7 +62,7 @@ constexpr auto kSearchPerPage = 50;
 } // namespace
 
 object_ptr<Ui::BoxContent> PrepareContactsBox(
-		not_null<Window::SessionController*> window) {
+		not_null<Window::SessionController*> sessionController) {
 	using Mode = ContactsBoxController::SortMode;
 	class Controller final : public ContactsBoxController {
 	public:
@@ -91,7 +90,7 @@ object_ptr<Ui::BoxContent> PrepareContactsBox(
 
 	};
 	auto controller = std::make_unique<Controller>(
-		&window->session());
+		&sessionController->session());
 	controller->setStyleOverrides(&st::contactsWithStories);
 	controller->setStoriesShown(true);
 	const auto raw = controller.get();
@@ -106,7 +105,7 @@ object_ptr<Ui::BoxContent> PrepareContactsBox(
 		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 		box->addLeftButton(
 			tr::lng_profile_add_contact(),
-			[=] { window->showAddContact(); });
+			[=] { sessionController->showAddContact(); });
 		state->toggleSort = box->addTopButton(st::contactsSortButton, [=] {
 			const auto online = (state->mode.current() == Mode::Online);
 			const auto mode = online ? Mode::Alphabet : Mode::Online;
@@ -118,16 +117,9 @@ object_ptr<Ui::BoxContent> PrepareContactsBox(
 		});
 		raw->setSortMode(Mode::Online);
 
-		raw->wheelClicks() | rpl::on_next([=](not_null<PeerData*> p) {
-			window->showInNewWindow(p);
+		raw->wheelClicks() | rpl::start_with_next([=](not_null<PeerData*> p) {
+			sessionController->showInNewWindow(p);
 		}, box->lifetime());
-
-		raw->setShowFinishedCallback([=] {
-			window->checkHighlightControl(
-				u"contacts/sort"_q,
-				state->toggleSort,
-				{ .rippleShape = true });
-		});
 	};
 	return Box<PeerListBox>(std::move(controller), std::move(init));
 }
@@ -393,7 +385,7 @@ void TrackMessageMoneyRestrictionsChanges(
 	rpl::merge(
 		Data::AmPremiumValue(session) | rpl::to_empty,
 		session->api().premium().someMessageMoneyRestrictionsResolved()
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		const auto st = &controller->computeListSt().item;
 		const auto delegate = controller->delegate();
 		const auto process = [&](not_null<PeerListRow*> raw) {
@@ -439,18 +431,18 @@ void ChatsListBoxController::prepare() {
 		session().data().chatsListLoadedEvents(
 		) | rpl::filter([=](Data::Folder *folder) {
 			return !folder;
-		}) | rpl::on_next([=] {
+		}) | rpl::start_with_next([=] {
 			checkForEmptyRows();
 		}, lifetime());
 	}
 
 	session().data().chatsListChanges(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		rebuildRows();
 	}, lifetime());
 
 	session().data().contactsLoaded().value(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		rebuildRows();
 	}, lifetime());
 }
@@ -594,14 +586,14 @@ void PeerListStories::prepare(not_null<PeerListDelegate*> delegate) {
 	_delegate = delegate;
 
 	_unreadBrush = PeerListStoriesGradient(_controller->computeListSt());
-	style::PaletteChanged() | rpl::on_next([=] {
+	style::PaletteChanged() | rpl::start_with_next([=] {
 		_unreadBrush = PeerListStoriesGradient(_controller->computeListSt());
 		updateColors();
 	}, _lifetime);
 
 	_session->changes().peerUpdates(
 		Data::PeerUpdate::Flag::StoriesState
-	) | rpl::on_next([=](const Data::PeerUpdate &update) {
+	) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
 		const auto id = update.peer->id.value;
 		if (const auto row = _delegate->peerListFindRow(id)) {
 			process(row);
@@ -609,7 +601,7 @@ void PeerListStories::prepare(not_null<PeerListDelegate*> delegate) {
 	}, _lifetime);
 
 	const auto stories = &_session->data().stories();
-	stories->sourceChanged() | rpl::on_next([=](PeerId id) {
+	stories->sourceChanged() | rpl::start_with_next([=](PeerId id) {
 		const auto source = stories->source(id);
 		const auto info = source
 			? source->info()
@@ -670,7 +662,7 @@ void ContactsBoxController::prepare() {
 	}
 
 	session().data().contactsLoaded().value(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		rebuildRows();
 	}, lifetime());
 }
@@ -732,7 +724,7 @@ void ContactsBoxController::setSortMode(SortMode mode) {
 		) | rpl::filter([=](const Data::PeerUpdate &update) {
 			return !_sortByOnlineTimer.isActive()
 				&& delegate()->peerListFindRow(update.peer->id.value);
-		}) | rpl::on_next([=] {
+		}) | rpl::start_with_next([=] {
 			_sortByOnlineTimer.callOnce(kSortByOnlineThrottle);
 		}, _sortByOnlineLifetime);
 	} else {
@@ -796,11 +788,11 @@ RecipientMoneyRestrictionError WriteMoneyRestrictionError(
 			lt_user,
 			TextWithEntities{ user->shortName() },
 			lt_link,
-			tr::link(
-				tr::bold(
+			Ui::Text::Link(
+				Ui::Text::Bold(
 					tr::lng_send_non_premium_message_toast_link(
 						tr::now))),
-			tr::rich),
+			Ui::Text::RichLangValue),
 	};
 }
 
@@ -882,7 +874,7 @@ void ChooseRecipientBoxController::rowClicked(not_null<PeerListRow*> row) {
 				});
 
 				forum->destroyed(
-				) | rpl::on_next([=] {
+				) | rpl::start_with_next([=] {
 					box->closeBox();
 				}, box->lifetime());
 			});
@@ -921,7 +913,7 @@ void ChooseRecipientBoxController::rowClicked(not_null<PeerListRow*> row) {
 				});
 
 				monoforum->destroyed(
-				) | rpl::on_next([=] {
+				) | rpl::start_with_next([=] {
 					box->closeBox();
 				}, box->lifetime());
 			});
@@ -1003,7 +995,7 @@ void ChooseTopicSearchController::searchQuery(const QString &query) {
 void ChooseTopicSearchController::searchOnServer() {
 	_requestId = _api.request(MTPmessages_GetForumTopics(
 		MTP_flags(MTPmessages_GetForumTopics::Flag::f_q),
-		_forum->peer()->input(),
+		_forum->peer()->input,
 		MTP_string(_query),
 		MTP_int(_offsetDate),
 		MTP_int(_offsetId),
@@ -1106,12 +1098,12 @@ ChooseTopicBoxController::ChooseTopicBoxController(
 	setStyleOverrides(&st::chooseTopicList);
 
 	_forum->chatsListChanges(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		refreshRows();
 	}, lifetime());
 
 	_forum->topicDestroyed(
-	) | rpl::on_next([=](not_null<Data::ForumTopic*> topic) {
+	) | rpl::start_with_next([=](not_null<Data::ForumTopic*> topic) {
 		const auto id = PeerListRowId(topic->rootId().bare);
 		if (const auto row = delegate()->peerListFindRow(id)) {
 			delegate()->peerListRemoveRow(row);
@@ -1141,7 +1133,7 @@ void ChooseTopicBoxController::prepare() {
 
 	session().changes().entryUpdates(
 		Data::EntryUpdate::Flag::Repaint
-	) | rpl::on_next([=](const Data::EntryUpdate &update) {
+	) | rpl::start_with_next([=](const Data::EntryUpdate &update) {
 		if (const auto topic = update.entry->asTopic()) {
 			if (topic->forum() == _forum) {
 				const auto id = topic->rootId().bare;
@@ -1208,12 +1200,12 @@ ChooseSublistBoxController::ChooseSublistBoxController(
 	setStyleOverrides(&st::chooseTopicList);
 
 	_monoforum->chatsListChanges(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		refreshRows();
 	}, lifetime());
 
 	_monoforum->sublistDestroyed(
-	) | rpl::on_next([=](not_null<Data::SavedSublist*> sublist) {
+	) | rpl::start_with_next([=](not_null<Data::SavedSublist*> sublist) {
 		const auto id = sublist->sublistPeer()->id.value;
 		if (const auto row = delegate()->peerListFindRow(id)) {
 			delegate()->peerListRemoveRow(row);
@@ -1243,7 +1235,7 @@ void ChooseSublistBoxController::prepare() {
 
 	session().changes().entryUpdates(
 		Data::EntryUpdate::Flag::Repaint
-	) | rpl::on_next([=](const Data::EntryUpdate &update) {
+	) | rpl::start_with_next([=](const Data::EntryUpdate &update) {
 		if (const auto sublist = update.entry->asSublist()) {
 			if (sublist->parent() == _monoforum) {
 				const auto id = sublist->sublistPeer()->id.value;

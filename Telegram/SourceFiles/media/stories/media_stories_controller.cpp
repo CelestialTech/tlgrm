@@ -246,13 +246,13 @@ void Controller::Unsupported::setup(not_null<PeerData*> peer) {
 
 	_bg = std::make_unique<Ui::RpWidget>(wrap);
 	_bg->show();
-	_bg->paintRequest() | rpl::on_next([=] {
+	_bg->paintRequest() | rpl::start_with_next([=] {
 		auto p = QPainter(_bg.get());
 		_bgRound.paint(p, _bg->rect());
 	}, _bg->lifetime());
 
 	_controller->layoutValue(
-	) | rpl::on_next([=](const Layout &layout) {
+	) | rpl::start_with_next([=](const Layout &layout) {
 		_bg->setGeometry(layout.content);
 	}, _bg->lifetime());
 
@@ -273,7 +273,7 @@ void Controller::Unsupported::setup(not_null<PeerData*> peer) {
 		_controller->layoutValue(),
 		_text->sizeValue(),
 		_button->sizeValue()
-	) | rpl::on_next([=](
+	) | rpl::start_with_next([=](
 			const Layout &layout,
 			QSize text,
 			QSize button) {
@@ -321,7 +321,7 @@ Controller::Controller(not_null<Delegate*> delegate)
 		_reactions->activeValue(),
 		_1 || _2
 	) | rpl::distinct_until_changed(
-	) | rpl::on_next([=](bool active) {
+	) | rpl::start_with_next([=](bool active) {
 		_replyActive = active;
 		updateContentFaded();
 	}, _lifetime);
@@ -334,14 +334,14 @@ Controller::Controller(not_null<Delegate*> delegate)
 	}
 
 	_reactions->chosen(
-	) | rpl::on_next([=](Reactions::Chosen chosen) {
+	) | rpl::start_with_next([=](Reactions::Chosen chosen) {
 		if (reactionChosen(chosen.mode, chosen.reaction)) {
 			_reactions->animateAndProcess(std::move(chosen));
 		}
 	}, _lifetime);
 
 	_delegate->storiesLayerShown(
-	) | rpl::on_next([=](bool shown) {
+	) | rpl::start_with_next([=](bool shown) {
 		if (_layerShown != shown) {
 			_layerShown = shown;
 			updatePlayingAllowed();
@@ -349,7 +349,7 @@ Controller::Controller(not_null<Delegate*> delegate)
 	}, _lifetime);
 
 	_header->tooltipShownValue(
-	) | rpl::on_next([=](bool shown) {
+	) | rpl::start_with_next([=](bool shown) {
 		if (_tooltipShown != shown) {
 			_tooltipShown = shown;
 			updatePlayingAllowed();
@@ -357,7 +357,7 @@ Controller::Controller(not_null<Delegate*> delegate)
 	}, _lifetime);
 
 	_wrap->windowActiveValue(
-	) | rpl::on_next([=](bool active) {
+	) | rpl::start_with_next([=](bool active) {
 		_windowActive = active;
 		updatePlayingAllowed();
 	}, _lifetime);
@@ -867,7 +867,7 @@ void Controller::show(
 	const auto subscribeToSource = [&] {
 		stories.sourceChanged() | rpl::filter(
 			rpl::mappers::_1 == storyId.peer
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			rebuildFromContext(peer, storyId);
 		}, _contextLifetime);
 	};
@@ -878,7 +878,7 @@ void Controller::show(
 		const auto key = Data::StoryAlbumIdsKey{ storyId.peer, album.id };
 		stories.albumIdsChanged() | rpl::filter(
 			rpl::mappers::_1 == key
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			rebuildFromContext(peer, storyId);
 			checkMoveByDelta();
 		}, _contextLifetime);
@@ -1024,13 +1024,13 @@ void Controller::subscribeToSession() {
 	}
 	_session->changes().storyUpdates(
 		Data::StoryUpdate::Flag::Destroyed
-	) | rpl::on_next([=](Data::StoryUpdate update) {
+	) | rpl::start_with_next([=](Data::StoryUpdate update) {
 		if (update.story->fullId() == _shown) {
 			_delegate->storiesClose();
 		}
 	}, _sessionLifetime);
 	_session->data().stories().itemsChanged(
-	) | rpl::on_next([=](PeerId peerId) {
+	) | rpl::start_with_next([=](PeerId peerId) {
 		if (_waitingForId.peer == peerId) {
 			checkWaitingFor();
 		}
@@ -1041,7 +1041,7 @@ void Controller::subscribeToSession() {
 		| Data::StoryUpdate::Flag::Reaction
 	) | rpl::filter([=](const Data::StoryUpdate &update) {
 		return (update.story == this->story());
-	}) | rpl::on_next([=](const Data::StoryUpdate &update) {
+	}) | rpl::start_with_next([=](const Data::StoryUpdate &update) {
 		if (update.flags & Data::StoryUpdate::Flag::Edited) {
 			show(update.story, _context);
 			_delegate->storiesRedisplay(update.story);
@@ -1779,18 +1779,13 @@ auto Controller::starsReactionsValue() const
 	});
 }
 
-auto Controller::starsReactionsEffects() const
--> rpl::producer<SendStarButtonEffect> {
-	return _starsReactionEffects.events();
-}
-
 void Controller::setStarsReactionIncrements(rpl::producer<int> increments) {
 	std::move(
 		increments
-	) | rpl::on_next([=](int count) {
+	) | rpl::start_with_next([=](int count) {
 		if (const auto call = _videoStreamCall.get()) {
 			const auto show = _delegate->storiesShow();
-			Payments::TryAddingPaidReaction(call, count, show);
+			Payments::TryAddingPaidReaction(call, count, std::nullopt, show);
 		}
 	}, _videoStreamLifetime);
 }
@@ -1889,7 +1884,7 @@ void Controller::updateVideoStream(not_null<Calls::GroupCall*> videoStream) {
 
 	using namespace Calls::Group;
 	videoStream->messages()->listValue(
-	) | rpl::on_next([=](const std::vector<Message> &messages) {
+	) | rpl::start_with_next([=](const std::vector<Message> &messages) {
 		if (_commentsState.current() == CommentsState::Shown
 			|| _commentsState.current() == CommentsState::Empty) {
 			for (const auto &message : messages | ranges::views::reverse) {
@@ -1930,19 +1925,13 @@ void Controller::updateVideoStream(not_null<Calls::GroupCall*> videoStream) {
 		_commentsStateShowFromPinned,
 		_videoStreamLifetime);
 
-	_starsReactions = rpl::single(Calls::Group::StarsDonor()) | rpl::then(
+	_starsReactions = rpl::single(rpl::empty) | rpl::then(
 		videoStream->messages()->starsValueChanges()
-	) | rpl::map([=](const Calls::Group::StarsDonor &donor) {
-		if (const auto peer = donor.peer) {
-			_starsReactionEffects.fire({
-				.from = peer,
-				.stars = donor.stars,
-			});
-		}
+	) | rpl::map([=] {
 		return videoStream->messages()->starsLocalState().total;
 	});
 	_paidReactionToast->shownForCall(
-	) | rpl::on_next([=](Calls::GroupCall *call) {
+	) | rpl::start_with_next([=](Calls::GroupCall *call) {
 		_starsReactionHighlighted = (call == videoStream);
 	}, _videoStreamLifetime);
 
@@ -1986,14 +1975,14 @@ Ui::Toast::Config PrepareToggleInProfileToast(
 					? tr::lng_stories_channel_save_done
 					: tr::lng_stories_save_done)(
 						tr::now,
-						tr::bold)
+						Ui::Text::Bold)
 				: (channel
 					? tr::lng_stories_channel_save_done_many
 					: tr::lng_stories_save_done_many)(
 						tr::now,
 						lt_count,
 						count,
-						tr::bold)).append(
+						Ui::Text::Bold)).append(
 							'\n').append((channel
 								? tr::lng_stories_channel_save_done_about
 								: tr::lng_stories_save_done_about)(tr::now))
@@ -2002,14 +1991,14 @@ Ui::Toast::Config PrepareToggleInProfileToast(
 					? tr::lng_stories_channel_archive_done
 					: tr::lng_stories_archive_done)(
 						tr::now,
-						tr::marked)
+						Ui::Text::WithEntities)
 				: (channel
 					? tr::lng_stories_channel_archive_done_many
 					: tr::lng_stories_archive_done_many)(
 						tr::now,
 						lt_count,
 						count,
-						tr::marked))),
+						Ui::Text::WithEntities))),
 		.st = &st::storiesActionToast,
 		.duration = (inProfile
 			? Data::Stories::kInProfileToastDuration

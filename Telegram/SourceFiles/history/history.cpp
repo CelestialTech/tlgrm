@@ -68,7 +68,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_options.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
-#include "ui/painter.h" // remove when History::paintUserpic accepts QPainter
 #include "payments/payments_checkout_process.h"
 #include "core/crash_reports.h"
 #include "core/application.h"
@@ -189,9 +188,7 @@ void History::checkChatListMessageRemoved(not_null<HistoryItem*> item) {
 }
 
 void History::itemVanished(not_null<HistoryItem*> item) {
-	if (const auto thread = item->maybeNotificationThread()) {
-		thread->removeNotification(item);
-	}
+	item->notificationThread()->removeNotification(item);
 	if (lastKeyboardId == item->id) {
 		clearLastKeyboard();
 	}
@@ -246,7 +243,7 @@ void History::createLocalDraftFromCloud(
 	draft->reply.topicRootId = topicRootId;
 	draft->reply.monoforumPeerId = monoforumPeerId;
 	if (!suggestDraftAllowed()) {
-		draft->suggest = SuggestOptions();
+		draft->suggest = SuggestPostOptions();
 	}
 	auto existing = localDraft(topicRootId, monoforumPeerId);
 	if (Data::DraftIsNull(existing)
@@ -336,7 +333,7 @@ Data::Draft *History::createCloudDraft(
 				.topicRootId = topicRootId,
 				.monoforumPeerId = monoforumPeerId,
 			},
-			SuggestOptions(),
+			SuggestPostOptions(),
 			MessageCursor(),
 			Data::WebPageDraft()));
 		cloudDraft(topicRootId, monoforumPeerId)->date = TimeId(0);
@@ -364,7 +361,7 @@ Data::Draft *History::createCloudDraft(
 		existing->reply.topicRootId = topicRootId;
 		existing->reply.monoforumPeerId = monoforumPeerId;
 		if (!suggestDraftAllowed()) {
-			existing->suggest = SuggestOptions();
+			existing->suggest = SuggestPostOptions();
 		}
 	}
 
@@ -501,7 +498,6 @@ not_null<HistoryItem*> History::createItem(
 		MessageFlags localFlags,
 		bool detachExistingItem,
 		bool newMessage) {
-	owner().fillMessagePeers(peer->id, message);
 	if (const auto result = owner().message(peer, id)) {
 		if (detachExistingItem) {
 			result->removeMainView();
@@ -1296,10 +1292,12 @@ void History::applyServiceChanges(
 					.text = tr::lng_payments_success(
 						tr::now,
 						lt_amount,
-						Ui::Text::Wrapped(payment->amount, EntityType::Bold),
+						Ui::Text::Wrapped(
+							payment->amount,
+							EntityType::Bold),
 						lt_title,
-						tr::bold(paid->title),
-						tr::marked),
+						Ui::Text::Bold(paid->title),
+						Ui::Text::WithEntities),
 					.textContext = Core::TextContext({
 						.session = &session(),
 					}),
@@ -3430,12 +3428,12 @@ void History::forumChanged(Data::Forum *old) {
 			return (_flags & Flag::IsForum) && inChatList();
 		}) | rpl::map(
 			AdjustedForumUnreadState
-		) | rpl::on_next([=](const Dialogs::UnreadState &old) {
+		) | rpl::start_with_next([=](const Dialogs::UnreadState &old) {
 			notifyUnreadStateChange(old);
 		}, forum->lifetime());
 
 		forum->chatsListChanges(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			updateChatListEntry();
 		}, forum->lifetime());
 	} else {
@@ -3467,12 +3465,12 @@ void History::monoforumChanged(Data::SavedMessages *old) {
 			return (_flags & Flag::IsMonoforumAdmin) && inChatList();
 		}) | rpl::map([=](const Dialogs::UnreadState &was) {
 			return AdjustedForumUnreadState(withMyMuted(was));
-		}) | rpl::on_next([=](const Dialogs::UnreadState &old) {
+		}) | rpl::start_with_next([=](const Dialogs::UnreadState &old) {
 			notifyUnreadStateChange(old);
 		}, monoforum->lifetime());
 
 		monoforum->chatsListChanges(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			updateChatListEntry();
 		}, monoforum->lifetime());
 	} else {
@@ -3987,11 +3985,6 @@ void History::clear(ClearType type, bool markEmpty) {
 		chat->markupSenders.clear();
 	} else if (const auto channel = peer->asMegagroup()) {
 		channel->mgInfo->markupSenders.clear();
-	}
-	if (const auto forum = peer->forum()) {
-		forum->enumerateTopics([&](not_null<Data::ForumTopic*> topic) {
-			destroyMessagesByTopic(topic->rootId());
-		});
 	}
 
 	owner().notifyHistoryChangeDelayed(this);

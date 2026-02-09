@@ -31,19 +31,11 @@ struct StarGiftAuctionMyState {
 	bool returned = false;
 };
 
-struct GiftAuctionRound {
-	int number = 0;
-	TimeId duration = 0;
-	int extendTop = 0;
-	TimeId extendDuration = 0;
-};
-
 struct GiftAuctionState {
 	std::optional<StarGift> gift;
 	StarGiftAuctionMyState my;
 	std::vector<GiftAuctionBidLevel> bidLevels;
 	std::vector<not_null<UserData*>> topBidders;
-	std::vector<GiftAuctionRound> roundParameters;
 	crl::time subscribedTill = 0;
 	int64 minBidAmount = 0;
 	int64 averagePrice = 0;
@@ -66,7 +58,6 @@ struct GiftAcquired {
 	TimeId date = 0;
 	int64 bidAmount = 0;
 	int round = 0;
-	int number = 0;
 	int position = 0;
 	bool nameHidden = false;
 };
@@ -80,8 +71,7 @@ public:
 	explicit GiftAuctions(not_null<Main::Session*> session);
 	~GiftAuctions();
 
-	[[nodiscard]] rpl::producer<GiftAuctionState> state(uint64 giftId);
-	void resolveSlug(const QString &slug, Fn<void(uint64)> done);
+	[[nodiscard]] rpl::producer<GiftAuctionState> state(const QString &slug);
 
 	void apply(const MTPDupdateStarGiftAuctionState &data);
 	void apply(const MTPDupdateStarGiftAuctionUserState &data);
@@ -89,10 +79,6 @@ public:
 	void requestAcquired(
 		uint64 giftId,
 		Fn<void(std::vector<Data::GiftAcquired>)> done);
-
-	[[nodiscard]] std::optional<Data::UniqueGiftAttributes> attributes(
-		uint64 giftId) const;
-	void requestAttributes(uint64 giftId, Fn<void()> ready = nullptr);
 
 	[[nodiscard]] rpl::producer<ActiveAuctions> active() const;
 	[[nodiscard]] rpl::producer<bool> hasActiveChanges() const;
@@ -114,19 +100,9 @@ private:
 		}
 		friend inline bool operator==(MyStateKey, MyStateKey) = default;
 	};
-	struct Attributes {
-		Data::UniqueGiftAttributes lists;
-		std::vector<Fn<void()>> waiters;
-	};
-	struct SlugRequest {
-		std::vector<Fn<void(uint64)>> callbacks;
-	};
 
-	void request(uint64 giftId);
+	void request(const QString &slug);
 	Entry *find(uint64 giftId) const;
-	void applyStateResponse(
-		not_null<Entry*> entry,
-		const MTPpayments_StarGiftAuctionState &result);
 	void apply(
 		not_null<Entry*> entry,
 		const MTPStarGiftAuctionState &state);
@@ -149,10 +125,7 @@ private:
 	const not_null<Main::Session*> _session;
 
 	base::Timer _timer;
-	base::flat_map<uint64, std::unique_ptr<Entry>> _map;
-	base::flat_map<QString, SlugRequest> _slugRequests;
-	base::flat_map<QString, uint64> _slugToGiftId;
-	base::flat_map<uint64, Attributes> _attributes;
+	base::flat_map<QString, std::unique_ptr<Entry>> _map;
 
 	rpl::event_stream<> _activeChanged;
 	mtpRequestId _activeRequestId = 0;

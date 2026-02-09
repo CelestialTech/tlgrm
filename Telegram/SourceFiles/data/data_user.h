@@ -98,7 +98,6 @@ struct BotInfo {
 	bool canManageEmojiStatus : 1 = false;
 	bool supportsBusiness : 1 = false;
 	bool hasMainApp : 1 = false;
-	bool canManageTopics : 1 = false;
 
 private:
 	std::unique_ptr<Data::Forum> _forum;
@@ -169,7 +168,7 @@ public:
 
 	void madeAction(TimeId when); // pseudo-online
 
-	[[nodiscard]] uint64 accessHash() const {
+	uint64 accessHash() const {
 		return _accessHash;
 	}
 	void setAccessHash(uint64 accessHash);
@@ -287,7 +286,7 @@ public:
 	[[nodiscard]] MsgId personalChannelMessageId() const;
 	void setPersonalChannel(ChannelId channelId, MsgId messageId);
 
-	[[nodiscard]] MTPInputUser inputUser() const;
+	MTPInputUser inputUser = MTP_inputUserEmpty();
 
 	QString firstName;
 	QString lastName;

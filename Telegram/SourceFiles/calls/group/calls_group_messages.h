@@ -54,18 +54,18 @@ struct MessageDeleteRequest {
 	bool reportSpam = false;
 };
 
-struct StarsDonor {
+struct StarsTopDonor {
 	PeerData *peer = nullptr;
 	int stars = 0;
 	bool my = false;
 
 	friend inline bool operator==(
-		const StarsDonor &,
-		const StarsDonor &) = default;
+		const StarsTopDonor &,
+		const StarsTopDonor &) = default;
 };
 
 struct StarsTop {
-	std::vector<StarsDonor> topDonors;
+	std::vector<StarsTopDonor> topDonors;
 	int total = 0;
 
 	friend inline bool operator==(
@@ -91,7 +91,7 @@ public:
 
 	[[nodiscard]] int reactionsPaidScheduled() const;
 	[[nodiscard]] PeerId reactionsLocalShownPeer() const;
-	void reactionsPaidAdd(int count);
+	void reactionsPaidAdd(int count, std::optional<PeerId> shownPeer = {});
 	void reactionsPaidScheduledCancel();
 	void reactionsPaidSend();
 	void undoScheduledPaidOnDestroy();
@@ -101,7 +101,7 @@ public:
 		int my = 0;
 	};
 	[[nodiscard]] PaidLocalState starsLocalState() const;
-	[[nodiscard]] rpl::producer<StarsDonor> starsValueChanges() const {
+	[[nodiscard]] rpl::producer<> starsValueChanges() const {
 		return _paidChanges.events();
 	}
 	[[nodiscard]] const StarsTop &starsTop() const {
@@ -155,9 +155,7 @@ private:
 		const TextWithEntities &text,
 		int stars) const;
 	[[nodiscard]] Data::PaidReactionSend startPaidReactionSending();
-	void finishPaidSending(
-		Data::PaidReactionSend send,
-		bool success);
+	void finishPaidSending(Data::PaidReactionSend send, bool success);
 	void addStars(not_null<PeerData*> from, int stars, bool mine);
 	void requestStarsStats();
 
@@ -183,7 +181,7 @@ private:
 
 	mtpRequestId _starsTopRequestId = 0;
 	Paid _paid;
-	rpl::event_stream<StarsDonor> _paidChanges;
+	rpl::event_stream<> _paidChanges;
 	bool _paidSendingPending = false;
 
 	TimeId _ttl = 0;

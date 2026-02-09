@@ -659,21 +659,21 @@ MultiSelect::Inner::Inner(
 , _cancel(this, _st.fieldCancel) {
 	_field->customUpDown(true);
 	_field->focusedChanges(
-	) | rpl::filter(rpl::mappers::_1) | rpl::on_next([=] {
+	) | rpl::filter(rpl::mappers::_1) | rpl::start_with_next([=] {
 		fieldFocused();
 	}, _field->lifetime());
 	_field->changes(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		queryChanged();
 	}, _field->lifetime());
 	_field->submits(
-	) | rpl::on_next([=](Qt::KeyboardModifiers m) {
+	) | rpl::start_with_next([=](Qt::KeyboardModifiers m) {
 		if (_submittedCallback) {
 			_submittedCallback(m);
 		}
 	}, _field->lifetime());
 	_field->cancelled(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		cancelled();
 	}, _field->lifetime());
 	_cancel->setClickedCallback([=] {

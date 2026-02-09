@@ -15,7 +15,7 @@ class HistoryItem;
 struct HistoryMessageEdited;
 struct HistoryMessageForwarded;
 struct HistoryMessageReplyMarkup;
-struct HistoryMessageSuggestion;
+struct HistoryMessageSuggestedPost;
 struct HistoryMessageReply;
 
 namespace Data {
@@ -31,7 +31,6 @@ namespace HistoryView {
 
 class ViewButton;
 class WebPage;
-class TranscribeButton;
 
 namespace Reactions {
 class InlineList;
@@ -114,6 +113,7 @@ public:
 		const TextState &reactionState) const override;
 	int reactionsOptimalWidth() const override;
 
+	bool hasHeavyPart() const override;
 	void unloadHeavyPart() override;
 
 	// hasFromPhoto() returns true even if we don't display the photo
@@ -165,20 +165,20 @@ public:
 	QRect innerGeometry() const override;
 	[[nodiscard]] BottomRippleMask bottomRippleMask(int buttonHeight) const;
 
+protected:
+	void refreshDataIdHook() override;
+
 private:
 	struct CommentsButton;
 	struct FromNameStatus;
 	struct RightAction;
-
-	void refreshDataIdHook() override;
-	bool hasHeavyPart() const override;
 
 	bool updateBottomInfo();
 
 	void initPaidInformation();
 	void refreshSuggestedInfo(
 		not_null<HistoryItem*> item,
-		not_null<const HistoryMessageSuggestion*> suggest,
+		not_null<const HistoryMessageSuggestedPost*> suggest,
 		const HistoryMessageReply *reply);
 	void initLogEntryOriginal();
 	void initPsa();
@@ -198,7 +198,6 @@ private:
 	void toggleRightActionRipple(bool pressed);
 
 	void toggleReplyRipple(bool pressed);
-	void toggleSummaryHeaderRipple(bool pressed);
 
 	void paintCommentsButton(
 		Painter &p,
@@ -217,10 +216,6 @@ private:
 		QRect &trect,
 		const PaintContext &context) const;
 	void paintReplyInfo(
-		Painter &p,
-		QRect &trect,
-		const PaintContext &context) const;
-	void paintSummaryHeaderInfo(
 		Painter &p,
 		QRect &trect,
 		const PaintContext &context) const;
@@ -256,10 +251,6 @@ private:
 		QPoint point,
 		QRect &trect,
 		not_null<TextState*> outResult) const;
-	bool getStateSummaryHeaderInfo(
-		QPoint point,
-		QRect &trect,
-		not_null<TextState*> outResult) const;
 	bool getStateViaBotIdInfo(
 		QPoint point,
 		QRect &trect,
@@ -291,7 +282,6 @@ private:
 	[[nodiscard]] bool displayFastForward() const;
 
 	[[nodiscard]] bool isPinnedContext() const;
-	[[nodiscard]] bool isCommentsRootView() const;
 
 	[[nodiscard]] bool displayFastShare() const;
 	[[nodiscard]] bool displayGoToOriginal() const;
@@ -303,15 +293,7 @@ private:
 	void refreshInfoSkipBlock(HistoryItem *textItem);
 	[[nodiscard]] int monospaceMaxWidth() const;
 
-	void ensureSummarizeButton() const;
-	void paintSummarize(
-		Painter &p,
-		int x,
-		int y,
-		bool right,
-		const PaintContext &context,
-		QRect g) const;
-
+	void validateInlineKeyboard(HistoryMessageReplyMarkup *markup);
 	void updateViewButtonExistence();
 	[[nodiscard]] int viewButtonHeight() const;
 
@@ -331,7 +313,6 @@ private:
 	mutable std::unique_ptr<ViewButton> _viewButton;
 	std::unique_ptr<TopicButton> _topicButton;
 	mutable std::unique_ptr<CommentsButton> _comments;
-	mutable std::unique_ptr<TranscribeButton> _summarize;
 
 	mutable Ui::Text::String _fromName;
 	mutable std::unique_ptr<FromNameStatus> _fromNameStatus;

@@ -178,7 +178,7 @@ EditorBlock::EditorBlock(QWidget *parent, Type type, Context *context)
 	setMouseTracking(true);
 
 	_context->updated.events(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (_mouseSelection) {
 			_lastGlobalPos = QCursor::pos();
 			updateSelected(mapFromGlobal(_lastGlobalPos));
@@ -188,7 +188,7 @@ EditorBlock::EditorBlock(QWidget *parent, Type type, Context *context)
 
 	if (_type == Type::Existing) {
 		_context->appended.events(
-		) | rpl::on_next([=](const Context::AppendData &added) {
+		) | rpl::start_with_next([=](const Context::AppendData &added) {
 			auto name = added.name;
 			auto value = added.value;
 			feed(name, value);
@@ -208,7 +208,7 @@ EditorBlock::EditorBlock(QWidget *parent, Type type, Context *context)
 		}, lifetime());
 	} else {
 		_context->changed.events(
-		) | rpl::on_next([=](const Context::ChangeData &data) {
+		) | rpl::start_with_next([=](const Context::ChangeData &data) {
 			checkCopiesChanged(0, data.names, data.value);
 		}, lifetime());
 	}
@@ -335,11 +335,11 @@ void EditorBlock::activateRow(const Row &row) {
 				saveEditing(editor->color());
 			});
 			box->boxClosing(
-			) | rpl::on_next(crl::guard(this, [=] {
+			) | rpl::start_with_next(crl::guard(this, [=] {
 				cancelEditing();
 			}), state->cancelLifetime);
 			editor->submitRequests(
-			) | rpl::on_next(save, editor->lifetime());
+			) | rpl::start_with_next(save, editor->lifetime());
 
 			box->setFocusCallback([=] {
 				editor->setInnerFocus();

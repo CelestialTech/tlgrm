@@ -110,21 +110,21 @@ Float::Float(
 	prepareShadow();
 
 	document->session().data().itemRepaintRequest(
-	) | rpl::on_next([this](auto item) {
+	) | rpl::start_with_next([this](auto item) {
 		if (_item == item) {
 			repaintItem();
 		}
 	}, lifetime());
 
 	document->session().data().itemRemoved(
-	) | rpl::on_next([this](auto item) {
+	) | rpl::start_with_next([this](auto item) {
 		if (_item == item) {
 			detach();
 		}
 	}, lifetime());
 
 	document->session().account().sessionChanges(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		detach();
 	}, lifetime());
 
@@ -320,7 +320,7 @@ FloatController::FloatController(not_null<FloatDelegate*> delegate)
 	Media::Player::instance()->trackChanged(
 	) | rpl::filter([=](AudioMsgId::Type type) {
 		return (type == AudioMsgId::Type::Voice);
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		checkCurrent();
 	}, _lifetime);
 
@@ -343,38 +343,38 @@ void FloatController::replaceDelegate(not_null<FloatDelegate*> delegate) {
 
 void FloatController::startDelegateHandling() {
 	_delegate->floatPlayerCheckVisibilityRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		checkVisibility();
 	}, _delegateLifetime);
 
 	_delegate->floatPlayerHideAllRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		hideAll();
 	}, _delegateLifetime);
 
 	_delegate->floatPlayerShowVisibleRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		showVisible();
 	}, _delegateLifetime);
 
 	_delegate->floatPlayerRaiseAllRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		raiseAll();
 	}, _delegateLifetime);
 
 	_delegate->floatPlayerUpdatePositionsRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updatePositions();
 	}, _delegateLifetime);
 
 	_delegate->floatPlayerFilterWheelEventRequests(
-	) | rpl::on_next([=](
+	) | rpl::start_with_next([=](
 			const FloatDelegate::FloatPlayerFilterWheelEventRequest &request) {
 		*request.result = filterWheelEvent(request.object, request.event);
 	}, _delegateLifetime);
 
 	_delegate->floatPlayerAreaUpdates(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		checkVisibility();
 	}, _delegateLifetime);
 }

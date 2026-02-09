@@ -72,7 +72,7 @@ void EdgeButton::init() {
 	// const auto bg = rounded(_bg);
 
 	paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		Painter p(this);
 
 		// p.drawImage(QPoint(), bg);
@@ -122,7 +122,7 @@ ButtonBar::ButtonBar(
 	const style::color &bg)
 : RpWidget(parent) {
 	sizeValue(
-	) | rpl::on_next([=](const QSize &size) {
+	) | rpl::start_with_next([=](const QSize &size) {
 		const auto children = RpWidget::children();
 		const auto widgets = ranges::views::all(
 			children
@@ -181,7 +181,7 @@ ButtonBar::ButtonBar(
 	}, lifetime());
 
 	paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		auto p = QPainter(this);
 		p.drawImage(QPoint(), _roundedBg);
 	}, lifetime());
@@ -269,7 +269,7 @@ PhotoEditorControls::PhotoEditorControls(
 	_paintModeButtonActive->setAttribute(Qt::WA_TransparentForMouseEvents);
 
 	sizeValue(
-	) | rpl::on_next([=](const QSize &size) {
+	) | rpl::start_with_next([=](const QSize &size) {
 		if (size.isEmpty()) {
 			return;
 		}
@@ -304,7 +304,7 @@ PhotoEditorControls::PhotoEditorControls(
 	}, lifetime());
 
 	_mode.changes(
-	) | rpl::on_next([=](const PhotoEditorMode &mode) {
+	) | rpl::start_with_next([=](const PhotoEditorMode &mode) {
 		if (mode.mode == PhotoEditorMode::Mode::Out) {
 			return;
 		}
@@ -316,7 +316,7 @@ PhotoEditorControls::PhotoEditorControls(
 	}, lifetime());
 
 	_paintBottomButtons->positionValue(
-	) | rpl::on_next([=](const QPoint &containerPos) {
+	) | rpl::start_with_next([=](const QPoint &containerPos) {
 		_paintTopButtons->moveToLeft(
 			containerPos.x(),
 			containerPos.y()
@@ -325,7 +325,7 @@ PhotoEditorControls::PhotoEditorControls(
 	}, _paintBottomButtons->lifetime());
 
 	_paintBottomButtons->shownValue(
-	) | rpl::on_next([=](bool shown) {
+	) | rpl::start_with_next([=](bool shown) {
 		_paintTopButtons->setVisible(shown);
 	}, _paintBottomButtons->lifetime());
 
@@ -350,7 +350,7 @@ PhotoEditorControls::PhotoEditorControls(
 		})));
 
 	controllers->undoController->canPerformChanges(
-	) | rpl::on_next([=](const UndoController::EnableRequest &r) {
+	) | rpl::start_with_next([=](const UndoController::EnableRequest &r) {
 		const auto isUndo = (r.command == Undo::Undo);
 		const auto &button = isUndo ? _undoButton : _redoButton;
 		button->setAttribute(Qt::WA_TransparentForMouseEvents, !r.enable);
@@ -385,7 +385,7 @@ PhotoEditorControls::PhotoEditorControls(
 			}));
 
 		controllers->stickersPanelController->panelShown(
-		) | rpl::on_next([=](bool shown) {
+		) | rpl::start_with_next([=](bool shown) {
 			const auto icon = shown
 				? &st::photoEditorStickersIconActive
 				: nullptr;
@@ -397,7 +397,7 @@ PhotoEditorControls::PhotoEditorControls(
 		modifications.flipped ? 0 : 1
 	) | rpl::then(
 		_flipButton->clicks() | rpl::to_empty
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_flipped = !_flipped;
 		const auto icon = _flipped ? &st::photoEditorFlipIconActive : nullptr;
 		_flipButton->setIconOverride(icon, icon);

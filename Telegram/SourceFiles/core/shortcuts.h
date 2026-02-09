@@ -80,8 +80,6 @@ enum class Command {
 	ShowChatMenu,
 	ShowChatPreview,
 
-	ShowAdminLog,
-
 	SupportReloadTemplates,
 	SupportToggleMuted,
 	SupportScrollToCurrent,

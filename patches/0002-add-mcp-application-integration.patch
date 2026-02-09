@@ -1,0 +1,77 @@
+diff --git a/Telegram/SourceFiles/core/application.cpp b/Telegram/SourceFiles/core/application.cpp
+index 0f831c5b5c..df8895e7b1 100644
+--- a/Telegram/SourceFiles/core/application.cpp
++++ b/Telegram/SourceFiles/core/application.cpp
+@@ -82,6 +82,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "window/window_separate_id.h"
+ #include "window/window_session_controller.h"
+ #include "window/window_controller.h"
++#include "mcp/mcp_server.h"
+ #include "boxes/abstract_box.h"
+ #include "base/qthelp_regex.h"
+ #include "base/qthelp_url.h"
+@@ -213,6 +214,9 @@ void Application::closeAdditionalWindows() {
+ }
+ 
+ Application::~Application() {
++	// Stop MCP server before other cleanup
++	_mcpServer = nullptr;
++
+ 	if (_saveSettingsTimer && _saveSettingsTimer->isActive()) {
+ 		Local::writeSettings();
+ 	}
+@@ -416,6 +420,18 @@ void Application::run() {
+ 		});
+ 	}
+ 
++	// Start MCP server if --mcp flag is present
++	const auto args = QCoreApplication::arguments();
++	if (args.contains(u"--mcp"_q)) {
++		_mcpServer = std::make_unique<MCP::Server>();
++		if (_mcpServer->start(MCP::TransportType::Stdio)) {
++			DEBUG_LOG(("MCP: Server started successfully"));
++		} else {
++			LOG(("MCP Error: Failed to start server"));
++			_mcpServer = nullptr;
++		}
++	}
++
+ 	processCreatedWindow(_lastActivePrimaryWindow);
+ }
+ 
+diff --git a/Telegram/SourceFiles/core/application.h b/Telegram/SourceFiles/core/application.h
+index 15f514582e..a0069ace89 100644
+--- a/Telegram/SourceFiles/core/application.h
++++ b/Telegram/SourceFiles/core/application.h
+@@ -109,6 +109,10 @@ namespace Webrtc {
+ class Environment;
+ } // namespace Webrtc
+ 
++namespace MCP {
++class Server;
++} // namespace MCP
++
+ namespace Core {
+ 
+ struct LocalUrlHandler;
+@@ -238,6 +242,11 @@ public:
+ 	}
+ 	[[nodiscard]] bool exportPreventsQuit();
+ 
++	// MCP Server component.
++	[[nodiscard]] MCP::Server *mcpServer() const {
++		return _mcpServer.get();
++	}
++
+ 	// Main::Session component.
+ 	Main::Session *maybePrimarySession() const;
+ 	[[nodiscard]] int unreadBadge() const;
+@@ -442,6 +451,8 @@ private:
+ 
+ 	const std::unique_ptr<Tray> _tray;
+ 
++	std::unique_ptr<MCP::Server> _mcpServer;
++
+ 	std::unique_ptr<Media::Player::FloatController> _floatPlayers;
+ 	rpl::lifetime _floatPlayerDelegateLifetime;
+ 	bool _floatPlayerGifsPaused = false;

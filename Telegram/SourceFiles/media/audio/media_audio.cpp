@@ -472,14 +472,14 @@ Mixer::Mixer(not_null<Audio::Instance*> instance)
 	connect(this, SIGNAL(suppressAll(qint64)), _fader, SLOT(onSuppressAll(qint64)));
 
 	Core::App().settings().songVolumeChanges(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		InvokeQueued(_fader, [fader = _fader] {
 			fader->songVolumeChanged();
 		});
 	}, _lifetime);
 
 	Core::App().settings().videoVolumeChanges(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		InvokeQueued(_fader, [fader = _fader] {
 			fader->videoVolumeChanged();
 		});

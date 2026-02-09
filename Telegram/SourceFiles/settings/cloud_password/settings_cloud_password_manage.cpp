@@ -12,7 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_cloud_password.h"
 #include "lang/lang_keys.h"
 #include "settings/cloud_password/settings_cloud_password_common.h"
-#include "settings/settings_common.h"
 #include "settings/cloud_password/settings_cloud_password_email_confirm.h"
 #include "settings/cloud_password/settings_cloud_password_email.h"
 #include "settings/cloud_password/settings_cloud_password_hint.h"
@@ -67,10 +66,6 @@ private:
 
 	rpl::lifetime _requestLifetime;
 
-	QPointer<Ui::RpWidget> _changePasswordButton;
-	QPointer<Ui::RpWidget> _changeEmailButton;
-	QPointer<Ui::RpWidget> _disableButton;
-
 };
 
 rpl::producer<QString> Manage::title() {
@@ -115,7 +110,7 @@ void Manage::setupContent() {
 		return;
 	}
 	cloudPassword().state(
-	) | rpl::on_next([=](const Core::CloudPasswordState &state) {
+	) | rpl::start_with_next([=](const Core::CloudPasswordState &state) {
 		if (!_requestLifetime && !state.hasPassword) {
 			quit();
 		}
@@ -139,24 +134,22 @@ void Manage::setupContent() {
 	});
 
 	Ui::AddSkip(content);
-	const auto changePasswordButton = AddButtonWithIcon(
+	AddButtonWithIcon(
 		content,
 		tr::lng_settings_cloud_password_manage_password_change(),
 		st::settingsButton,
-		{ &st::menuIconPermissions });
-	_changePasswordButton = changePasswordButton;
-	changePasswordButton->setClickedCallback([=] {
+		{ &st::menuIconPermissions }
+	)->setClickedCallback([=] {
 		showOtherAndRememberPassword(CloudPasswordInputId());
 	});
-	const auto changeEmailButton = AddButtonWithIcon(
+	AddButtonWithIcon(
 		content,
 		state->hasRecovery
 			? tr::lng_settings_cloud_password_manage_email_change()
 			: tr::lng_settings_cloud_password_manage_email_new(),
 		st::settingsButton,
-		{ &st::menuIconRecoveryEmail });
-	_changeEmailButton = changeEmailButton;
-	changeEmailButton->setClickedCallback([=] {
+		{ &st::menuIconRecoveryEmail }
+	)->setClickedCallback([=] {
 		auto data = stepData();
 		data.setOnlyRecoveryEmail = true;
 		setStepData(std::move(data));
@@ -164,16 +157,6 @@ void Manage::setupContent() {
 		showOtherAndRememberPassword(CloudPasswordEmailId());
 	});
 	Ui::AddSkip(content);
-
-	showFinishes() | rpl::take(1) | rpl::on_next([=] {
-		controller()->checkHighlightControl(
-			u"2sv/change"_q,
-			_changePasswordButton);
-		controller()->checkHighlightControl(
-			u"2sv/change-email"_q,
-			_changeEmailButton);
-		controller()->checkHighlightControl("2sv/disable"_q, _disableButton);
-	}, lifetime());
 
 	using Divider = CloudPassword::OneEdgeBoxContentDivider;
 	const auto divider = Ui::CreateChild<Divider>(this);
@@ -189,12 +172,12 @@ void Manage::setupContent() {
 	rpl::combine(
 		about->geometryValue(),
 		content->widthValue()
-	) | rpl::on_next([=](QRect r, int w) {
+	) | rpl::start_with_next([=](QRect r, int w) {
 		r.setWidth(w);
 		divider->setGeometry(r);
 	}, divider->lifetime());
 	_isBottomFillerShown.value(
-	) | rpl::on_next([=](bool shown) {
+	) | rpl::start_with_next([=](bool shown) {
 		divider->skipEdge(Qt::BottomEdge, shown);
 	}, divider->lifetime());
 
@@ -214,7 +197,7 @@ base::weak_qptr<Ui::RpWidget> Manage::createPinnedToBottom(
 			QString(),
 			false,
 			QString()
-		) | rpl::on_error_done([=](const QString &type) {
+		) | rpl::start_with_error_done([=](const QString &type) {
 			AbstractStep::isPasswordInvalidError(type);
 		}, [=] {
 			setStepData(StepData());
@@ -239,7 +222,6 @@ base::weak_qptr<Ui::RpWidget> Manage::createPinnedToBottom(
 		std::move(callback));
 
 	_isBottomFillerShown = base::take(bottomButton.isBottomFillerShown);
-	_disableButton = bottomButton.button.get();
 
 	return bottomButton.content;
 }

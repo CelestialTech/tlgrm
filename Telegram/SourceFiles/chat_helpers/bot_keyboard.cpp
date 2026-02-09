@@ -33,6 +33,7 @@ public:
 		Ui::BubbleRounding outer,
 		RectParts sides) const override;
 
+	void startPaint(QPainter &p, const Ui::ChatStyle *st) const override;
 	const style::TextStyle &textStyle() const override;
 	void repaint(not_null<const HistoryItem*> item) const override;
 
@@ -41,13 +42,8 @@ protected:
 		QPainter &p,
 		const Ui::ChatStyle *st,
 		const QRect &rect,
-		HistoryMessageMarkupButton::Color color,
 		Ui::BubbleRounding rounding,
 		float64 howMuchOver) const override;
-	void paintButtonStart(
-		QPainter &p,
-		const Ui::ChatStyle *st,
-		HistoryMessageMarkupButton::Color color) const override;
 	void paintButtonIcon(
 		QPainter &p,
 		const Ui::ChatStyle *st,
@@ -58,7 +54,6 @@ protected:
 		QPainter &p,
 		const Ui::ChatStyle *st,
 		const QRect &rect,
-		HistoryMessageMarkupButton::Color color,
 		int outerWidth,
 		Ui::BubbleRounding rounding) const override;
 	int minButtonWidth(HistoryMessageMarkupButton::Type type) const override;
@@ -74,12 +69,8 @@ Style::Style(
 : ReplyKeyboard::Style(st), _parent(parent) {
 }
 
-void Style::paintButtonStart(
-		QPainter &p,
-		const Ui::ChatStyle *st,
-		HistoryMessageMarkupButton::Color color) const {
-	using Color = HistoryMessageMarkupButton::Color;
-	p.setPen((color == Color::Normal) ? st::botKbColor : st::white);
+void Style::startPaint(QPainter &p, const Ui::ChatStyle *st) const {
+	p.setPen(st::botKbColor);
 	p.setFont(st::botKbStyle.font);
 }
 
@@ -102,23 +93,9 @@ void Style::paintButtonBg(
 		QPainter &p,
 		const Ui::ChatStyle *st,
 		const QRect &rect,
-		HistoryMessageMarkupButton::Color color,
 		Ui::BubbleRounding rounding,
 		float64 howMuchOver) const {
-	using Color = HistoryMessageMarkupButton::Color;
-	if (color == Color::Normal) {
-		Ui::FillRoundRect(p, rect, st::botKbBg, Ui::BotKeyboardCorners);
-	} else {
-		auto hq = PainterHighQualityEnabler(p);
-		p.setPen(Qt::NoPen);
-		p.setBrush((color == Color::Primary)
-			? QColor(0x29, 0x8a, 0xcf)
-			: (color == Color::Danger)
-			? QColor(0xe0, 0x53, 0x56)
-			: QColor(0x61, 0xc7, 0x52));
-		const auto radius = st::roundRadiusSmall;
-		p.drawRoundedRect(rect, radius, radius);
-	}
+	Ui::FillRoundRect(p, rect, st::botKbBg, Ui::BotKeyboardCorners);
 }
 
 void Style::paintButtonIcon(
@@ -134,7 +111,6 @@ void Style::paintButtonLoading(
 		QPainter &p,
 		const Ui::ChatStyle *st,
 		const QRect &rect,
-		HistoryMessageMarkupButton::Color color,
 		int outerWidth,
 		Ui::BubbleRounding rounding) const {
 	// Buttons with loading progress should not appear here.
@@ -172,8 +148,7 @@ void BotKeyboard::paintEvent(QPaintEvent *e) {
 			nullptr,
 			Ui::BubbleRounding(),
 			width(),
-			clip.translated(-x, -st::botKbScroll.deltat),
-			_controller->isGifPausedAtLeastFor(Window::GifPauseReason::Any));
+			clip.translated(-x, -st::botKbScroll.deltat));
 	}
 }
 

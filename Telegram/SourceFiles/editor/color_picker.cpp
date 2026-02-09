@@ -113,7 +113,7 @@ ColorPicker::ColorPicker(
 	_down.pos = QPoint(colorToPosition(savedBrush.color), 0);
 
 	_colorLine->paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		auto p = QPainter(_colorLine);
 		PainterHighQualityEnabler hq(p);
 
@@ -125,13 +125,13 @@ ColorPicker::ColorPicker(
 	}, _colorLine->lifetime());
 
 	_canvasForCircle->paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		auto p = QPainter(_canvasForCircle);
 		paintCircle(p);
 	}, _canvasForCircle->lifetime());
 
 	_colorLine->events(
-	) | rpl::on_next([=](not_null<QEvent*> event) {
+	) | rpl::start_with_next([=](not_null<QEvent*> event) {
 		const auto type = event->type();
 		const auto isPress = (type == QEvent::MouseButtonPress)
 			|| (type == QEvent::MouseButtonDblClick);

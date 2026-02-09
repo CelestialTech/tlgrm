@@ -65,18 +65,14 @@ Viewport::Viewport(
 }
 
 Viewport::~Viewport() {
-	if (_borrowed) {
-		if (_opengl) {
-			const auto w = static_cast<QOpenGLWidget*>(widget().get());
-			w->makeCurrent();
-			const auto context = w->context();
-			const auto valid = w->isValid()
-				&& context
-				&& (QOpenGLContext::currentContext() == context);
-			ensureBorrowedCleared(valid ? context->functions() : nullptr);
-		} else {
-			ensureBorrowedCleared();
-		}
+	if (_borrowed && _opengl) {
+		const auto w = static_cast<QOpenGLWidget*>(widget().get());
+		w->makeCurrent();
+		const auto context = w->context();
+		const auto valid = w->isValid()
+			&& context
+			&& (QOpenGLContext::currentContext() == context);
+		ensureBorrowedCleared(valid ? context->functions() : nullptr);
 	}
 }
 
@@ -102,12 +98,12 @@ void Viewport::setup() {
 	_content->sizeValue(
 	) | rpl::filter([=] {
 		return wide() || videoStream();
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		updateTilesGeometry();
 	}, lifetime());
 
 	_content->events(
-	) | rpl::on_next([=](not_null<QEvent*> e) {
+	) | rpl::start_with_next([=](not_null<QEvent*> e) {
 		const auto type = e->type();
 		if (type == QEvent::Enter) {
 			Ui::Integration::Instance().registerLeaveSubscription(raw);
@@ -299,12 +295,12 @@ void Viewport::add(
 	_tiles.back()->trackSizeValue(
 	) | rpl::filter([](QSize size) {
 		return !size.isEmpty();
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		updateTilesGeometry();
 	}, _tiles.back()->lifetime());
 
 	_tiles.back()->track()->stateValue(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateTilesGeometry();
 	}, _tiles.back()->lifetime());
 }
@@ -791,13 +787,13 @@ void Viewport::updateTilesGeometryColumn(int outerWidth) {
 			top += height + st::groupCallVideoSmallSkip;
 		}
 	};
-	const auto topPeer = _large ? _large->peer().get() : nullptr;
+	const auto topPeer = _large ? _large->row()->peer().get() : nullptr;
 	const auto reorderNeeded = [&] {
 		if (!topPeer) {
 			return false;
 		}
 		for (const auto &tile : _tiles) {
-			if (tile.get() != _large && tile->peer() == topPeer) {
+			if (tile.get() != _large && tile->row()->peer() == topPeer) {
 				return (tile.get() != _tiles.front().get())
 					&& !tile->trackOrUserpicSize().isEmpty();
 			}
@@ -813,7 +809,7 @@ void Viewport::updateTilesGeometryColumn(int outerWidth) {
 		ranges::stable_partition(
 			_tilesForOrder,
 			[&](not_null<VideoTile*> tile) {
-				return (tile->peer() == topPeer);
+				return (tile->row()->peer() == topPeer);
 			});
 		for (const auto &tile : _tilesForOrder) {
 			layoutNext(tile);
@@ -929,7 +925,6 @@ rpl::producer<bool> Viewport::mouseInsideValue() const {
 
 void Viewport::ensureBorrowedRenderer(QOpenGLFunctions &f) {
 	Expects(_borrowed != nullptr);
-	Expects(_opengl);
 
 	if (_borrowedRenderer) {
 		return;
@@ -940,7 +935,6 @@ void Viewport::ensureBorrowedRenderer(QOpenGLFunctions &f) {
 
 void Viewport::ensureBorrowedCleared(QOpenGLFunctions *f) {
 	Expects(_borrowed != nullptr);
-	Expects(_opengl);
 
 	if (const auto renderer = base::take(_borrowedRenderer)) {
 		renderer->deinit(f);
@@ -952,23 +946,6 @@ void Viewport::borrowedPaint(QOpenGLFunctions &f) {
 	Expects(_opengl);
 
 	_borrowedRenderer->paint(static_cast<QOpenGLWidget*>(widget().get()), f);
-}
-
-void Viewport::ensureBorrowedRenderer() {
-	Expects(_borrowed != nullptr);
-	Expects(!_opengl);
-
-	if (_borrowedRenderer) {
-		return;
-	}
-	_borrowedRenderer = makeRenderer();
-}
-
-void Viewport::ensureBorrowedCleared() {
-	Expects(_borrowed != nullptr);
-	Expects(!_opengl);
-
-	base::take(_borrowedRenderer);
 }
 
 void Viewport::borrowedPaint(Painter &p, const QRegion &clip) {

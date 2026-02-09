@@ -527,7 +527,7 @@ void ShowSendErrorToast(
 		window->resolveBoostState(peer->asChannel(), error.boostsToLift);
 	};
 	show->showToast({
-		.text = tr::link(*error),
+		.text = Ui::Text::Link(*error),
 		.filter = [=](const auto &...) { boost(); return false; },
 	});
 }

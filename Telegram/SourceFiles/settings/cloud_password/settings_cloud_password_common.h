@@ -81,7 +81,6 @@ void AddSkipInsteadOfError(not_null<Ui::VerticalLayout*> content);
 
 struct BottomButton {
 	base::weak_qptr<Ui::RpWidget> content;
-	base::weak_qptr<Ui::RpWidget> button;
 	rpl::producer<bool> isBottomFillerShown;
 };
 

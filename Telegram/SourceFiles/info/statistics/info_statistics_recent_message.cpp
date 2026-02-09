@@ -199,7 +199,7 @@ void MessagePreview::processPreview() {
 
 	rpl::single(rpl::empty) | rpl::then(
 		session->downloaderTaskFinished()
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		const auto computed = computeThumbInfo();
 		const auto guard = gsl::finally([&] { update(); });
 		if (!computed.image) {

@@ -27,7 +27,7 @@ InnerWidget::InnerWidget(
 , _empty(this) {
 	_empty->setType(type());
 	_empty->heightValue(
-	) | rpl::on_next(
+	) | rpl::start_with_next(
 		[this] { refreshHeight(); },
 		_empty->lifetime());
 	_list = setupList();
@@ -38,7 +38,7 @@ object_ptr<Media::ListWidget> InnerWidget::setupList() {
 
 	// Setup list widget connections
 	result->heightValue(
-	) | rpl::on_next([this] {
+	) | rpl::start_with_next([this] {
 		refreshHeight();
 	}, result->lifetime());
 
@@ -54,7 +54,7 @@ object_ptr<Media::ListWidget> InnerWidget::setupList() {
 		result->lifetime());
 
 	_controller->searchQueryValue(
-	) | rpl::on_next([this](const QString &query) {
+	) | rpl::start_with_next([this](const QString &query) {
 		_empty->setSearchQuery(query);
 	}, result->lifetime());
 

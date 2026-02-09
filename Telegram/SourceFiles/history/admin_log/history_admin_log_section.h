@@ -18,7 +18,6 @@ namespace Ui {
 class ScrollArea;
 class PlainShadow;
 class FlatButton;
-class IconButton;
 } // namespace Ui
 
 namespace Profile {
@@ -82,8 +81,7 @@ private:
 	QPointer<InnerWidget> _inner;
 	object_ptr<FixedBar> _fixedBar;
 	object_ptr<Ui::PlainShadow> _fixedBarShadow;
-	object_ptr<Ui::FlatButton> _settingsFilter;
-	object_ptr<Ui::IconButton> _whatIsThis;
+	object_ptr<Ui::FlatButton> _whatIsThis;
 
 	Ui::Controls::SwipeBackResult _swipeBackData;
 

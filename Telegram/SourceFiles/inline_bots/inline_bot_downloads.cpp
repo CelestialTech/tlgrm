@@ -79,7 +79,7 @@ void Downloads::load(
 	applyProgress(botId, id, 0, 0);
 
 	loader.loader->updates(
-	) | rpl::on_next_error_done([=] {
+	) | rpl::start_with_next_error_done([=] {
 		progress(botId, id);
 	}, [=](FileLoader::Error) {
 		fail(botId, id);
@@ -385,8 +385,8 @@ void DownloadFileBox(not_null<Ui::GenericBox*> box, DownloadBoxArgs args) {
 		box,
 		tr::lng_bot_download_file_sure(
 			lt_bot,
-			rpl::single(tr::bold(args.bot)),
-			tr::rich),
+			rpl::single(Ui::Text::Bold(args.bot)),
+			Ui::Text::RichLangValue),
 		st::botDownloadLabel));
 	//box->addRow(MakeFilePreview(box, args));
 	const auto done = std::move(args.done);
@@ -411,7 +411,7 @@ void DownloadFileBox(not_null<Ui::GenericBox*> box, DownloadBoxArgs args) {
 	box->addButton(tr::lng_cancel(), [=] {
 		box->closeBox();
 	});
-	box->boxClosing() | rpl::on_next([=] {
+	box->boxClosing() | rpl::start_with_next([=] {
 		if (!*chosen) {
 			done(QString());
 		}

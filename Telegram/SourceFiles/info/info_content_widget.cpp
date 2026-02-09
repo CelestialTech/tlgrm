@@ -85,7 +85,7 @@ ContentWidget::ContentWidget(
 
 	setAttribute(Qt::WA_OpaquePaintEvent);
 	_controller->wrapValue(
-	) | rpl::on_next([this](Wrap value) {
+	) | rpl::start_with_next([this](Wrap value) {
 		if (value != Wrap::Layer) {
 			applyAdditionalScroll(0);
 		}
@@ -100,14 +100,14 @@ ContentWidget::ContentWidget(
 			_controller->searchEnabledByContent(),
 			(_1 == Wrap::Layer) && _2
 		) | rpl::distinct_until_changed(
-		) | rpl::on_next([this](bool shown) {
+		) | rpl::start_with_next([this](bool shown) {
 			refreshSearchField(shown);
 		}, lifetime());
 	}
 	rpl::merge(
 		_scrollTopSkip.changes(),
 		_scrollBottomSkip.changes()
-	) | rpl::on_next([this] {
+	) | rpl::start_with_next([this] {
 		updateControlsGeometry();
 	}, lifetime());
 }
@@ -202,7 +202,7 @@ Ui::RpWidget *ContentWidget::doSetInnerWidget(
 		_scroll->scrollTopValue(),
 		_scroll->heightValue(),
 		_innerWrap->entity()->desiredHeightValue()
-	) | rpl::on_next([this](
+	) | rpl::start_with_next([this](
 			int top,
 			int height,
 			int desired) {
@@ -216,7 +216,7 @@ Ui::RpWidget *ContentWidget::doSetInnerWidget(
 		_scroll->heightValue(),
 		_innerWrap->entity()->heightValue(),
 		_controller->wrapValue()
-	) | rpl::on_next([=](
+	) | rpl::start_with_next([=](
 			int scrollHeight,
 			int innerHeight,
 			Wrap wrap) {
@@ -241,7 +241,7 @@ Ui::RpWidget *ContentWidget::doSetupFlexibleInnerWidget(
 	filler->resize(1, 1);
 
 	flexibleScroll.contentHeightValue.events(
-	) | rpl::on_next([=](int h) {
+	) | rpl::start_with_next([=](int h) {
 		filler->resize(filler->width(), h);
 	}, filler->lifetime());
 
@@ -412,7 +412,7 @@ void ContentWidget::setViewport(
 		rpl::producer<not_null<QEvent*>> &&events) const {
 	std::move(
 		events
-	) | rpl::on_next([=](not_null<QEvent*> e) {
+	) | rpl::start_with_next([=](not_null<QEvent*> e) {
 		_scroll->viewportEvent(e);
 	}, _scroll->lifetime());
 }
@@ -437,7 +437,7 @@ void ContentWidget::refreshSearchField(bool shown) {
 
 		const auto view = _searchWrap.get();
 		widthValue(
-		) | rpl::on_next([=](int newWidth) {
+		) | rpl::start_with_next([=](int newWidth) {
 			view->resizeToWidth(newWidth);
 			view->moveToLeft(0, 0);
 		}, view->lifetime());
@@ -578,7 +578,7 @@ ContentMemento::ContentMemento(
 , _sublist(sublist) {
 	if (_topic) {
 		_peer->owner().itemIdChanged(
-		) | rpl::on_next([=](const Data::Session::IdChange &change) {
+		) | rpl::start_with_next([=](const Data::Session::IdChange &change) {
 			if (_topic->rootId() == change.oldId) {
 				_topic = _topic->forum()->topicFor(change.newId.msg);
 			}

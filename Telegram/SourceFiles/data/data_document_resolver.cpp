@@ -130,13 +130,13 @@ void LaunchWithWarning(
 		File::Launch(name);
 	};
 	auto text = isIpReveal
-		? tr::lng_launch_svg_warning(tr::marked)
+		? tr::lng_launch_svg_warning(Ui::Text::WithEntities)
 		: ((nameType == Core::NameType::Executable)
 			? tr::lng_launch_exe_warning
 			: tr::lng_launch_other_warning)(
 				lt_extension,
-				rpl::single(tr::bold('.' + extension)),
-				tr::marked);
+				rpl::single(Ui::Text::Bold('.' + extension)),
+				Ui::Text::WithEntities);
 	auto check = (isIpReveal
 		? tr::lng_launch_exe_dont_ask
 		: tr::lng_launch_dont_ask)();

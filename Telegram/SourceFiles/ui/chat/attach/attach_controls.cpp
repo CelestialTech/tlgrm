@@ -100,7 +100,7 @@ AttachControlsWidget::AttachControlsWidget(
 	}
 
 	paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		auto p = QPainter(this);
 		_controls.paint(p, 0, 0);
 	}, lifetime());

@@ -174,7 +174,6 @@ constexpr auto kDefaultChargeStars = 10;
 		{ Flag::ManageCall, tr::lng_rights_channel_manage_calls(tr::now) },
 		{ Flag::ManageDirect, tr::lng_rights_channel_manage_direct(tr::now) },
 		{ Flag::AddAdmins, tr::lng_rights_add_admins(tr::now) },
-		{ Flag::BanUsers, tr::lng_rights_group_ban(tr::now) },
 	};
 	return {
 		{ std::nullopt, std::move(first) },
@@ -407,14 +406,14 @@ not_null<Ui::RpWidget*> AddInnerToggle(
 	{
 		const auto separator = Ui::CreateChild<Ui::RpWidget>(container.get());
 		separator->paintRequest(
-		) | rpl::on_next([=, bg = st.textBgOver] {
+		) | rpl::start_with_next([=, bg = st.textBgOver] {
 			auto p = QPainter(separator);
 			p.fillRect(separator->rect(), bg);
 		}, separator->lifetime());
 		const auto separatorHeight = 2 * st.toggle.border
 			+ st.toggle.diameter;
 		button->geometryValue(
-		) | rpl::on_next([=](const QRect &r) {
+		) | rpl::start_with_next([=](const QRect &r) {
 			const auto w = st::rightsButtonToggleWidth;
 			toggleButton->setGeometry(
 				r.x() + r.width() - w,
@@ -431,12 +430,12 @@ not_null<Ui::RpWidget*> AddInnerToggle(
 		const auto checkWidget = Ui::CreateChild<Ui::RpWidget>(toggleButton);
 		checkWidget->resize(checkView->getSize());
 		checkWidget->paintRequest(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			auto p = QPainter(checkWidget);
 			checkView->paint(p, 0, 0, checkWidget->width());
 		}, checkWidget->lifetime());
 		toggleButton->sizeValue(
-		) | rpl::on_next([=](const QSize &s) {
+		) | rpl::start_with_next([=](const QSize &s) {
 			checkWidget->moveToRight(
 				st.toggleSkip,
 				(s.height() - checkWidget->height()) / 2);
@@ -444,7 +443,7 @@ not_null<Ui::RpWidget*> AddInnerToggle(
 	}
 	state->anyChanges.events_starting_with(
 		rpl::empty_value()
-	) | rpl::map(countChecked) | rpl::on_next([=](int count) {
+	) | rpl::map(countChecked) | rpl::start_with_next([=](int count) {
 		checkView->setChecked(count > 0, anim::type::normal);
 	}, toggleButton->lifetime());
 	checkView->setLocked(locked.has_value());
@@ -459,7 +458,7 @@ not_null<Ui::RpWidget*> AddInnerToggle(
 				rpl::empty_value()
 			) | rpl::map(countChecked)
 		) | rpl::map([=](const QString &t, int checked) {
-			auto count = tr::bold("  "
+			auto count = Ui::Text::Bold("  "
 				+ QString::number(checked)
 				+ '/'
 				+ QString::number(totalInnerChecks));
@@ -471,7 +470,7 @@ not_null<Ui::RpWidget*> AddInnerToggle(
 		const auto &icon = st::permissionsExpandIcon;
 		arrow->resize(icon.size());
 		arrow->paintRequest(
-		) | rpl::on_next([=, &icon] {
+		) | rpl::start_with_next([=, &icon] {
 			auto p = QPainter(arrow);
 			const auto center = QPointF(
 				icon.width() / 2.,
@@ -489,7 +488,7 @@ not_null<Ui::RpWidget*> AddInnerToggle(
 		}, arrow->lifetime());
 	}
 	button->sizeValue(
-	) | rpl::on_next([=, &st](const QSize &s) {
+	) | rpl::start_with_next([=, &st](const QSize &s) {
 		const auto labelLeft = st.padding.left();
 		const auto labelRight = s.width() - toggleButton->width();
 
@@ -504,7 +503,7 @@ not_null<Ui::RpWidget*> AddInnerToggle(
 			(s.height() - arrow->height()) / 2);
 	}, button->lifetime());
 	wrap->toggledValue(
-	) | rpl::skip(1) | rpl::on_next([=](bool toggled) {
+	) | rpl::skip(1) | rpl::start_with_next([=](bool toggled) {
 		state->animation.start(
 			[=] { arrow->update(); },
 			toggled ? 0. : 1.,
@@ -521,14 +520,14 @@ not_null<Ui::RpWidget*> AddInnerToggle(
 	};
 
 	button->clicks(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (!handleLocked()) {
 			wrap->toggle(!wrap->toggled(), anim::type::normal);
 		}
 	}, button->lifetime());
 
 	toggleButton->clicks(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (!handleLocked()) {
 			const auto checked = !checkView->checked();
 			for (const auto &innerCheck : state->innerChecks) {
@@ -563,7 +562,7 @@ template <typename Flags>
 		});
 
 		state->forceDisabled.value(
-		) | rpl::on_next([=](bool disabled) {
+		) | rpl::start_with_next([=](bool disabled) {
 			if (disabled) {
 				for (const auto &[flags, checkView] : state->checkViews) {
 					checkView->setChecked(false, anim::type::normal);
@@ -629,7 +628,7 @@ template <typename Flags>
 				rpl::combine(
 					verticalLayout->widthValue(),
 					checkbox->geometryValue()
-				) | rpl::on_next([=](int w, const QRect &r) {
+				) | rpl::start_with_next([=](int w, const QRect &r) {
 					button->setGeometry(0, r.y(), w, r.height());
 				}, button->lifetime());
 				checkbox->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -659,12 +658,12 @@ template <typename Flags>
 					[=] { toggle->update(); });
 				toggle->resize(checkView->getSize());
 				toggle->paintRequest(
-				) | rpl::on_next([=] {
+				) | rpl::start_with_next([=] {
 					auto p = QPainter(toggle);
 					checkView->paint(p, 0, 0, toggle->width());
 				}, toggle->lifetime());
 				button->sizeValue(
-				) | rpl::on_next([=](const QSize &s) {
+				) | rpl::start_with_next([=](const QSize &s) {
 					toggle->moveToRight(
 						st.toggleSkip,
 						(s.height() - toggle->height()) / 2);
@@ -680,7 +679,7 @@ template <typename Flags>
 		}();
 		state->checkViews.emplace(flags, checkView);
 		checkView->checkedChanges(
-		) | rpl::on_next([=](bool checked) {
+		) | rpl::start_with_next([=](bool checked) {
 			if (checked && state->forceDisabled.current()) {
 				if (!state->toast) {
 					state->toast = Ui::Toast::Show(container, {
@@ -712,8 +711,6 @@ template <typename Flags>
 
 		return checkView;
 	};
-	auto highlightWidget = QPointer<Ui::RpWidget>();
-	const auto highlightFlags = descriptor.highlightFlags;
 	for (const auto &nestedWithLabel : descriptor.labels) {
 		Assert(!nestedWithLabel.nested.empty());
 
@@ -725,18 +722,16 @@ template <typename Flags>
 			: object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>{ nullptr };
 		const auto verticalLayout = wrap ? wrap->entity() : container.get();
 		auto innerChecks = std::vector<not_null<Ui::AbstractCheckView*>>();
-		auto sectionFlags = Flags();
 		for (const auto &entry : nestedWithLabel.nested) {
 			const auto c = addCheckbox(verticalLayout, isInner, entry);
 			if (isInner) {
 				innerChecks.push_back(c);
-				sectionFlags |= entry.flags;
 			}
 		}
 		if (wrap) {
 			const auto raw = wrap.data();
 			raw->hide(anim::type::instant);
-			const auto toggle = AddInnerToggle(
+			AddInnerToggle(
 				container,
 				st,
 				innerChecks,
@@ -744,12 +739,9 @@ template <typename Flags>
 				*nestedWithLabel.nestingLabel,
 				std::nullopt,
 				{ nestedWithLabel.nested.front().icon });
-			if (highlightFlags && (sectionFlags & highlightFlags)) {
-				highlightWidget = toggle;
-			}
 			container->add(std::move(wrap));
 			container->widthValue(
-			) | rpl::on_next([=](int w) {
+			) | rpl::start_with_next([=](int w) {
 				raw->resizeToWidth(w);
 			}, raw->lifetime());
 		}
@@ -761,10 +753,9 @@ template <typename Flags>
 	}
 
 	return {
-		.widget = nullptr,
-		.value = value,
-		.changes = state->anyChanges.events() | rpl::map(value),
-		.highlightWidget = highlightWidget,
+		nullptr,
+		value,
+		state->anyChanges.events() | rpl::map(value)
 	};
 }
 
@@ -788,7 +779,7 @@ void AddSlowmodeLabels(
 		rpl::combine(
 			labels->widthValue(),
 			label->widthValue()
-		) | rpl::on_next([=](int outer, int inner) {
+		) | rpl::start_with_next([=](int outer, int inner) {
 			const auto skip = st::localStorageLimitMargin;
 			const auto size = st::localStorageLimitSlider.seekSize;
 			const auto available = outer
@@ -911,7 +902,7 @@ void AddBoostsUnrestrictLabels(not_null<Ui::VerticalLayout*> container) {
 		rpl::combine(
 			labels->widthValue(),
 			label->widthValue()
-		) | rpl::on_next([=](int outer, int inner) {
+		) | rpl::start_with_next([=](int outer, int inner) {
 			const auto skip = st::localStorageLimitMargin;
 			const auto size = st::localStorageLimitSlider.seekSize;
 			const auto available = outer
@@ -956,7 +947,7 @@ rpl::producer<int> AddBoostsUnrestrictSlider(
 		tr::lng_rights_boosts_no_restrict(),
 		st::defaultSettingsButton
 	))->toggleOn(rpl::duplicate(enabled))->toggledValue(
-	) | rpl::on_next([=](bool toggled) {
+	) | rpl::start_with_next([=](bool toggled) {
 		if (toggled && !boostsUnrestrict->current()) {
 			*boostsUnrestrict = 1;
 		} else if (!toggled && boostsUnrestrict->current()) {
@@ -1151,7 +1142,7 @@ void ShowEditPeerPermissionsBox(
 	Ui::AddSubsectionTitle(
 		inner,
 		tr::lng_rights_default_restrictions_header());
-	auto [checkboxes, getRestrictions, changes, highlightWidget] = CreateEditRestrictions(
+	auto [checkboxes, getRestrictions, changes] = CreateEditRestrictions(
 		inner,
 		restrictions,
 		disabledMessages,
@@ -1281,7 +1272,7 @@ Fn<void()> AboutGigagroupCallback(
 		}
 		*converting = true;
 		channel->session().api().request(MTPchannels_ConvertToGigagroup(
-			channel->inputChannel()
+			channel->inputChannel
 		)).done([=](const MTPUpdates &result) {
 			channel->session().api().applyUpdates(result);
 			if (const auto strong = weak.get()) {
@@ -1303,7 +1294,7 @@ Fn<void()> AboutGigagroupCallback(
 				object_ptr<Ui::FlatLabel>(
 					box,
 					tr::lng_gigagroup_warning(
-					) | rpl::map(tr::rich),
+					) | Ui::Text::ToRichLangValue(),
 					st::infoAboutGigagroup));
 			box->addButton(tr::lng_gigagroup_convert_sure(), convertSure);
 			box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
@@ -1318,7 +1309,7 @@ Fn<void()> AboutGigagroupCallback(
 			box->setTitle(tr::lng_gigagroup_convert_title());
 			const auto addFeature = [&](rpl::producer<QString> text) {
 				using namespace rpl::mappers;
-				const auto prefix = Ui::kQBullet + ' ';
+				const auto prefix = QString::fromUtf8("\xE2\x80\xA2 ");
 				box->addRow(
 					object_ptr<Ui::FlatLabel>(
 						box,
@@ -1469,12 +1460,10 @@ ChatAdminRights AdminRightsForOwnershipTransfer(
 EditFlagsControl<PowerSaving::Flags> CreateEditPowerSaving(
 		QWidget *parent,
 		PowerSaving::Flags flags,
-		rpl::producer<QString> forceDisabledMessage,
-		PowerSaving::Flags highlightFlags) {
+		rpl::producer<QString> forceDisabledMessage) {
 	auto widget = object_ptr<Ui::VerticalLayout>(parent);
 	auto descriptor = Settings::PowerSavingLabels();
 	descriptor.forceDisabledMessage = std::move(forceDisabledMessage);
-	descriptor.highlightFlags = highlightFlags;
 	auto result = CreateEditFlags(
 		widget.data(),
 		flags,

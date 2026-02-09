@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h" // Ui::FlatLabel
 #include "ui/widgets/buttons.h" // Ui::IconButton
 #include "ui/wrap/slide_wrap.h" // Ui::SlideWrap
+#include "ui/text/text_utilities.h" // Ui::Text::ToUpper
 #include "base/platform/base_platform_info.h"
 #include "lang/lang_keys.h"
 #include "styles/style_window.h"
@@ -46,15 +47,15 @@ private:
 [[nodiscard]] rpl::producer<QString> OutdatedReasonPhrase() {
 	const auto why = Platform::WhySystemBecomesOutdated();
 	return (why == Platform::OutdateReason::Is32Bit)
-		? tr::lng_outdated_title_bits(tr::upper)
-		: tr::lng_outdated_title(tr::upper);
+		? tr::lng_outdated_title_bits()
+		: tr::lng_outdated_title();
 }
 
 Bar::Bar(not_null<QWidget*> parent, QDate date)
 : _date(date)
 , _title(
 	this,
-	OutdatedReasonPhrase(),
+	OutdatedReasonPhrase() | Text::ToUpper(),
 	st::windowOutdatedTitle)
 , _details(this,
 	QString(),
@@ -165,7 +166,7 @@ object_ptr<RpWidget> CreateOutdatedBar(
 	const auto wrap = result.data();
 
 	wrap->entity()->hideClicks(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		wrap->toggle(false, anim::type::normal);
 		Closed(workingPath);
 	}, wrap->lifetime());

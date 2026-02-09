@@ -382,8 +382,10 @@ Manager::Private::Private(not_null<Manager*> manager)
 			};
 		};
 
-		auto activate = gi::object_cast<Gio::SimpleAction>(
-			actionMap.lookup_action("notification-activate"));
+		auto activate = gi::wrap(
+			G_SIMPLE_ACTION(
+				actionMap.lookup_action("notification-activate").gobj_()),
+			gi::transfer_none);
 
 		const auto activateSig = activate.signal_activate().connect([=](
 				Gio::SimpleAction,
@@ -398,8 +400,10 @@ Manager::Private::Private(not_null<Manager*> manager)
 			activate.disconnect(activateSig);
 		});
 
-		auto markAsRead = gi::object_cast<Gio::SimpleAction>(
-			actionMap.lookup_action("notification-mark-as-read"));
+		auto markAsRead = gi::wrap(
+			G_SIMPLE_ACTION(
+				actionMap.lookup_action("notification-mark-as-read").gobj_()),
+			gi::transfer_none);
 
 		const auto markAsReadSig = markAsRead.signal_activate().connect([=](
 				Gio::SimpleAction,

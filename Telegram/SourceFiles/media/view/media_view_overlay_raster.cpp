@@ -15,33 +15,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_media_view.h"
 
 namespace Media::View {
-namespace {
-
-[[nodiscard]] QRectF StoryCropRect(QSizeF imageSize, QSizeF targetSize) {
-	if (imageSize.isEmpty() || targetSize.isEmpty()) {
-		return QRectF();
-	}
-	const auto targetAspect = targetSize.width() / targetSize.height();
-	const auto imageAspect = imageSize.width() / imageSize.height();
-	if (imageAspect > targetAspect) {
-		const auto cropW = imageSize.height() * targetAspect;
-		return QRectF(
-			(imageSize.width() - cropW) / 2.,
-			0.,
-			cropW,
-			imageSize.height());
-	} else if (imageAspect < targetAspect) {
-		const auto cropH = imageSize.width() / targetAspect;
-		return QRectF(
-			0.,
-			(imageSize.height() - cropH) / 2.,
-			imageSize.width(),
-			cropH);
-	}
-	return QRectF();
-}
-
-} // namespace
 
 OverlayWidget::RendererSW::RendererSW(not_null<OverlayWidget*> owner)
 : _owner(owner)
@@ -62,9 +35,6 @@ void OverlayWidget::RendererSW::paintFallback(
 		p.setCompositionMode(QPainter::CompositionMode_Source);
 		p.fillRect(clip.boundingRect(), Qt::transparent);
 		return;
-	}
-	if (const auto stream = _owner->_videoStream.get()) {
-		stream->ensureBorrowedRenderer();
 	}
 	_p = &p;
 	_clip = &clip;
@@ -127,11 +97,7 @@ void OverlayWidget::RendererSW::paintTransformedVideoFrame(
 	if (!rect.intersects(_clipOuter)) {
 		return;
 	}
-	const auto image = _owner->videoFrame();
-	const auto sourceRect = _owner->_stories
-		? StoryCropRect(QSizeF(image.size()), geometry.rect.size())
-		: QRectF();
-	paintTransformedImage(image, rect, rotation, sourceRect);
+	paintTransformedImage(_owner->videoFrame(), rect, rotation);
 	paintControlsFade(rect, geometry);
 }
 
@@ -151,10 +117,7 @@ void OverlayWidget::RendererSW::paintTransformedStaticContent(
 		_p->fillRect(rect, _transparentBrush);
 	}
 	if (!image.isNull()) {
-		const auto sourceRect = _owner->_stories
-			? StoryCropRect(QSizeF(image.size()), geometry.rect.size())
-			: QRectF();
-		paintTransformedImage(image, rect, rotation, sourceRect);
+		paintTransformedImage(image, rect, rotation);
 	}
 	paintControlsFade(rect, geometry);
 }
@@ -226,19 +189,14 @@ void OverlayWidget::RendererSW::paintControlsFade(
 void OverlayWidget::RendererSW::paintTransformedImage(
 		const QImage &image,
 		QRect rect,
-		int rotation,
-		const QRectF &sourceRect) {
+		int rotation) {
 	PainterHighQualityEnabler hq(*_p);
 	if (UsePainterRotation(rotation)) {
 		if (rotation) {
 			_p->save();
 			_p->rotate(rotation);
 		}
-		if (sourceRect.isValid()) {
-			_p->drawImage(QRectF(RotatedRect(rect, rotation)), image, sourceRect);
-		} else {
-			_p->drawImage(RotatedRect(rect, rotation), image);
-		}
+		_p->drawImage(RotatedRect(rect, rotation), image);
 		if (rotation) {
 			_p->restore();
 		}

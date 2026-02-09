@@ -29,7 +29,7 @@ struct ParticipantState;
 class MenuVolumeItem final : public Ui::Menu::ItemBase {
 public:
 	MenuVolumeItem(
-		not_null<Ui::Menu::Menu*> parent,
+		not_null<RpWidget*> parent,
 		const style::Menu &st,
 		const style::MediaSlider &stSlider,
 		rpl::producer<Group::ParticipantState> participantState,

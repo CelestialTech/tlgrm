@@ -56,7 +56,7 @@ constexpr auto kChangesDebounceTimeout = crl::time(1000);
 
 using ChatLinkData = Api::ChatLink;
 
-class ChatLinks final : public Section<ChatLinks> {
+class ChatLinks final : public BusinessSection<ChatLinks> {
 public:
 	ChatLinks(
 		QWidget *parent,
@@ -388,11 +388,11 @@ void EditChatLinkBox(
 	emojiPanel->hide();
 	emojiPanel->selector()->setCurrentPeer(peer);
 	emojiPanel->selector()->emojiChosen(
-	) | rpl::on_next([=](ChatHelpers::EmojiChosen data) {
+	) | rpl::start_with_next([=](ChatHelpers::EmojiChosen data) {
 		Ui::InsertEmojiAtCursor(field->textCursor(), data.emoji);
 	}, field->lifetime());
 	emojiPanel->selector()->customEmojiChosen(
-	) | rpl::on_next([=](ChatHelpers::FileChosen data) {
+	) | rpl::start_with_next([=](ChatHelpers::FileChosen data) {
 		Data::InsertCustomEmoji(field, data.document);
 	}, field->lifetime());
 
@@ -448,21 +448,21 @@ void EditChatLinkBox(
 	base::install_event_filter(emojiPanel, outer, filterCallback);
 
 	field->submits(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		title->setFocus();
 	}, field->lifetime());
 	field->cancelled(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		box->closeBox();
 	}, field->lifetime());
 
 	title->submits(
-	) | rpl::on_next(save, title->lifetime());
+	) | rpl::start_with_next(save, title->lifetime());
 
 	rpl::combine(
 		box->sizeValue(),
 		field->geometryValue()
-	) | rpl::on_next([=](QSize outer, QRect inner) {
+	) | rpl::start_with_next([=](QSize outer, QRect inner) {
 		emojiToggle->moveToLeft(
 			inner.x() + inner.width() - emojiToggle->width(),
 			inner.y() + st::settingsChatLinkEmojiTop);
@@ -485,7 +485,7 @@ void EditChatLinkBox(
 		}
 	});
 	field->changes(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		checkChangedTimer->callOnce(kChangesDebounceTimeout);
 		box->setCloseByOutsideClick(false);
 	}, field->lifetime());
@@ -525,12 +525,12 @@ LinksController::LinksController(
 : _window(window)
 , _session(&window->session()) {
 	style::PaletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_icon = QImage();
 	}, _lifetime);
 
 	_session->api().chatLinks().updates(
-	) | rpl::on_next([=](const Api::ChatLinkUpdate &update) {
+	) | rpl::start_with_next([=](const Api::ChatLinkUpdate &update) {
 		if (!update.now) {
 			if (removeRow(update.was)) {
 				delegate()->peerListRefreshRows();
@@ -698,7 +698,7 @@ void LinksController::rowPaintIcon(
 ChatLinks::ChatLinks(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
-: Section(parent, controller)
+: BusinessSection(parent, controller)
 , _bottomSkipRounding(st::boxRadius, st::boxDividerBg) {
 	setupContent(controller);
 }
@@ -720,7 +720,7 @@ void ChatLinks::setupContent(
 		.lottieSize = st::settingsCloudPasswordIconSize,
 		.lottieMargins = st::peerAppearanceIconPadding,
 		.showFinished = showFinishes() | rpl::take(1),
-		.about = tr::lng_chat_links_about(tr::marked),
+		.about = tr::lng_chat_links_about(Ui::Text::WithEntities),
 		.aboutMargins = st::peerAppearanceCoverLabelMargin,
 	});
 
@@ -783,11 +783,11 @@ void ChatLinks::setupContent(
 			? tr::lng_chat_links_footer_both(
 				tr::now,
 				lt_username,
-				tr::link(links[0], "https://" + links[0]),
+				Ui::Text::Link(links[0], "https://" + links[0]),
 				lt_link,
-				tr::link(links[1], "https://" + links[1]),
-				tr::marked)
-			: tr::link(links[0], "https://" + links[0]);
+				Ui::Text::Link(links[1], "https://" + links[1]),
+				Ui::Text::WithEntities)
+			: Ui::Text::Link(links[0], "https://" + links[0]);
 	};
 	auto links = !username.isEmpty()
 		? make({ username, '+' + self->phone() })
@@ -797,7 +797,7 @@ void ChatLinks::setupContent(
 		tr::lng_chat_links_footer(
 			lt_links,
 			rpl::single(std::move(links)),
-			tr::marked),
+			Ui::Text::WithEntities),
 		st::boxDividerLabel);
 	label->setClickHandlerFilter([=](ClickHandlerPtr handler, auto) {
 		QGuiApplication::clipboard()->setText(handler->url());

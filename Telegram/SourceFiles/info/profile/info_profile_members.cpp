@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/wrap/padding_wrap.h"
+#include "ui/text/text_utilities.h" // Ui::Text::ToUpper
 #include "ui/search_field_controller.h"
 #include "lang/lang_keys.h"
 #include "ui/boxes/confirm_box.h"
@@ -56,13 +57,13 @@ Members::Members(
 	_listController->setDelegate(static_cast<PeerListDelegate*>(this));
 
 	_controller->searchFieldController()->queryValue(
-	) | rpl::on_next([this](QString &&query) {
+	) | rpl::start_with_next([this](QString &&query) {
 		peerListScrollToTop();
 		content()->searchQueryChanged(std::move(query));
 	}, lifetime());
 	MembersCountValue(
 		_peer
-	) | rpl::on_next([this](int count) {
+	) | rpl::start_with_next([this](int count) {
 		const auto enabled = (count >= kEnableSearchMembersAfterCount);
 		_controller->setSearchEnabledByContent(enabled);
 	}, lifetime());
@@ -155,12 +156,12 @@ void Members::setupHeader() {
 	setupButtons();
 
 	//_controller->wrapValue(
-	//) | rpl::on_next([this](Wrap wrap) {
+	//) | rpl::start_with_next([this](Wrap wrap) {
 	//	_wrap = wrap;
 	//	updateSearchOverrides();
 	//}, lifetime());
 	widthValue(
-	) | rpl::on_next([this](int width) {
+	) | rpl::start_with_next([this](int width) {
 		_header->resizeToWidth(width);
 	}, _header->lifetime());
 }
@@ -176,8 +177,8 @@ object_ptr<Ui::FlatLabel> Members::setupTitle() {
 			tr::lng_chat_status_members(
 				lt_count_decimal,
 				MembersCountValue(_peer) | tr::to_count(),
-				tr::upper),
-			tr::lng_channel_admins(tr::upper)),
+				Ui::Text::Upper),
+			tr::lng_channel_admins(Ui::Text::Upper)),
 		st::infoBlockHeaderLabel);
 	result->setAttribute(Qt::WA_TransparentForMouseEvents);
 	return result;
@@ -196,7 +197,7 @@ void Members::setupButtons() {
 	auto visible = _peer->isMegagroup()
 		? CanViewParticipantsValue(_peer->asMegagroup())
 		: rpl::single(true);
-	rpl::duplicate(visible) | rpl::on_next([=](bool visible) {
+	rpl::duplicate(visible) | rpl::start_with_next([=](bool visible) {
 		_openMembers->setVisible(visible);
 	}, lifetime());
 
@@ -224,7 +225,7 @@ void Members::setupButtons() {
 		std::move(addMemberShown),
 		std::move(searchShown),
 		std::move(visible)
-	) | rpl::on_next([this] {
+	) | rpl::start_with_next([this] {
 		updateHeaderControlsGeometry(width());
 	}, lifetime());
 }
@@ -237,7 +238,7 @@ void Members::setupList() {
 		this,
 		_listController.get());
 	_list->scrollToRequests(
-	) | rpl::on_next([this](Ui::ScrollToRequest request) {
+	) | rpl::start_with_next([this](Ui::ScrollToRequest request) {
 		auto addmin = (request.ymin < 0 || !_header)
 			? 0
 			: _header->height();
@@ -249,11 +250,11 @@ void Members::setupList() {
 			request.ymax + addmax });
 	}, _list->lifetime());
 	widthValue(
-	) | rpl::on_next([this](int newWidth) {
+	) | rpl::start_with_next([this](int newWidth) {
 		_list->resizeToWidth(newWidth);
 	}, _list->lifetime());
 	_list->heightValue(
-	) | rpl::on_next([=](int listHeight) {
+	) | rpl::start_with_next([=](int listHeight) {
 		auto newHeight = (listHeight > st::membersMarginBottom)
 			? (topSkip
 				+ listHeight

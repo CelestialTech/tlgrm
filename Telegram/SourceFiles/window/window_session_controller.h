@@ -90,10 +90,6 @@ namespace HistoryView::Reactions {
 class CachedIconFactory;
 } // namespace HistoryView::Reactions
 
-namespace Settings {
-struct HighlightArgs;
-} // namespace Settings
-
 namespace Window {
 
 using GifPauseReason = ChatHelpers::PauseReason;
@@ -199,7 +195,6 @@ struct SectionShow {
 	bool forceTopicsList = false;
 	bool reapplyLocalDraft = false;
 	bool dropSameFromStack = false;
-	bool allowDuplicateInStack = false;
 	Origin origin;
 
 };
@@ -702,18 +697,6 @@ public:
 	void dropSubsectionTabs();
 
 	void showStarGiftAuction(const QString &slug);
-	void showStarGiftAuction(uint64 giftId);
-
-	void showCloudPassword(const QString &highlightId = QString());
-
-	void setHighlightControlId(const QString &id);
-	[[nodiscard]] QString highlightControlId() const;
-	[[nodiscard]] bool takeHighlightControlId(const QString &id);
-	void checkHighlightControl(
-		const QString &id,
-		QWidget *widget,
-		Settings::HighlightArgs &&args);
-	void checkHighlightControl(const QString &id, QWidget *widget);
 
 	[[nodiscard]] rpl::lifetime &lifetime() {
 		return _lifetime;
@@ -835,7 +818,6 @@ private:
 	rpl::lifetime _savedSubsectionTabsLifetime;
 
 	rpl::lifetime _starGiftAuctionLifetime;
-	rpl::lifetime _showCloudPasswordLifetime;
 
 	rpl::lifetime _lifetime;
 

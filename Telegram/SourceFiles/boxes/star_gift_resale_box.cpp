@@ -8,14 +8,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/star_gift_resale_box.h"
 
 #include "boxes/star_gift_box.h"
-#include "boxes/transfer_gift_box.h"
 #include "chat_helpers/compose/compose_show.h"
 #include "core/ui_integration.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
 #include "data/data_star_gift.h"
-#include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "info/peer_gifts/info_peer_gifts_common.h"
 #include "main/main_session.h"
@@ -25,7 +23,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/popup_menu.h"
-#include "ui/wrap/slide_wrap.h"
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "window/window_session_controller.h"
@@ -84,6 +81,7 @@ struct ResaleTabs {
 };
 [[nodiscard]] ResaleTabs MakeResaleTabs(
 		std::shared_ptr<ChatHelpers::Show> show,
+		not_null<PeerData*> peer,
 		const ResaleGiftsDescriptor &info,
 		rpl::producer<ResaleGiftsFilter> filter) {
 	auto widget = object_ptr<RpWidget>((QWidget*)nullptr);
@@ -109,29 +107,9 @@ struct ResaleTabs {
 	};
 	const auto state = raw->lifetime().make_state<State>();
 	state->filter = std::move(filter);
-
-	const auto forCraft = state->filter.current().forCraft;
-	const auto wrapName = [=](QString name, int count) {
-		auto result = tr::marked(name);
-		if (!forCraft) {
-			result.append(' ').append(tr::bold(
-				Lang::FormatCountDecimal(count)));
-		}
-		return result;
-	};
-
 	state->lists.backdrops = info.backdrops;
 	state->lists.models = info.models;
 	state->lists.patterns = info.patterns;
-	if (forCraft) {
-		using namespace Data;
-		const auto isRare = [](const UniqueGiftModelCount &entry) {
-			return entry.model.rarityType() != UniqueGiftRarity::Default;
-		};
-		state->lists.models.erase(
-			ranges::remove_if(state->lists.models, isRare),
-			end(state->lists.models));
-	}
 
 	const auto scroll = [=] {
 		return QPoint(int(base::SafeRound(state->scroll)), 0);
@@ -174,14 +152,14 @@ struct ResaleTabs {
 				not_null<const style::icon*> icon,
 				bool checked = false) {
 			auto action = base::make_unique_q<Ui::GiftResaleFilterAction>(
-				menu->menu(),
+				menu,
 				menu->st().menu,
 				TextWithEntities{ text },
 				Ui::Text::MarkedContext(),
 				QString(),
 				icon);
 			action->setChecked(checked);
-			action->setActionTriggered(std::move(callback));
+			action->setClickedCallback(std::move(callback));
 			menu->addAction(std::move(action));
 		};
 		auto context = Core::TextContext({ .session = &show->session() });
@@ -198,14 +176,14 @@ struct ResaleTabs {
 				QString data,
 				bool checked) {
 			auto action = base::make_unique_q<Ui::GiftResaleFilterAction>(
-				menu->menu(),
+				menu,
 				menu->st().menu,
 				std::move(text),
 				context,
 				data,
 				nullptr);
 			action->setChecked(checked);
-			action->setActionTriggered(std::move(callback));
+			action->setClickedCallback(std::move(callback));
 			menu->addAction(std::move(action));
 		};
 		const auto actionWithDocument = [=](
@@ -285,9 +263,11 @@ struct ResaleTabs {
 			if (type == GiftAttributeIdType::Model) {
 				for (auto &entry : state->lists.models) {
 					const auto id = IdFor(entry.model);
-					const auto text = wrapName(
-						entry.model.name,
-						entry.count);
+					const auto text = TextWithEntities{
+						entry.model.name
+					}.append(' ').append(Ui::Text::Bold(
+						Lang::FormatCountDecimal(entry.count)
+					));
 					actionWithDocument(text, [=] {
 						toggle(id);
 					}, id.value, checked(id));
@@ -295,9 +275,11 @@ struct ResaleTabs {
 			} else if (type == GiftAttributeIdType::Backdrop) {
 				for (auto &entry : state->lists.backdrops) {
 					const auto id = IdFor(entry.backdrop);
-					const auto text = wrapName(
-						entry.backdrop.name,
-						entry.count);
+					const auto text = TextWithEntities{
+						entry.backdrop.name
+					}.append(' ').append(Ui::Text::Bold(
+						Lang::FormatCountDecimal(entry.count)
+					));
 					actionWithColor(text, [=] {
 						toggle(id);
 					}, entry.backdrop.centerColor, checked(id));
@@ -305,9 +287,11 @@ struct ResaleTabs {
 			} else if (type == GiftAttributeIdType::Pattern) {
 				for (auto &entry : state->lists.patterns) {
 					const auto id = IdFor(entry.pattern);
-					const auto text = wrapName(
-						entry.pattern.name,
-						entry.count);
+					const auto text = TextWithEntities{
+						entry.pattern.name
+					}.append(' ').append(Ui::Text::Bold(
+						Lang::FormatCountDecimal(entry.count)
+					));
 					actionWithDocument(text, [=] {
 						toggle(id);
 					}, id.value, checked(id));
@@ -318,7 +302,7 @@ struct ResaleTabs {
 	};
 
 	state->filter.value(
-	) | rpl::on_next([=](const ResaleGiftsFilter &fields) {
+	) | rpl::start_with_next([=](const ResaleGiftsFilter &fields) {
 		auto x = st::giftBoxResaleTabsMargin.left();
 		auto y = st::giftBoxResaleTabsMargin.top();
 
@@ -372,12 +356,12 @@ struct ResaleTabs {
 	rpl::combine(
 		raw->widthValue(),
 		state->fullWidth.value()
-	) | rpl::on_next([=](int outer, int inner) {
+	) | rpl::start_with_next([=](int outer, int inner) {
 		state->scrollMax = std::max(0, inner - outer);
 	}, raw->lifetime());
 
 	raw->setMouseTracking(true);
-	raw->events() | rpl::on_next([=](not_null<QEvent*> e) {
+	raw->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
 		const auto type = e->type();
 		switch (type) {
 		case QEvent::Leave: setSelected(-1); break;
@@ -436,7 +420,7 @@ struct ResaleTabs {
 		}
 	}, raw->lifetime());
 
-	raw->paintRequest() | rpl::on_next([=] {
+	raw->paintRequest() | rpl::start_with_next([=] {
 		auto p = QPainter(raw);
 		auto hq = PainterHighQualityEnabler(p);
 		const auto padding = st::giftBoxTabPadding;
@@ -486,13 +470,16 @@ void GiftResaleBox(
 		ResaleGiftsDescriptor descriptor) {
 	box->setWidth(st::boxWideWidth);
 
+	// Create a proper vertical layout for the title
 	const auto titleWrap = box->setPinnedToTopContent(
 		object_ptr<Ui::VerticalLayout>(box.get()));
 
+	// Add vertical spacing above the title
 	titleWrap->add(object_ptr<Ui::FixedHeightWidget>(
 		titleWrap,
 		st::defaultVerticalListSkip));
 
+	// Add the gift name with semibold style
 	titleWrap->add(
 		object_ptr<Ui::FlatLabel>(
 			titleWrap,
@@ -500,6 +487,7 @@ void GiftResaleBox(
 			st::boxTitle),
 		QMargins(st::boxRowPadding.left(), 0, st::boxRowPadding.right(), 0));
 
+	// Add the count text in gray below with proper translation
 	const auto countLabel = titleWrap->add(
 		object_ptr<Ui::FlatLabel>(
 			titleWrap,
@@ -513,21 +501,27 @@ void GiftResaleBox(
 	countLabel->setTextColorOverride(st::windowSubTextFg->c);
 
 	const auto content = box->verticalLayout();
-	content->paintRequest() | rpl::on_next([=](QRect clip) {
+	content->paintRequest() | rpl::start_with_next([=](QRect clip) {
 		QPainter(content).fillRect(clip, st::boxDividerBg);
 	}, content->lifetime());
 
 	struct State {
+		rpl::event_stream<> updated;
+		ResaleGiftsDescriptor data;
+		rpl::variable<ResaleGiftsFilter> filter;
 		rpl::variable<bool> ton;
+		rpl::lifetime loading;
 		int lastMinHeight = 0;
 	};
 	const auto state = content->lifetime().make_state<State>();
+	state->data = std::move(descriptor);
 
 	box->addButton(tr::lng_create_group_back(), [=] { box->closeBox(); });
 
 #ifndef OS_MAC_STORE
 	const auto currency = box->addLeftButton(rpl::single(QString()), [=] {
 		state->ton = !state->ton.current();
+		state->updated.fire({});
 	});
 	currency->setText(rpl::conditional(
 		state->ton.value(),
@@ -535,73 +529,29 @@ void GiftResaleBox(
 		tr::lng_gift_resale_switch_to_ton()));
 #endif
 
-	box->heightValue() | rpl::on_next([=](int height) {
+	box->heightValue() | rpl::start_with_next([=](int height) {
 		if (height > state->lastMinHeight) {
 			state->lastMinHeight = height;
 			box->setMinHeight(height);
 		}
 	}, content->lifetime());
 
-	AddResaleGiftsList(
-		window,
-		peer,
-		content,
-		std::move(descriptor),
-		state->ton.value());
-}
-
-} // namespace
-
-void AddResaleGiftsList(
-		not_null<Window::SessionController*> window,
-		not_null<PeerData*> peer,
-		not_null<VerticalLayout*> container,
-		Data::ResaleGiftsDescriptor descriptor,
-		rpl::producer<bool> forceTon,
-		Fn<void(std::shared_ptr<Data::UniqueGift>)> bought,
-		bool forCraft) {
-	struct State {
-		rpl::event_stream<> updated;
-		ResaleGiftsDescriptor data;
-		rpl::variable<ResaleGiftsFilter> filter;
-		rpl::variable<bool> ton;
-		rpl::variable<bool> empty = true;
-		rpl::lifetime loading;
-		int lastMinHeight = 0;
-	};
-	const auto state = container->lifetime().make_state<State>();
-	state->filter = ResaleGiftsFilter{ .forCraft = forCraft };
-	state->data = std::move(descriptor);
-	state->ton = std::move(forceTon);
-
 	auto tabs = MakeResaleTabs(
 		window->uiShow(),
+		peer,
 		state->data,
 		state->filter.value());
 	state->filter = std::move(tabs.filter);
-	if (forCraft) {
-		const auto skip = st::giftBoxResaleTabsMargin.top()
-			- st::giftBoxTabsMargin.bottom();
-		const auto wrap = container->add(object_ptr<PaddingWrap<>>(
-			container,
-			std::move(tabs.widget),
-			QMargins(0, 0, 0, skip)));
-		wrap->paintOn([=](QPainter &p) {
-			p.fillRect(wrap->rect(), st::windowBgOver);
-		});
-	} else {
-		container->add(std::move(tabs.widget));
-	}
+	content->add(std::move(tabs.widget));
 
-	const auto session = &window->session();
-	state->filter.changes() | rpl::on_next([=](ResaleGiftsFilter value) {
+	state->filter.changes() | rpl::start_with_next([=](ResaleGiftsFilter value) {
 		state->data.offset = QString();
 		state->loading = ResaleGiftsSlice(
-			session,
+			&peer->session(),
 			state->data.giftId,
 			value,
 			QString()
-		) | rpl::on_next([=](ResaleGiftsDescriptor &&slice) {
+		) | rpl::start_with_next([=](ResaleGiftsDescriptor &&slice) {
 			state->loading.destroy();
 			state->data.offset = slice.list.empty()
 				? QString()
@@ -609,10 +559,10 @@ void AddResaleGiftsList(
 			state->data.list = std::move(slice.list);
 			state->updated.fire({});
 		});
-	}, container->lifetime());
+	}, content->lifetime());
 
-	session->data().giftUpdates(
-	) | rpl::on_next([=](const Data::GiftUpdate &update) {
+	peer->owner().giftUpdates(
+	) | rpl::start_with_next([=](const Data::GiftUpdate &update) {
 		using Action = Data::GiftUpdate::Action;
 		const auto action = update.action;
 		if (action != Action::Transfer && action != Action::ResaleChange) {
@@ -631,52 +581,26 @@ void AddResaleGiftsList(
 			state->data.list.erase(i);
 		}
 		state->updated.fire({});
-	}, container->lifetime());
+	}, box->lifetime());
 
-	using Descriptor = Info::PeerGifts::GiftDescriptor;
-	auto customHandler = Fn<void(Descriptor)>();
-	if (bought) {
-		using StarGift = Info::PeerGifts::GiftTypeStars;
-		customHandler = crl::guard(container, [=](Descriptor descriptor) {
-			Expects(v::is<StarGift>(descriptor));
-
-			const auto unique = v::get<StarGift>(descriptor).info.unique;
-			const auto done = crl::guard(container, [=](bool ok) {
-				if (ok) {
-					bought(unique);
-				}
-			});
-			const auto to = peer->session().user();
-			const auto ton = state->ton.current();
-			ShowBuyResaleGiftBox(window->uiShow(), unique, ton, to, done);
-		});
-	}
-
-	auto gifts = rpl::single(
+	content->add(MakeGiftsSendList(window, peer, rpl::single(
 		rpl::empty
-	) | rpl::then(rpl::merge(
-		state->updated.events() | rpl::type_erased,
-		state->ton.changes() | rpl::to_empty | rpl::type_erased
-	)) | rpl::map([=] {
+	) | rpl::then(
+		state->updated.events()
+	) | rpl::map([=] {
 		auto result = GiftsDescriptor();
 		const auto selfId = window->session().userPeerId();
 		const auto forceTon = state->ton.current();
 		for (const auto &gift : state->data.list) {
-			const auto mine = (gift.unique->ownerId == selfId);
-			if (mine && forCraft) {
-				continue;
-			}
 			result.list.push_back(Info::PeerGifts::GiftTypeStars{
 				.info = gift,
 				.forceTon = forceTon,
 				.resale = true,
-				.mine = mine,
-				});
+				.mine = (gift.unique->ownerId == selfId),
+			});
 		}
-		state->empty = result.list.empty();
 		return result;
-	});
-	const auto loadMore = [=] {
+	}), [=] {
 		if (!state->data.offset.isEmpty()
 			&& !state->loading) {
 			state->loading = ResaleGiftsSlice(
@@ -684,7 +608,7 @@ void AddResaleGiftsList(
 				state->data.giftId,
 				state->filter.current(),
 				state->data.offset
-			) | rpl::on_next([=](ResaleGiftsDescriptor &&slice) {
+			) | rpl::start_with_next([=](ResaleGiftsDescriptor &&slice) {
 				state->loading.destroy();
 				state->data.offset = slice.list.empty()
 					? QString()
@@ -696,48 +620,17 @@ void AddResaleGiftsList(
 				state->updated.fire({});
 			});
 		}
-	};
-	container->add(MakeGiftsList({
-		.window = window,
-		.mode = forCraft ? GiftsListMode::CraftResale : GiftsListMode::Send,
-		.peer = peer,
-		.gifts = std::move(gifts),
-		.loadMore = loadMore,
-		.handler = customHandler,
 	}));
-
-	const auto skip = st::defaultSubsectionTitlePadding.top();
-	const auto wrap = container->add(
-		object_ptr<SlideWrap<FlatLabel>>(
-			container,
-			object_ptr<FlatLabel>(
-				container,
-				tr::lng_gift_craft_search_none(),
-				st::craftYourListEmpty),
-			(st::boxRowPadding + QMargins(0, 0, 0, skip))),
-		style::al_top);
-	state->empty.value() | rpl::on_next([=](bool empty) {
-		// Scroll doesn't jump up if we show before rows are cleared,
-		// and we hide after rows are added.
-		if (empty) {
-			wrap->show(anim::type::instant);
-		} else {
-			crl::on_main(wrap, [=] {
-				if (!state->empty.current()) {
-					wrap->hide(anim::type::instant);
-				}
-			});
-		}
-	}, wrap->lifetime());
-	wrap->entity()->setTryMakeSimilarLines(true);
 }
+
+} // namespace
 
 void ShowResaleGiftBoughtToast(
 		std::shared_ptr<Main::SessionShow> show,
 		not_null<PeerData*> to,
 		const Data::UniqueGift &gift) {
 	show->showToast({
-		.title = to->isSelf() ? QString() : tr::lng_gift_sent_title(tr::now),
+		.title = tr::lng_gift_sent_title(tr::now),
 		.text = TextWithEntities{ (to->isSelf()
 			? tr::lng_gift_sent_resale_done_self(
 				tr::now,
@@ -763,7 +656,7 @@ rpl::lifetime ShowStarGiftResale(
 	return Data::ResaleGiftsSlice(
 		session,
 		giftId
-	) | rpl::on_next([=](ResaleGiftsDescriptor &&info) {
+	) | rpl::start_with_next([=](ResaleGiftsDescriptor &&info) {
 		if (const auto onstack = finishRequesting) {
 			onstack();
 		}

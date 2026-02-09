@@ -20,7 +20,7 @@ public:
 	[[nodiscard]] rpl::producer<QString> title() override;
 
 private:
-	void setupContent();
+	void setupContent(not_null<Window::SessionController*> controller);
 
 };
 

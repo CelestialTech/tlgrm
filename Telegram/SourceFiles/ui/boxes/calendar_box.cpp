@@ -115,7 +115,7 @@ void FillMonthYearPicker(
 	state->currentMaxMonth = maxMonth;
 
 	years->value(
-	) | rpl::skip(1) | rpl::on_next([=](int yearIndex) {
+	) | rpl::skip(1) | rpl::start_with_next([=](int yearIndex) {
 		const auto year = minYear + yearIndex;
 		const auto [newMinMonth, newMaxMonth] = monthsRange(year);
 
@@ -150,14 +150,14 @@ void FillMonthYearPicker(
 	}, box->lifetime());
 
 	content->sizeValue(
-	) | rpl::on_next([=](QSize s) {
+	) | rpl::start_with_next([=](QSize s) {
 		const auto half = s.width() / 2;
 		state->months->setGeometry(0, 0, half, s.height());
 		years->setGeometry(half, 0, half, s.height());
 	}, content->lifetime());
 
 	content->paintRequest(
-	) | rpl::on_next([=](const QRect &r) {
+	) | rpl::start_with_next([=](const QRect &r) {
 		auto p = QPainter(content);
 		p.fillRect(r, Qt::transparent);
 		const auto lineRect = QRect(
@@ -594,7 +594,7 @@ CalendarBox::FloatingDate::FloatingDate(
 		HistoryServiceMsgRadius(),
 		st::roundedBg)) {
 	_context->monthValue(
-	) | rpl::on_next([=](QDate month) {
+	) | rpl::start_with_next([=](QDate month) {
 		_text = langMonthOfYearFull(month.month(), month.year());
 		const auto width = st::msgServiceFont->width(_text);
 		const auto rect = QRect(0, 0, width, st::msgServiceFont->height);
@@ -603,7 +603,7 @@ CalendarBox::FloatingDate::FloatingDate(
 	}, _widget.lifetime());
 
 	_widget.paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		paint();
 	}, _widget.lifetime());
 
@@ -648,12 +648,12 @@ CalendarBox::Inner::Inner(
 	setMouseTracking(true);
 
 	context->monthValue(
-	) | rpl::on_next([=](QDate month) {
+	) | rpl::start_with_next([=](QDate month) {
 		monthChanged(month);
 	}, lifetime());
 
 	context->selectionUpdates(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		update();
 	}, lifetime());
 }
@@ -947,12 +947,12 @@ CalendarBox::Title::Title(
 	_context->monthValue(
 	) | rpl::filter([=] {
 		return !_context->selectionMode();
-	}) | rpl::on_next([=](QDate date) {
+	}) | rpl::start_with_next([=](QDate date) {
 		setTextFromMonth(date);
 	}, lifetime());
 
 	_context->selectionUpdates(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (!_context->selectionMode()) {
 			setTextFromMonth(_context->month());
 			setAttribute(Qt::WA_TransparentForMouseEvents, false);
@@ -1060,7 +1060,7 @@ CalendarBox::CalendarBox(QWidget*, CalendarBoxArgs &&args)
 	_scroll->scrolls(
 	) | rpl::filter([=] {
 		return _watchScroll;
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		processScroll();
 	}, lifetime());
 
@@ -1070,7 +1070,7 @@ CalendarBox::CalendarBox(QWidget*, CalendarBoxArgs &&args)
 		button->events(
 		) | rpl::filter([=] {
 			return *enabled;
-		}) | rpl::on_next([=](not_null<QEvent*> e) {
+		}) | rpl::start_with_next([=](not_null<QEvent*> e) {
 			const auto type = e->type();
 			if (type == QEvent::MouseMove
 				&& !(static_cast<QMouseEvent*>(e.get())->buttons()
@@ -1093,7 +1093,7 @@ CalendarBox::CalendarBox(QWidget*, CalendarBoxArgs &&args)
 	setupJumps(_next.data(), &_nextEnabled);
 
 	_context->selectionUpdates(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (!_context->selectionMode()) {
 			_floatingDate = nullptr;
 		} else if (!_floatingDate) {
@@ -1103,7 +1103,7 @@ CalendarBox::CalendarBox(QWidget*, CalendarBoxArgs &&args)
 			rpl::combine(
 				_scroll->geometryValue(),
 				_floatingDate->widthValue()
-			) | rpl::on_next([=](QRect scroll, int width) {
+			) | rpl::start_with_next([=](QRect scroll, int width) {
 				const auto shift = _st.daysHeight
 					- _st.padding.top()
 					- st::calendarDaysFont->height;
@@ -1164,13 +1164,13 @@ void CalendarBox::prepare() {
 	_inner->setDateChosenCallback(std::move(_callback));
 
 	_context->monthValue(
-	) | rpl::on_next([=](QDate month) {
+	) | rpl::start_with_next([=](QDate month) {
 		monthChanged(month);
 	}, lifetime());
 	setExactScroll();
 
 	_context->selectionUpdates(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_selectionMode = _context->selectionMode();
 		if (_selectionChanged) {
 			const auto count = !_selectionMode

@@ -58,7 +58,7 @@ void SubsectionSliderReorder::start() {
 			? _proxyButtonCallback(i)
 			: button;
 		eventsProducer->events(
-		) | rpl::on_next_done([=](not_null<QEvent*> e) {
+		) | rpl::start_with_next_done([=](not_null<QEvent*> e) {
 			switch (e->type()) {
 			case QEvent::MouseMove:
 				mouseMove(

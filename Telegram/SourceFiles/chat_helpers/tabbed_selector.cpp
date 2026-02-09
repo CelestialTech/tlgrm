@@ -345,7 +345,7 @@ std::unique_ptr<Ui::TabbedSearch> MakeSearch(
 	});
 
 	result->queryValue(
-	) | rpl::skip(1) | rpl::on_next(
+	) | rpl::skip(1) | rpl::start_with_next(
 		std::move(callback),
 		parent->lifetime());
 
@@ -439,7 +439,7 @@ TabbedSelector::TabbedSelector(
 		const auto widget = tab.widget();
 
 		widget->scrollToRequests(
-		) | rpl::on_next([=, tab = &tab](int y) {
+		) | rpl::start_with_next([=, tab = &tab](int y) {
 			if (tab == currentTab()) {
 				scrollToY(y);
 			} else {
@@ -448,7 +448,7 @@ TabbedSelector::TabbedSelector(
 		}, widget->lifetime());
 
 		widget->disableScrollRequests(
-		) | rpl::on_next([=, tab = &tab](bool disabled) {
+		) | rpl::start_with_next([=, tab = &tab](bool disabled) {
 			if (tab == currentTab()) {
 				_scroll->disableScroll(disabled);
 			}
@@ -458,9 +458,9 @@ TabbedSelector::TabbedSelector(
 	rpl::merge(
 		(hasStickersTab()
 			? stickers()->scrollUpdated() | rpl::map_to(0)
-			: rpl::never<int>() | rpl::type_erased),
+			: rpl::never<int>() | rpl::type_erased()),
 		_scroll->scrollTopChanges()
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		handleScroll();
 	}, lifetime());
 
@@ -479,22 +479,17 @@ TabbedSelector::TabbedSelector(
 			Data::PeerUpdate::Flag::Rights
 		) | rpl::filter([=](const Data::PeerUpdate &update) {
 			return (update.peer.get() == _currentPeer);
-		}) | rpl::on_next([=] {
+		}) | rpl::start_with_next([=] {
 			checkRestrictedPeer();
 		}, lifetime());
 	}
 
 	if (hasStickersTab()) {
 		session().data().stickers().stickerSetInstalled(
-		) | rpl::on_next([=](uint64 setId) {
+		) | rpl::start_with_next([=](uint64 setId) {
 			_tabsSlider->setActiveSection(indexByType(SelectorTab::Stickers));
 			stickers()->showStickerSet(setId);
-			if (_currentPeer
-				&& Data::CanSend(
-					_currentPeer,
-					ChatRestriction::SendStickers)) {
-				_showRequests.fire({});
-			}
+			_showRequests.fire({});
 		}, lifetime());
 
 		rpl::merge(
@@ -502,13 +497,13 @@ TabbedSelector::TabbedSelector(
 			session().data().stickers().updated(hasMasksTab()
 				? Data::StickersType::Masks
 				: Data::StickersType::Stickers)
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			refreshStickers();
 		}, lifetime());
 	}
 
 	style::PaletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_panelRounding = Ui::PrepareCornerPixmaps(
 			st::emojiPanRadius,
 			_st.bg);
@@ -519,12 +514,10 @@ TabbedSelector::TabbedSelector(
 
 	if (hasEmojiTab() && _mode == Mode::Full) {
 		session().data().stickers().emojiSetInstalled(
-		) | rpl::on_next([=](uint64 setId) {
+		) | rpl::start_with_next([=](uint64 setId) {
 			_tabsSlider->setActiveSection(indexByType(SelectorTab::Emoji));
 			emoji()->showSet(setId);
-			if (_currentPeer && Data::CanSendTexts(_currentPeer)) {
-				_showRequests.fire({});
-			}
+			_showRequests.fire({});
 		}, lifetime());
 	}
 	if (hasEmojiTab()) {
@@ -709,7 +702,7 @@ rpl::producer<FileChosen> TabbedSelector::customEmojiChosen() const {
 
 rpl::producer<FileChosen> TabbedSelector::fileChosen() const {
 	auto never = rpl::never<FileChosen>(
-	) | rpl::type_erased;
+	) | rpl::type_erased();
 	return rpl::merge(
 		hasStickersTab() ? stickers()->chosen() : never,
 		hasGifsTab() ? gifs()->fileChosen() : never,
@@ -1117,7 +1110,7 @@ void TabbedSelector::checkRestrictedPeer() {
 			_restrictedLabel.create(
 				this,
 				rpl::single(error.boostsToLift
-					? tr::link(error.text)
+					? Ui::Text::Link(error.text)
 					: TextWithEntities{ error.text }),
 				st::stickersRestrictedLabel);
 			const auto lifting = error.boostsToLift;
@@ -1211,7 +1204,7 @@ void TabbedSelector::createTabsSlider() {
 
 	_tabsSlider->setActiveSectionFast(indexByType(_currentTabType));
 	_tabsSlider->sectionActivated(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		switchTab();
 	}, lifetime());
 }
@@ -1493,15 +1486,12 @@ void TabbedSelector::Inner::checkHideWithBox(
 void TabbedSelector::Inner::paintEmptySearchResults(
 		Painter &p,
 		const style::icon &icon,
-		const QString &text,
-		bool skipIcon) const {
+		const QString &text) const {
 	const auto iconLeft = (width() - icon.width()) / 2;
 	const auto iconTop = std::max(
 		(height() / 3) - (icon.height() / 2),
 		st::normalFont->height);
-	if (!skipIcon) {
-		icon.paint(p, iconLeft, iconTop, width());
-	}
+	icon.paint(p, iconLeft, iconTop, width());
 
 	const auto textWidth = st::normalFont->width(text);
 	const auto textTop = std::min(

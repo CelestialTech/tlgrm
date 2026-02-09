@@ -29,6 +29,7 @@ namespace Info::Profile {
 extern const char kOptionShowPeerIdBelowAbout[];
 extern const char kOptionShowChannelJoinedBelowAbout[];
 
+class Cover;
 struct Origin;
 
 object_ptr<Ui::RpWidget> SetupDetails(
@@ -60,6 +61,12 @@ object_ptr<Ui::RpWidget> SetupChannelMembersAndManage(
 	not_null<Ui::RpWidget*> parent,
 	not_null<PeerData*> peer);
 
+Cover *AddCover(
+	not_null<Ui::VerticalLayout*> container,
+	not_null<Controller*> controller,
+	not_null<PeerData*> peer,
+	Data::ForumTopic *topic,
+	Data::SavedSublist *sublist);
 void AddDetails(
 	not_null<Ui::VerticalLayout*> container,
 	not_null<Controller*> controller,

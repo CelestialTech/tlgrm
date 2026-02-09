@@ -28,20 +28,14 @@ constexpr auto kDuration = crl::time(5000);
 } // namespace
 
 RateTranscribe::RateTranscribe(
-	not_null<Ui::PopupMenu*> popupMenu,
+	not_null<Ui::PopupMenu*> parent,
 	const style::Menu &st,
 	Fn<void(bool)> rate)
-: Ui::Menu::ItemBase(popupMenu->menu(), st)
-, _dummyAction(Ui::CreateChild<QAction>(this))
-, _leftButton(Ui::CreateSimpleCircleButton(
-	this,
-	st::defaultRippleAnimation))
-, _rightButton(Ui::CreateSimpleCircleButton(
-	this,
-	st::defaultRippleAnimation)) {
+: Ui::Menu::ItemBase(parent, st)
+, _dummyAction(Ui::CreateChild<QAction>(this)) {
 	setAcceptBoth(true);
 
-	fitToMenuWidth();
+	initResizeHook(parent->sizeValue());
 
 	enableMouseSelecting();
 
@@ -59,8 +53,8 @@ RateTranscribe::RateTranscribe(
 	setMinWidth(
 		label->st().style.font->width(
 			tr::lng_context_rate_transcription(tr::now)));
-	widthValue() | rpl::on_next([=, menu = popupMenu->menu()](int w) {
-		content->resizeToWidth(menu->width());
+	widthValue() | rpl::start_with_next([=](int w) {
+		content->resizeToWidth(parentWidget()->width());
 	}, content->lifetime());
 	Ui::AddSkip(content);
 
@@ -70,25 +64,31 @@ RateTranscribe::RateTranscribe(
 	// const auto rightButton = Ui::CreateChild<Ui::IconButton>(
 	// 	this,
 	// 	st::menuTranscribeDummyButton);
+	const auto leftButton = Ui::CreateSimpleCircleButton(
+		this,
+		st::defaultRippleAnimation);
 	{
-		_leftButton->resize(Size(st::menuTranscribeDummyButton.width));
+		leftButton->resize(Size(st::menuTranscribeDummyButton.width));
 		const auto label = Ui::CreateChild<Ui::FlatLabel>(
-			_leftButton,
+			leftButton,
 			QString::fromUtf8("\U0001F44D"));
 		label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-		_leftButton->sizeValue() | rpl::on_next([=](QSize s) {
+		leftButton->sizeValue() | rpl::start_with_next([=](QSize s) {
 			label->moveToLeft(
 				(s.width() - label->width()) / 2,
 				(s.height() - label->height()) / 2);
 		}, label->lifetime());
 	}
+	const auto rightButton = Ui::CreateSimpleCircleButton(
+		this,
+		st::defaultRippleAnimation);
 	{
-		_rightButton->resize(Size(st::menuTranscribeDummyButton.width));
+		rightButton->resize(Size(st::menuTranscribeDummyButton.width));
 		const auto label = Ui::CreateChild<Ui::FlatLabel>(
-			_rightButton,
+			rightButton,
 			QString::fromUtf8("\U0001F44E"));
 		label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-		_rightButton->sizeValue() | rpl::on_next([=](QSize s) {
+		rightButton->sizeValue() | rpl::start_with_next([=](QSize s) {
 			label->moveToLeft(
 				(s.width() - label->width()) / 2,
 				(s.height() - label->height()) / 2);
@@ -96,7 +96,7 @@ RateTranscribe::RateTranscribe(
 	}
 	{
 		const auto showToast = [=,
-				weak = base::make_weak(popupMenu->parentWidget())]{
+				weak = base::make_weak(parent->parentWidget())]{
 			if (const auto strong = weak.get()) {
 				base::call_delayed(
 					st::universalDuration * 1.1,
@@ -110,19 +110,19 @@ RateTranscribe::RateTranscribe(
 					}));
 			}
 		};
-		const auto hideMenu = [=, weak = base::make_weak(popupMenu)] {
+		const auto hideMenu = [=, weak = base::make_weak(parent)] {
 			if (const auto strong = weak.get()) {
 				base::call_delayed(
 					st::universalDuration,
 					crl::guard(strong, [=] { strong->hideMenu(false); }));
 			}
 		};
-		_leftButton->setClickedCallback([=] {
+		leftButton->setClickedCallback([=] {
 			rate(true);
 			showToast();
 			hideMenu();
 		});
-		_rightButton->setClickedCallback([=] {
+		rightButton->setClickedCallback([=] {
 			rate(false);
 			showToast();
 			hideMenu();
@@ -134,33 +134,21 @@ RateTranscribe::RateTranscribe(
 	rpl::combine(
 		content->geometryValue(),
 		label->geometryValue()
-	) | rpl::on_next([=](
+	) | rpl::start_with_next([=](
 			const QRect &contentRect,
 			const QRect &labelRect) {
-		_leftButton->moveToLeft(
+		leftButton->moveToLeft(
 			labelRect.x(),
 			rect::bottom(contentRect));
-		_rightButton->moveToLeft(
-			rect::right(labelRect) - _rightButton->width(),
+		rightButton->moveToLeft(
+			rect::right(labelRect) - rightButton->width(),
 			rect::bottom(contentRect));
 		_desiredHeight = rect::m::sum::v(st::menuTranscribeItemPadding)
-			+ _leftButton->height()
+			+ leftButton->height()
 			+ labelRect.height();
-	}, _leftButton->lifetime());
-	_leftButton->show();
-	_rightButton->show();
-
-	selects() | rpl::on_next([=](const Ui::Menu::CallbackData &data) {
-		if (data.selected
-			&& data.source == Ui::Menu::TriggeredSource::Keyboard) {
-			_leftButton->setForceRippled(true);
-			_selectedButton = SelectedButton::Left;
-		} else if (!data.selected) {
-			_leftButton->setForceRippled(false);
-			_rightButton->setForceRippled(false);
-			_selectedButton = SelectedButton::None;
-		}
-	}, lifetime());
+	}, leftButton->lifetime());
+	leftButton->show();
+	rightButton->show();
 }
 
 not_null<QAction*> RateTranscribe::action() const {
@@ -173,45 +161,6 @@ bool RateTranscribe::isEnabled() const {
 
 int RateTranscribe::contentHeight() const {
 	return _desiredHeight;
-}
-
-void RateTranscribe::handleKeyPress(not_null<QKeyEvent*> e) {
-	const auto key = e->key();
-	if (key == Qt::Key_Left) {
-		if (_selectedButton == SelectedButton::Right) {
-			_rightButton->setForceRippled(false);
-			_leftButton->setForceRippled(true);
-			_selectedButton = SelectedButton::Left;
-		} else if (_selectedButton == SelectedButton::Left) {
-			_leftButton->setForceRippled(false);
-			_rightButton->setForceRippled(true);
-			_selectedButton = SelectedButton::Right;
-		} else {
-			_leftButton->setForceRippled(true);
-			_selectedButton = SelectedButton::Left;
-		}
-	} else if (key == Qt::Key_Right) {
-		if (_selectedButton == SelectedButton::Left) {
-			_leftButton->setForceRippled(false);
-			_rightButton->setForceRippled(true);
-			_selectedButton = SelectedButton::Right;
-		} else if (_selectedButton == SelectedButton::Right) {
-			_rightButton->setForceRippled(false);
-			_leftButton->setForceRippled(true);
-			_selectedButton = SelectedButton::Left;
-		} else {
-			_leftButton->setForceRippled(true);
-			_selectedButton = SelectedButton::Left;
-		}
-	} else if (key == Qt::Key_Return
-			|| key == Qt::Key_Enter
-			|| key == Qt::Key_Space) {
-		if (_selectedButton == SelectedButton::Left) {
-			_leftButton->clicked(Qt::KeyboardModifiers(), Qt::LeftButton);
-		} else if (_selectedButton == SelectedButton::Right) {
-			_rightButton->clicked(Qt::KeyboardModifiers(), Qt::LeftButton);
-		}
-	}
 }
 
 } // namespace Menu

@@ -278,7 +278,7 @@ Instance::Instance()
 	});
 
 	_playbackDeviceId.changes(
-	) | rpl::on_next([=](Webrtc::DeviceResolvedId id) {
+	) | rpl::start_with_next([=](Webrtc::DeviceResolvedId id) {
 		if (Player::internal::DetachIfDeviceChanged(this, id)) {
 			_detachFromDeviceForce = false;
 		}

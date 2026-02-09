@@ -21,7 +21,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
-#include "settings/settings_common.h"
 #include "window/window_session_controller.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
@@ -133,7 +132,6 @@ public:
 	void toggleProgress(bool shown);
 
 	rpl::producer<> clearRequests() const;
-	[[nodiscard]] not_null<Ui::RoundButton*> clearButton() const;
 
 protected:
 	int resizeGetHeight(int newWidth) override;
@@ -212,10 +210,6 @@ rpl::producer<> LocalStorageBox::Row::clearRequests() const {
 	return _clear->clicks() | rpl::to_empty;
 }
 
-not_null<Ui::RoundButton*> LocalStorageBox::Row::clearButton() const {
-	return _clear.data();
-}
-
 int LocalStorageBox::Row::resizeGetHeight(int newWidth) {
 	const auto height = st::localStorageRowHeight;
 	const auto padding = st::localStorageRowPadding;
@@ -287,17 +281,14 @@ LocalStorageBox::LocalStorageBox(
 	_timeLimit = settings.totalTimeLimit;
 }
 
-void LocalStorageBox::Show(
-		not_null<Window::SessionController*> controller,
-		const QString &highlightId) {
+void LocalStorageBox::Show(not_null<Window::SessionController*> controller) {
 	auto shared = std::make_shared<object_ptr<LocalStorageBox>>(
 		Box<LocalStorageBox>(&controller->session(), CreateTag()));
 	const auto weak = shared->data();
-	weak->_highlightId = highlightId;
 	rpl::combine(
 		controller->session().data().cache().statsOnMain(),
 		controller->session().data().cacheBigFile().statsOnMain()
-	) | rpl::on_next([=](
+	) | rpl::start_with_next([=](
 			Database::Stats &&stats,
 			Database::Stats &&statsBig) {
 		weak->update(std::move(stats), std::move(statsBig));
@@ -313,26 +304,6 @@ void LocalStorageBox::prepare() {
 	addButton(tr::lng_box_ok(), [this] { closeBox(); });
 
 	setupControls();
-}
-
-void LocalStorageBox::showFinished() {
-	if (_highlightId.isEmpty()) {
-		return;
-	}
-	if (_highlightId == u"storage/clear-cache"_q) {
-		if (const auto i = _rows.find(0); i != _rows.end()) {
-			Settings::HighlightWidget(
-				i->second->entity()->clearButton(),
-				{ .rippleShape = true });
-		}
-	} else if (_highlightId == u"storage/max-cache"_q) {
-		if (_totalSlider) {
-			const auto add = st::roundRadiusSmall;
-			Settings::HighlightWidget(
-				_totalSlider,
-				{ .margin = { -add, -add, -add, -add }, .radius = add });
-		}
-	}
 }
 
 void LocalStorageBox::updateRow(
@@ -408,7 +379,7 @@ void LocalStorageBox::setupControls() {
 		const auto shown = (data.count && data.totalSize) || !tag;
 		result->toggle(shown, anim::type::instant);
 		result->entity()->clearRequests(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			clearByTag(tag);
 		}, result->lifetime());
 		_rows.emplace(tag, result);
@@ -460,7 +431,7 @@ void LocalStorageBox::setupControls() {
 	);
 	container->resizeToWidth(st::boxWidth);
 	container->heightValue(
-	) | rpl::on_next([=](int height) {
+	) | rpl::start_with_next([=](int height) {
 		setDimensions(st::boxWidth, height);
 	}, container->lifetime());
 }

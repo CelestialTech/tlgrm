@@ -207,13 +207,12 @@ struct FullReplyTo {
 	friend inline bool operator==(FullReplyTo, FullReplyTo) = default;
 };
 
-struct SuggestOptions {
+struct SuggestPostOptions {
 	uint32 exists : 1 = 0;
 	uint32 priceWhole : 31 = 0;
 	uint32 priceNano : 31 = 0;
 	uint32 ton : 1 = 0;
 	TimeId date = 0;
-	TimeId offerDuration = 0;
 
 	[[nodiscard]] CreditsAmount price() const {
 		return CreditsAmount(
@@ -227,11 +226,11 @@ struct SuggestOptions {
 	}
 
 	friend inline auto operator<=>(
-		SuggestOptions,
-		SuggestOptions) = default;
+		SuggestPostOptions,
+		SuggestPostOptions) = default;
 	friend inline bool operator==(
-		SuggestOptions,
-		SuggestOptions) = default;
+		SuggestPostOptions,
+		SuggestPostOptions) = default;
 };
 
 struct GlobalMsgId {

@@ -239,12 +239,12 @@ SetupEmailLockWidget::SetupEmailLockWidget(
 
 		submit->setClickedCallback([=] { this->submit(); });
 
-		emailInput->changes() | rpl::on_next([=] {
+		emailInput->changes() | rpl::start_with_next([=] {
 			_error = QString();
 			errorLabel->hide();
 		}, emailInput->lifetime());
 
-		emailInput->submits() | rpl::on_next([=] {
+		emailInput->submits() | rpl::start_with_next([=] {
 			this->submit();
 		}, emailInput->lifetime());
 	}
@@ -330,12 +330,12 @@ void SetupEmailLockWidget::showConfirmWidget(
 	_confirmWidget->setFocus();
 
 	_confirmWidget->backRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		showEmailInput();
 	}, _confirmWidget->lifetime());
 
 	_confirmWidget->confirmations(
-	) | rpl::on_next([=, controller = window()] {
+	) | rpl::start_with_next([=, controller = window()] {
 		if (const auto session = controller->maybeSession()) {
 			session->promoSuggestions().setSetupEmailState(
 				Data::SetupEmailState::None);
@@ -511,7 +511,7 @@ SetupEmailConfirmWidget::SetupEmailConfirmWidget(
 	});
 
 	codeInput->codeCollected(
-	) | rpl::on_next([=](const QString &code) {
+	) | rpl::start_with_next([=](const QString &code) {
 		verifyCode(code);
 	}, codeInput->lifetime());
 }
@@ -657,7 +657,6 @@ void SetupEmailLockWidget::showAccountsMenu() {
 			user,
 			st::lockSetupEmailUserpicSmall);
 		userpic->move(st.menu.itemIconPosition);
-		userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
 		_accountsMenu->addAction(std::move(owned));
 	}
 

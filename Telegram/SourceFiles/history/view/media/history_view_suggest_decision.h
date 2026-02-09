@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-struct HistoryMessageSuggestion;
+struct HistoryMessageSuggestedPost;
 struct HistoryServiceSuggestDecision;
 
 namespace HistoryView {
@@ -25,7 +25,7 @@ auto GenerateSuggestDecisionMedia(
 
 auto GenerateSuggestRequestMedia(
 	not_null<Element*> parent,
-	not_null<const HistoryMessageSuggestion*> suggest
+	not_null<const HistoryMessageSuggestedPost*> suggest
 ) -> Fn<void(
 	not_null<MediaGeneric*>,
 	Fn<void(std::unique_ptr<MediaGenericPart>)>)>;

@@ -53,7 +53,7 @@ EmojiStatuses::EmojiStatuses(not_null<Session*> owner)
 
 	base::timer_each(
 		kRefreshDefaultListEach
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		refreshDefault();
 		refreshChannelDefault();
 	}, _lifetime);
@@ -534,7 +534,7 @@ void EmojiStatuses::set(
 	if (peer->isSelf()) {
 		send(MTPaccount_UpdateEmojiStatus(status));
 	} else if (const auto channel = peer->asChannel()) {
-		send(MTPchannels_UpdateEmojiStatus(channel->inputChannel(), status));
+		send(MTPchannels_UpdateEmojiStatus(channel->inputChannel, status));
 	}
 }
 

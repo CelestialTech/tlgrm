@@ -424,7 +424,6 @@ void Reply::setLinkFrom(
 		not_null<HistoryMessageReply*> data) {
 	const auto weak = base::make_weak(view);
 	const auto &fields = data->fields();
-	const auto isAdminLogEntry = view->data()->isAdminLogEntry();
 	const auto externalChannelId = peerToChannel(fields.externalPeerId);
 	const auto messageId = fields.messageId;
 	const auto highlight = MessageHighlightId{
@@ -474,9 +473,7 @@ void Reply::setLinkFrom(
 	};
 	const auto message = data->resolvedMessage.get();
 	const auto story = data->resolvedStory.get();
-	_link = isAdminLogEntry
-		? std::make_shared<LambdaClickHandler>(externalLink)
-		: message
+	_link = message
 		? JumpToMessageClickHandler(message, returnToId, highlight)
 		: story
 		? JumpToStoryClickHandler(story)
@@ -822,11 +819,9 @@ void Reply::paint(
 	}
 
 	if (_ripple.animation) {
-		_ripple.lastPaintedPoint = inBubble ? QPoint(x, y) : QPoint();
 		_ripple.animation->paint(p, x, y, w, &rippleColor);
 		if (_ripple.animation->empty()) {
 			_ripple.animation.reset();
-			_ripple.lastPaintedPoint = {};
 		}
 	}
 
@@ -988,11 +983,7 @@ void Reply::createRippleAnimation(
 		Ui::RippleAnimation::RoundRectMask(
 			size,
 			st::messageQuoteStyle.radius),
-		[=] {
-			view->repaint(_ripple.lastPaintedPoint.isNull()
-				? QRect()
-				: QRect(_ripple.lastPaintedPoint, size));
-		});
+		[=] { view->repaint(); });
 }
 
 void Reply::saveRipplePoint(QPoint point) const {
@@ -1039,7 +1030,7 @@ TextWithEntities Reply::ComposePreviewName(
 				tr::now,
 				lt_title,
 				todolist->title,
-				tr::marked);
+				Ui::Text::WithEntities);
 		}
 	}
 	const auto toPeer = to->history()->peer;
@@ -1066,7 +1057,7 @@ TextWithEntities Reply::ComposePreviewName(
 			tr::now,
 			lt_name,
 			nameFull,
-			tr::marked);
+			Ui::Text::WithEntities);
 
 }
 

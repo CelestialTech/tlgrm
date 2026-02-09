@@ -106,15 +106,6 @@ public:
 		Fn<bool(Data::MessagesSlice&&)> slice,
 		FnMut<void()> done);
 
-	void requestTopicMessages(
-		PeerId peerId,
-		MTPInputPeer inputPeer,
-		int32 topicRootId,
-		FnMut<bool(int count)> start,
-		Fn<bool(DownloadProgress)> progress,
-		Fn<bool(Data::MessagesSlice&&)> slice,
-		FnMut<void()> done);
-
 	void finishExport(FnMut<void()> done);
 	void skipFile(uint64 randomId);
 	void cancelExportFast();
@@ -134,9 +125,7 @@ private:
 	struct ChatsProcess;
 	struct LeftChannelsProcess;
 	struct DialogsProcess;
-	struct AbstractMessagesProcess;
 	struct ChatProcess;
-	struct TopicProcess;
 
 	void startMainSession(FnMut<void()> done);
 	void sendNextStartRequest();
@@ -213,12 +202,6 @@ private:
 		int addOffset,
 		int limit,
 		FnMut<void(MTPmessages_Messages&&)> done);
-	void requestTopicMessagesSlice();
-	void requestTopicReplies(
-		int offsetId,
-		int addOffset,
-		int limit,
-		FnMut<void(MTPmessages_Messages&&)> done);
 	void collectMessagesCustomEmoji(const Data::MessagesSlice &slice);
 	void resolveCustomEmoji();
 	void loadMessagesFiles(Data::MessagesSlice &&slice);
@@ -233,17 +216,6 @@ private:
 	void loadMessageEmojiDone(uint64 id, const QString &relativePath);
 	void finishMessagesSlice();
 	void finishMessages();
-
-	void loadTopicMessagesFiles(Data::MessagesSlice &&slice);
-	void resolveTopicCustomEmoji();
-	void loadNextTopicMessageFile();
-	bool loadTopicEmojiProgress(FileProgress progress);
-	void loadCustomEmojiDone(uint64 id, const QString &relativePath);
-	void loadTopicMessageFileOrThumbDone(
-		Data::File &file,
-		const QString &relativePath);
-	void finishTopicMessagesSlice();
-	void finishTopicMessages();
 
 	[[nodiscard]] Data::Message *currentFileMessage() const;
 	[[nodiscard]] Data::FileOrigin currentFileMessageOrigin() const;
@@ -313,7 +285,6 @@ private:
 	std::unique_ptr<LeftChannelsProcess> _leftChannelsProcess;
 	std::unique_ptr<DialogsProcess> _dialogsProcess;
 	std::unique_ptr<ChatProcess> _chatProcess;
-	std::unique_ptr<TopicProcess> _topicProcess;
 	base::flat_set<uint64> _unresolvedCustomEmoji;
 	base::flat_map<uint64, Data::Document> _resolvedCustomEmoji;
 	QVector<MTPMessageRange> _splits;

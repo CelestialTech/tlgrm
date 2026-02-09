@@ -10,8 +10,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/message_bubble.h"
 #include "ui/chat/chat_style.h"
 #include "ui/effects/reaction_fly_animation.h"
-#include "ui/text/custom_emoji_helper.h"
-#include "ui/text/format_values.h"
 #include "ui/text/text_options.h"
 #include "ui/text/text_utilities.h"
 #include "ui/painter.h"
@@ -142,8 +140,7 @@ bool BottomInfo::isWide() const {
 		|| !_data.author.isEmpty()
 		|| !_views.isEmpty()
 		|| !_replies.isEmpty()
-		|| _effect
-		|| _data.tonStake;
+		|| _effect;
 }
 
 TextState BottomInfo::textState(
@@ -456,7 +453,7 @@ void BottomInfo::layoutDateText() {
 	const auto author = _data.author;
 	const auto prefix = !author.isEmpty() ? u", "_q : QString();
 	const auto date = edited + ((_data.flags & Data::Flag::ForwardedDate)
-		? Ui::FormatDateTimeSavedFrom(_data.date)
+		? langDateTime(_data.date)
 		: QLocale().toString(_data.date.time(), QLocale::ShortFormat));
 	const auto afterAuthor = prefix + date;
 	const auto afterAuthorWidth = st::msgDateFont->width(afterAuthor);
@@ -474,33 +471,18 @@ void BottomInfo::layoutDateText() {
 		: name.isEmpty()
 		? date
 		: (name + afterAuthor);
-	auto helper = Ui::Text::CustomEmojiHelper(
-		Core::TextContext({ .session = &_reactionsOwner->session() }));
 	auto marked = TextWithEntities();
 	if (const auto count = _data.stars) {
 		marked.append(
 			Ui::Text::IconEmoji(&st::starIconEmojiSmall)
 		).append(Lang::FormatCountToShort(count).string).append(u", "_q);
 	}
-	if (const auto stake = _data.tonStake) {
-		marked.append(
-			QString::number(stake / 1e9)
-		).append(helper.image({
-			.image = Ui::Emoji::SinglePixmap(
-				Ui::Emoji::Find(QString::fromUtf8("\xf0\x9f\x92\x8e")),
-				Ui::Emoji::GetSizeNormal()).toImage().scaledToHeight(
-					st::stakeIconEmojiSize * style::DevicePixelRatio(),
-					Qt::SmoothTransformation),
-			.margin = QMargins(0, st::stakeIconEmojiTop, 0, 0),
-			.textColor = false,
-		})).append("  ");
-	}
 	marked.append(full);
 	_authorEditedDate.setMarkedText(
 		st::msgDateTextStyle,
 		marked,
 		Ui::NameTextOptions(),
-		helper.context());
+		Core::TextContext({ .session = &_reactionsOwner->session() }));
 }
 
 void BottomInfo::layoutViewsText() {
@@ -653,19 +635,14 @@ BottomInfo::Data BottomInfoDataFromMessage(not_null<Message*> message) {
 		result.flags |= Flag::Sending;
 	}
 	if (!item->history()->peer->isUser()) {
+		const auto media = message->media();
 		const auto mine = PaidInformation{
 			.messages = 1,
 			.stars = item->starsPaid(),
 		};
-		const auto media = message->media();
 		auto info = media ? media->paidInformation().value_or(mine) : mine;
 		if (const auto total = info.stars) {
 			result.stars = total;
-		}
-	}
-	if (const auto media = item->media()) {
-		if (const auto outcome = media->diceGameOutcome()) {
-			result.tonStake = outcome.stakeNanoTon;
 		}
 	}
 	const auto forwarded = item->Get<HistoryMessageForwarded>();
@@ -678,16 +655,10 @@ BottomInfo::Data BottomInfoDataFromMessage(not_null<Message*> message) {
 	if (item->isScheduled()) {
 		result.scheduleRepeatPeriod = item->scheduleRepeatPeriod();
 	}
-	if (!forwarded) {
-		return result;
-	}
-	if (forwarded->savedFromMsgId && forwarded->savedFromDate) {
-		result.date = base::unixtime::parse(forwarded->savedFromDate);
-		result.flags |= Flag::ForwardedDate;
-	} else if (forwarded->originalDate
-		&& (message->context() == Context::SavedSublist
-			|| item->history()->peer->isSelf())
-		&& !item->externalReply()) {
+	if (forwarded
+			&& forwarded->savedFromPeer
+			&& forwarded->savedFromMsgId
+			&& !item->externalReply()) {
 		result.date = base::unixtime::parse(forwarded->originalDate);
 		result.flags |= Flag::ForwardedDate;
 	}

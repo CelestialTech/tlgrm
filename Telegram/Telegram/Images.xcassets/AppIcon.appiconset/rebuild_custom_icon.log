@@ -1,0 +1,5 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project out/Telegram.xcodeproj -scheme Telegram -configuration Release clean build
+
+2025-11-24 08:13:23.665 xcodebuild[3143:24529] Writing error result bundle to /var/folders/x3/7srzp6gj1pldq5f64mf70sv40000gn/T/ResultBundle_2025-24-11_08-13-0023.xcresult
+xcodebuild: error: 'out/Telegram.xcodeproj' does not exist.

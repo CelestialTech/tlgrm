@@ -20,7 +20,9 @@ namespace {
 using namespace details;
 
 [[nodiscard]] QString BaseGlobalPath() {
-	return cWorkingDir() + u"tdata/"_q;
+	const auto path = cWorkingDir() + u"tdata/"_q;
+	LOG(("TData: BaseGlobalPath = %1").arg(path));
+	return path;
 }
 
 [[nodiscard]] QString ComputeKeyName(const QString &dataName) {
@@ -216,7 +218,14 @@ void Domain::writeAccounts() {
 
 	const auto path = BaseGlobalPath();
 	if (!QDir().exists(path)) {
-		QDir().mkpath(path);
+		LOG(("TData: Directory does not exist, creating: %1").arg(path));
+		if (!QDir().mkpath(path)) {
+			LOG(("TData Error: Failed to create directory: %1").arg(path));
+		} else {
+			LOG(("TData: Directory created successfully: %1").arg(path));
+		}
+	} else {
+		LOG(("TData: Directory exists: %1").arg(path));
 	}
 
 	FileWriteDescriptor key(ComputeKeyName(_dataName), path);

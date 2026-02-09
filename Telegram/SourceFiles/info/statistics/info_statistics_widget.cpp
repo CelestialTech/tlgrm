@@ -65,7 +65,7 @@ Widget::Widget(
 		controller->statisticsTag().contextId,
 		controller->statisticsTag().storyId))) {
 	_inner->showRequests(
-	) | rpl::on_next([=](InnerWidget::ShowRequest request) {
+	) | rpl::start_with_next([=](InnerWidget::ShowRequest request) {
 		if (request.history) {
 			controller->showPeerHistory(
 				request.history.peer,
@@ -88,7 +88,7 @@ Widget::Widget(
 		}
 	}, _inner->lifetime());
 	_inner->scrollToRequests(
-	) | rpl::on_next([this](const Ui::ScrollToRequest &request) {
+	) | rpl::start_with_next([this](const Ui::ScrollToRequest &request) {
 		scrollTo(request);
 	}, _inner->lifetime());
 }

@@ -46,12 +46,12 @@ MediaPreviewWidget::MediaPreviewWidget(
 , _emojiSize(Ui::Emoji::GetSizeLarge() / style::DevicePixelRatio()) {
 	setAttribute(Qt::WA_TransparentForMouseEvents);
 	_controller->session().downloaderTaskFinished(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		update();
 	}, lifetime());
 
 	style::PaletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (_document && _document->emojiUsesTextColor()) {
 			_cache = QPixmap();
 		}
@@ -243,10 +243,7 @@ void MediaPreviewWidget::startShow() {
 				Window::GifPauseReason::MediaPreview);
 		}
 		_hiding = false;
-		const auto duration = _customDuration
-			? _customDuration
-			: st::stickerPreviewDuration;
-		_a_shown.start([=] { update(); }, 0., 1., duration);
+		_a_shown.start([=] { update(); }, 0., 1., st::stickerPreviewDuration);
 	} else {
 		update();
 	}
@@ -260,10 +257,7 @@ void MediaPreviewWidget::hidePreview() {
 		_cache = currentImage();
 	}
 	_hiding = true;
-	const auto duration = _customDuration
-		? _customDuration
-		: st::stickerPreviewDuration;
-	_a_shown.start([=] { update(); }, 1., 0., duration);
+	_a_shown.start([=] { update(); }, 1., 0., st::stickerPreviewDuration);
 	_photo = nullptr;
 	_photoMedia = nullptr;
 	_document = nullptr;
@@ -313,10 +307,6 @@ void MediaPreviewWidget::setBackgroundMargins(const QMargins &margins) {
 void MediaPreviewWidget::setCustomRadius(int radius) {
 	_customRadius = radius;
 	update();
-}
-
-void MediaPreviewWidget::setCustomDuration(crl::time duration) {
-	_customDuration = duration;
 }
 
 QSize MediaPreviewWidget::currentDimensions() const {
@@ -428,9 +418,9 @@ void MediaPreviewWidget::setupLottie() {
 		});
 	};
 
-	_lottie->updates() | rpl::on_next(handler, lifetime());
+	_lottie->updates() | rpl::start_with_next(handler, lifetime());
 	if (_effect) {
-		_effect->updates() | rpl::on_next(handler, lifetime());
+		_effect->updates() | rpl::start_with_next(handler, lifetime());
 	}
 }
 

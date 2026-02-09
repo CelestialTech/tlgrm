@@ -109,13 +109,13 @@ PreviewWrap::PreviewWrap(
 
 	using namespace HistoryView;
 	_history->owner().viewRepaintRequest(
-	) | rpl::on_next([=](Data::RequestViewRepaint data) {
-		if (data.view == _item.get()) {
+	) | rpl::start_with_next([=](not_null<const Element*> view) {
+		if (view == _item.get()) {
 			update();
 		}
 	}, lifetime());
 
-	_history->session().downloaderTaskFinished() | rpl::on_next([=] {
+	_history->session().downloaderTaskFinished() | rpl::start_with_next([=] {
 		update();
 	}, lifetime());
 
@@ -135,7 +135,7 @@ void PreviewWrap::prepare(not_null<HistoryItem*> item) {
 	widthValue(
 	) | rpl::filter([=](int width) {
 		return width >= st::msgMinWidth;
-	}) | rpl::on_next([=](int width) {
+	}) | rpl::start_with_next([=](int width) {
 		resizeTo(width);
 	}, lifetime());
 }
@@ -165,7 +165,6 @@ void PreviewWrap::paintEvent(QPaintEvent *e) {
 
 	auto context = _theme->preparePaintContext(
 		_style.get(),
-		rect(),
 		rect(),
 		e->rect(),
 		!window()->isActiveWindow());
@@ -212,7 +211,7 @@ void PreparedPreviewBox(
 	const auto lifetime = box->lifetime().make_state<rpl::lifetime>();
 	std::move(
 		recipient
-	) | rpl::on_next([=](not_null<Data::Thread*> thread) {
+	) | rpl::start_with_next([=](not_null<Data::Thread*> thread) {
 		info->hide(anim::type::instant);
 		while (row->count()) {
 			delete row->widgetAt(0);
@@ -220,7 +219,7 @@ void PreparedPreviewBox(
 		AddSkip(row);
 		AddSinglePeerRow(row, thread, nullptr, choose);
 		if (const auto topic = thread->asTopic()) {
-			*lifetime = topic->destroyed() | rpl::on_next(reset);
+			*lifetime = topic->destroyed() | rpl::start_with_next(reset);
 		} else {
 			*lifetime = rpl::lifetime();
 		}
@@ -231,7 +230,7 @@ void PreparedPreviewBox(
 	}, info->lifetime());
 
 	item->history()->owner().itemRemoved(
-	) | rpl::on_next([=](not_null<const HistoryItem*> removed) {
+	) | rpl::start_with_next([=](not_null<const HistoryItem*> removed) {
 		if (removed == item) {
 			box->closeBox();
 		}

@@ -95,7 +95,7 @@ void Account::watchProxyChanges() {
 	using ProxyChange = Core::Application::ProxyChange;
 
 	Core::App().proxyChanges(
-	) | rpl::on_next([=](const ProxyChange &change) {
+	) | rpl::start_with_next([=](const ProxyChange &change) {
 		const auto key = [&](const MTP::ProxyData &proxy) {
 			return (proxy.type == MTP::ProxyData::Type::Mtproto)
 				? std::make_pair(proxy.host, proxy.port)
@@ -115,7 +115,7 @@ void Account::watchProxyChanges() {
 
 void Account::watchSessionChanges() {
 	sessionChanges(
-	) | rpl::on_next([=](Session *session) {
+	) | rpl::start_with_next([=](Session *session) {
 		if (!session && _mtp) {
 			_mtp->setUserPhone(QString());
 		}
@@ -427,7 +427,7 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	_mtp->writeKeysRequests(
 	) | rpl::filter([=] {
 		return !*writingKeys;
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		*writingKeys = true;
 		Ui::PostponeCall(_mtp.get(), [=] {
 			local().writeMtpData();
@@ -441,7 +441,7 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 		_mtp->dcOptions().changed() | rpl::to_empty
 	) | rpl::filter([=] {
 		return !*writingConfig;
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		*writingConfig = true;
 		Ui::PostponeCall(_mtp.get(), [=] {
 			local().writeMtpConfig();
@@ -569,11 +569,11 @@ void Account::destroyMtpKeys(MTP::AuthKeysList &&keys) {
 		MTP::Instance::Mode::KeysDestroyer,
 		std::move(destroyFields));
 	_mtpForKeysDestroy->writeKeysRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		local().writeMtpData();
 	}, _mtpForKeysDestroy->lifetime());
 	_mtpForKeysDestroy->allKeysDestroyed(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		LOG(("MTP Info: all keys scheduled for destroy are destroyed."));
 		crl::on_main(this, [=] {
 			_mtpForKeysDestroy = nullptr;

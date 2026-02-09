@@ -44,14 +44,12 @@ struct ProcessingState {
 		Sessions,
 		OtherData,
 		Dialogs,
-		Topic,
 	};
 	enum class EntityType {
 		Chat,
 		SavedMessages,
 		RepliesMessages,
 		VerifyCodes,
-		Topic,
 		Other,
 	};
 
@@ -117,12 +115,6 @@ public:
 	Controller(
 		QPointer<MTP::Instance> mtproto,
 		const MTPInputPeer &peer);
-	Controller(
-		QPointer<MTP::Instance> mtproto,
-		const MTPInputPeer &peer,
-		int32 topicRootId,
-		uint64 peerId,
-		const QString &topicTitle);
 
 	rpl::producer<State> state() const;
 

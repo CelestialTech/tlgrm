@@ -52,7 +52,6 @@ void PrepareImage(
 	emoji->paint(p, {
 		.textColor = patternColor,
 		.position = QPoint(shift, shift),
-		.paused = true,
 	});
 }
 
@@ -93,16 +92,10 @@ QImage CreateTopBgGradient(
 }
 
 QImage CreateTopBgGradient(QSize size, const Data::UniqueGift &gift) {
-	return CreateTopBgGradient(size, gift.backdrop);
-}
-
-QImage CreateTopBgGradient(
-		QSize size,
-		const Data::UniqueGiftBackdrop &backdrop) {
 	return CreateTopBgGradient(
 		size,
-		backdrop.centerColor,
-		backdrop.edgeColor);
+		gift.backdrop.centerColor,
+		gift.backdrop.edgeColor);
 }
 
 QImage CreateTopBgGradient(
@@ -218,25 +211,7 @@ void PaintBgPoints(
 		points,
 		cache,
 		emoji,
-		gift.backdrop,
-		rect,
-		shown);
-}
-
-void PaintBgPoints(
-		QPainter &p,
-		const std::vector<PatternPoint> &points,
-		base::flat_map<float64, QImage> &cache,
-		not_null<Ui::Text::CustomEmoji*> emoji,
-		const Data::UniqueGiftBackdrop &backdrop,
-		const QRect &rect,
-		float64 shown) {
-	PaintBgPoints(
-		p,
-		points,
-		cache,
-		emoji,
-		backdrop.patternColor,
+		gift.backdrop.patternColor,
 		rect,
 		shown);
 }

@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_notifications_manager.h"
 #include "platform/platform_specific.h"
 #include "lang/lang_keys.h"
+#include "settings/settings_bots.h"
+#include "window/window_controller.h"
 
 #include <QtWidgets/QApplication>
 
@@ -29,7 +31,7 @@ void Tray::create() {
 
 	Core::App().settings().workModeValue(
 	) | rpl::combine_previous(
-	) | rpl::on_next([=](WorkMode previous, WorkMode state) {
+	) | rpl::start_with_next([=](WorkMode previous, WorkMode state) {
 		const auto wasHasIcon = (previous != WorkMode::WindowOnly);
 		const auto nowHasIcon = (state != WorkMode::WindowOnly);
 		if (wasHasIcon != nowHasIcon) {
@@ -42,17 +44,17 @@ void Tray::create() {
 	}, _tray.lifetime());
 
 	Core::App().settings().trayIconMonochromeChanges(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateIconCounters();
 	}, _tray.lifetime());
 
 	Core::App().passcodeLockChanges(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		rebuildMenu();
 	}, _tray.lifetime());
 
 	_tray.iconClicks(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		const auto skipTrayClick = (_lastTrayClickTime > 0)
 			&& (crl::now() - _lastTrayClickTime
 				< QApplication::doubleClickInterval());
@@ -93,6 +95,15 @@ void Tray::rebuildMenu() {
 		_tray.addAction(
 			std::move(notificationsText),
 			[=] { toggleSoundNotifications(); });
+
+		// Bot Framework quick access
+		_tray.addAction(
+			rpl::single(QString("Bot Framework")),
+			[] {
+				if (auto window = Core::App().activePrimaryWindow()) {
+					window->showSettings();
+				}
+			});
 	}
 
 	_tray.addAction(tr::lng_quit_from_tray(), [] { Core::Quit(); });

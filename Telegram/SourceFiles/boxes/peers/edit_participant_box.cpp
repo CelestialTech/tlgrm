@@ -24,10 +24,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_options.h"
 #include "ui/painter.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
-#include "settings/sections/settings_privacy_security.h"
+#include "settings/settings_privacy_security.h"
 #include "ui/boxes/choose_date_time.h"
 #include "ui/boxes/confirm_box.h"
-#include "boxes/peers/channel_ownership_transfer.h"
+#include "boxes/passcode_box.h"
 #include "boxes/peers/add_bot_to_chat_box.h"
 #include "boxes/peers/edit_peer_permissions_box.h"
 #include "boxes/peers/edit_peer_info_box.h"
@@ -35,8 +35,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
+#include "core/core_cloud_password.h"
 #include "base/unixtime.h"
 #include "apiwrap.h"
+#include "api/api_cloud_password.h"
 #include "main/main_session.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
@@ -92,7 +94,7 @@ EditParticipantBox::Inner::Inner(
 , _hasAdminRights(hasAdminRights)
 , _rows(this) {
 	_rows->heightValue(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		resizeToWidth(width());
 	}, lifetime());
 
@@ -244,8 +246,7 @@ ChatAdminRightsInfo EditAdminBox::defaultRights() const {
 			| Flag::DeleteStories
 			| Flag::InviteByLinkOrAdd
 			| Flag::ManageCall
-			| Flag::ManageDirect
-			| Flag::BanUsers) };
+			| Flag::ManageDirect) };
 }
 
 void EditAdminBox::prepare() {
@@ -280,7 +281,7 @@ void EditAdminBox::prepare() {
 					true)),
 			st::rightsToggleMargin + (st::rightsDividerMargin / 2));
 		_addAsAdmin->checkedChanges(
-		) | rpl::on_next([=](bool checked) {
+		) | rpl::start_with_next([=](bool checked) {
 			_adminControlsWrap->toggle(checked, anim::type::normal);
 			refreshButtons();
 		}, _addAsAdmin->lifetime());
@@ -299,11 +300,11 @@ void EditAdminBox::prepare() {
 			tr::lng_rights_about_by(
 				lt_user,
 				rpl::single(_by
-					? tr::link(_by->name(), 1)
+					? Ui::Text::Link(_by->name(), 1)
 					: TextWithEntities{ QString::fromUtf8("\U0001F47B") }),
 				lt_date,
 				rpl::single(TextWithEntities{ langDateTimeFull(parsed) }),
-				tr::marked));
+				Ui::Text::WithEntities));
 		if (_by) {
 			label->setLink(1, _by->createOpenLink());
 		}
@@ -366,7 +367,7 @@ void EditAdminBox::prepare() {
 		.anyoneCanAddMembers = anyoneCanAddMembers,
 	};
 	Ui::AddSubsectionTitle(inner, tr::lng_rights_edit_admin_header());
-	auto [checkboxes, getChecked, changes, highlightWidget] = CreateEditAdminRights(
+	auto [checkboxes, getChecked, changes] = CreateEditAdminRights(
 		inner,
 		prepareFlags,
 		disabledMessages,
@@ -463,8 +464,8 @@ void EditAdminBox::prepare() {
 					phrase(
 						tr::now,
 						lt_group,
-						tr::bold(peer()->name()),
-						tr::marked),
+						Ui::Text::Bold(peer()->name()),
+						Ui::Text::WithEntities),
 					crl::guard(this, [=] { finishAddAdmin(); })
 				}));
 			} else {
@@ -528,7 +529,7 @@ not_null<Ui::InputField*> EditAdminBox::addRankInput(
 	result->setMaxLength(kAdminRoleLimit);
 	result->setInstantReplaces(Ui::InstantReplaces::TextOnly());
 	result->changes(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		const auto text = result->getLastText();
 		const auto removed = TextUtilities::RemoveEmoji(text);
 		if (removed != text) {
@@ -585,12 +586,155 @@ not_null<Ui::SlideWrap<Ui::RpWidget>*> EditAdminBox::setupTransferButton(
 }
 
 void EditAdminBox::transferOwnership() {
-	_ownershipTransfer = std::make_unique<ChannelOwnershipTransfer>(
-		peer(),
-		user(),
-		uiShow(),
-		[](std::shared_ptr<Ui::Show> show) { show->hideLayer(); });
-	_ownershipTransfer->start();
+	if (_checkTransferRequestId) {
+		return;
+	}
+
+	const auto channel = peer()->isChannel()
+		? peer()->asChannel()->inputChannel
+		: MTP_inputChannelEmpty();
+	const auto api = &peer()->session().api();
+	api->cloudPassword().reload();
+	_checkTransferRequestId = api->request(MTPchannels_EditCreator(
+		channel,
+		MTP_inputUserEmpty(),
+		MTP_inputCheckPasswordEmpty()
+	)).fail([=](const MTP::Error &error) {
+		_checkTransferRequestId = 0;
+		if (!handleTransferPasswordError(error.type())) {
+			const auto callback = crl::guard(this, [=](Fn<void()> &&close) {
+				transferOwnershipChecked();
+				close();
+			});
+			getDelegate()->show(Ui::MakeConfirmBox({
+				.text = tr::lng_rights_transfer_about(
+					tr::now,
+					lt_group,
+					Ui::Text::Bold(peer()->name()),
+					lt_user,
+					Ui::Text::Bold(user()->shortName()),
+					Ui::Text::RichLangValue),
+				.confirmed = callback,
+				.confirmText = tr::lng_rights_transfer_sure(),
+			}));
+		}
+	}).send();
+}
+
+bool EditAdminBox::handleTransferPasswordError(const QString &error) {
+	const auto session = &user()->session();
+	auto about = tr::lng_rights_transfer_check_about(
+		tr::now,
+		lt_user,
+		Ui::Text::Bold(user()->shortName()),
+		Ui::Text::WithEntities);
+	if (auto box = PrePasswordErrorBox(error, session, std::move(about))) {
+		getDelegate()->show(std::move(box));
+		return true;
+	}
+	return false;
+}
+
+void EditAdminBox::transferOwnershipChecked() {
+	if (const auto chat = peer()->asChatNotMigrated()) {
+		peer()->session().api().migrateChat(chat, crl::guard(this, [=](
+				not_null<ChannelData*> channel) {
+			requestTransferPassword(channel);
+		}));
+	} else if (const auto channel = peer()->asChannelOrMigrated()) {
+		requestTransferPassword(channel);
+	} else {
+		Unexpected("Peer in SaveAdminCallback.");
+	}
+
+}
+
+void EditAdminBox::requestTransferPassword(not_null<ChannelData*> channel) {
+	peer()->session().api().cloudPassword().state(
+	) | rpl::take(
+		1
+	) | rpl::start_with_next([=](const Core::CloudPasswordState &state) {
+		auto fields = PasscodeBox::CloudFields::From(state);
+		fields.customTitle = tr::lng_rights_transfer_password_title();
+		fields.customDescription
+			= tr::lng_rights_transfer_password_description(tr::now);
+		fields.customSubmitButton = tr::lng_passcode_submit();
+		fields.customCheckCallback = crl::guard(this, [=](
+				const Core::CloudPasswordResult &result,
+				base::weak_qptr<PasscodeBox> box) {
+			sendTransferRequestFrom(box, channel, result);
+		});
+		getDelegate()->show(Box<PasscodeBox>(&channel->session(), fields));
+	}, lifetime());
+}
+
+void EditAdminBox::sendTransferRequestFrom(
+		base::weak_qptr<PasscodeBox> box,
+		not_null<ChannelData*> channel,
+		const Core::CloudPasswordResult &result) {
+	if (_transferRequestId) {
+		return;
+	}
+	const auto weak = base::make_weak(this);
+	const auto user = this->user();
+	const auto api = &channel->session().api();
+	_transferRequestId = api->request(MTPchannels_EditCreator(
+		channel->inputChannel,
+		user->inputUser,
+		result.result
+	)).done([=](const MTPUpdates &result) {
+		api->applyUpdates(result);
+		if (!box && !weak) {
+			return;
+		}
+		const auto show = box ? box->uiShow() : weak->uiShow();
+		show->showToast(
+			(channel->isBroadcast()
+				? tr::lng_rights_transfer_done_channel
+				: tr::lng_rights_transfer_done_group)(
+					tr::now,
+					lt_user,
+					user->shortName()));
+		show->hideLayer();
+	}).fail(crl::guard(this, [=](const MTP::Error &error) {
+		if (weak) {
+			_transferRequestId = 0;
+		}
+		if (box && box->handleCustomCheckError(error)) {
+			return;
+		}
+
+		const auto &type = error.type();
+		const auto problem = [&] {
+			if (type == u"CHANNELS_ADMIN_PUBLIC_TOO_MUCH"_q) {
+				return tr::lng_channels_too_much_public_other(tr::now);
+			} else if (type == u"CHANNELS_ADMIN_LOCATED_TOO_MUCH"_q) {
+				return tr::lng_channels_too_much_located_other(tr::now);
+			} else if (type == u"ADMINS_TOO_MUCH"_q) {
+				return (channel->isBroadcast()
+					? tr::lng_error_admin_limit_channel
+					: tr::lng_error_admin_limit)(tr::now);
+			} else if (type == u"CHANNEL_INVALID"_q) {
+				return (channel->isBroadcast()
+					? tr::lng_channel_not_accessible
+					: tr::lng_group_not_accessible)(tr::now);
+			}
+			return Lang::Hard::ServerError();
+		}();
+		const auto recoverable = [&] {
+			return (type == u"PASSWORD_MISSING"_q)
+				|| type.startsWith(u"PASSWORD_TOO_FRESH_"_q)
+				|| type.startsWith(u"SESSION_TOO_FRESH_"_q);
+		}();
+		const auto weak = base::make_weak(this);
+		getDelegate()->show(Ui::MakeInformBox(problem));
+		if (box) {
+			box->closeBox();
+		}
+		if (weak && !recoverable) {
+			closeBox();
+		}
+	})).handleFloodErrors().send();
 }
 
 EditRestrictedBox::EditRestrictedBox(
@@ -654,7 +798,7 @@ void EditRestrictedBox::prepare() {
 	Ui::AddSubsectionTitle(
 		verticalLayout(),
 		tr::lng_rights_user_restrictions_header());
-	auto [checkboxes, getRestrictions, changes, highlightWidget] = CreateEditRestrictions(
+	auto [checkboxes, getRestrictions, changes] = CreateEditRestrictions(
 		this,
 		prepareFlags,
 		disabledMessages,
@@ -692,11 +836,11 @@ void EditRestrictedBox::prepare() {
 				: tr::lng_rights_chat_restricted_by)(
 					lt_user,
 					rpl::single(_by
-						? tr::link(_by->name(), 1)
+						? Ui::Text::Link(_by->name(), 1)
 						: TextWithEntities{ QString::fromUtf8("\U0001F47B") }),
 					lt_date,
 					rpl::single(TextWithEntities{ langDateTimeFull(parsed) }),
-					tr::marked));
+					Ui::Text::WithEntities));
 		if (_by) {
 			label->setLink(1, _by->createOpenLink());
 		}

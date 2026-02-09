@@ -363,10 +363,10 @@ TextWithEntities Story::inReplyText() const {
 				tr::now,
 				lt_media,
 				Ui::Text::Colorized(type),
-				tr::marked),
+				Ui::Text::WithEntities),
 			lt_caption,
 			_caption,
-			tr::marked);
+			Ui::Text::WithEntities);
 }
 
 void Story::setPinnedToTop(bool pinned) {
@@ -727,7 +727,7 @@ void Story::applyFields(
 	auto caption = TextWithEntities{
 		data.vcaption().value_or_empty(),
 		Api::EntitiesFromMTP(
-			&session(),
+			&owner().session(),
 			data.ventities().value_or_empty()),
 	};
 	if (const auto user = _peer->asUser()) {

@@ -16,7 +16,7 @@ HorizontalFitContainer::HorizontalFitContainer(
 	int spacing)
 : RpWidget(parent)
 , _spacing(spacing) {
-	sizeValue() | rpl::on_next([=](QSize size) {
+	sizeValue() | rpl::start_with_next([=](QSize size) {
 		updateLayout(size);
 	}, lifetime());
 }

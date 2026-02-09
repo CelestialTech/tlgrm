@@ -589,7 +589,7 @@ void Sticker::setupLottie() const {
 		boundingBox() * style::DevicePixelRatio());
 
 	_lottie->updates(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		update();
 	}, _lifetime);
 }

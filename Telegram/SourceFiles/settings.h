@@ -50,10 +50,20 @@ DeclareSetting(QString, WorkingDir);
 inline void cForceWorkingDir(const QString &newDir) {
 	cSetWorkingDir(newDir);
 	if (!gWorkingDir.isEmpty()) {
-		cSetWorkingDir(QDir(gWorkingDir).absolutePath() + '/');
-		QDir().mkpath(gWorkingDir);
-		QFile::setPermissions(gWorkingDir,
-			QFileDevice::ReadUser | QFileDevice::WriteUser | QFileDevice::ExeUser);
+		const auto absPath = QDir(gWorkingDir).absolutePath() + '/';
+		cSetWorkingDir(absPath);
+		LOG(("TData: cForceWorkingDir - creating directory: %1").arg(gWorkingDir));
+		if (!QDir().mkpath(gWorkingDir)) {
+			LOG(("TData Error: Failed to create working directory: %1").arg(gWorkingDir));
+		} else {
+			LOG(("TData: Working directory created: %1").arg(gWorkingDir));
+		}
+		if (!QFile::setPermissions(gWorkingDir,
+			QFileDevice::ReadUser | QFileDevice::WriteUser | QFileDevice::ExeUser)) {
+			LOG(("TData Warning: Could not set permissions on: %1").arg(gWorkingDir));
+		} else {
+			LOG(("TData: Permissions set on working directory: %1").arg(gWorkingDir));
+		}
 	}
 
 }

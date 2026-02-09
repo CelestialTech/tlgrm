@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/local_url_handlers.h"
 
-#include "core/deep_links/deep_links_router.h"
 #include "api/api_authorizations.h"
 #include "api/api_cloud_password.h"
 #include "api/api_confirm_phone.h"
@@ -36,7 +35,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/sticker_set_box.h"
 #include "boxes/star_gift_box.h"
 #include "boxes/language_box.h"
-#include "boxes/url_auth_box.h"
 #include "passport/passport_form_controller.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
@@ -56,17 +54,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/themes/window_theme_editor_box.h" // GenerateSlug.
 #include "payments/payments_checkout_process.h"
 #include "settings/cloud_password/settings_cloud_password_login_email.h"
-#include "settings/sections/settings_active_sessions.h"
-#include "settings/sections/settings_credits.h"
+#include "settings/settings_active_sessions.h"
+#include "settings/settings_credits.h"
 #include "settings/settings_credits_graphics.h"
-#include "settings/sections/settings_information.h"
-#include "settings/sections/settings_global_ttl.h"
-#include "settings/sections/settings_folders.h"
-#include "settings/sections/settings_main.h"
+#include "settings/settings_information.h"
+#include "settings/settings_global_ttl.h"
+#include "settings/settings_folders.h"
+#include "settings/settings_main.h"
 #include "settings/settings_privacy_controllers.h"
-#include "settings/sections/settings_privacy_security.h"
-#include "settings/sections/settings_chat.h"
-#include "settings/sections/settings_premium.h"
+#include "settings/settings_privacy_security.h"
+#include "settings/settings_chat.h"
+#include "settings/settings_premium.h"
 #include "storage/storage_account.h"
 #include "mainwidget.h"
 #include "main/main_account.h"
@@ -156,10 +154,10 @@ void PersonalChannelController::prepare() {
 		}
 		if (!delegate()->peerListFullRowsCount()) {
 			auto none = rpl::combine(
-				tr::lng_settings_channel_no_yet(tr::marked),
+				tr::lng_settings_channel_no_yet(Ui::Text::WithEntities),
 				tr::lng_settings_channel_start()
 			) | rpl::map([](TextWithEntities &&text, const QString &link) {
-				return text.append('\n').append(tr::link(link));
+				return text.append('\n').append(Ui::Text::Link(link));
 			});
 			auto label = object_ptr<Ui::FlatLabel>(
 				nullptr,
@@ -233,7 +231,7 @@ void SavePersonalChannel(
 			&& self->personalChannelMessageId() != messageId)) {
 		self->setPersonalChannel(channelId, messageId);
 		self->session().api().request(MTPaccount_UpdatePersonalChannel(
-			channel ? channel->inputChannel() : MTP_inputChannelEmpty()
+			channel ? channel->inputChannel : MTP_inputChannelEmpty()
 		)).done(crl::guard(window, [=] {
 			window->showToast((channel
 				? tr::lng_settings_channel_saved
@@ -324,7 +322,7 @@ void ShowPhonePrivacyBox(Window::SessionController *controller) {
 		key
 	) | rpl::take(
 		1
-	) | rpl::on_next([=](const Privacy::Rule &value) mutable {
+	) | rpl::start_with_next([=](const Privacy::Rule &value) mutable {
 		using namespace ::Settings;
 		const auto show = shared->alive();
 		if (lifetime) {
@@ -508,14 +506,7 @@ void LoginEmailBox(
 	{
 		box->getDelegate()->setTitle(rpl::duplicate(
 			email
-		) | rpl::map([](QString email) {
-			if (email.contains(' ')) {
-				return tr::lng_settings_cloud_login_email_section_title(
-					tr::now,
-					tr::rich);
-			}
-			return Ui::Text::WrapEmailPattern(std::move(email));
-		}));
+		) | rpl::map(Ui::Text::WrapEmailPattern));
 		for (const auto &child : ranges::views::reverse(
 				box->parentWidget()->children())) {
 			if (child && child->isWidgetType()) {
@@ -612,17 +603,6 @@ bool ResolveUsernameOrPhone(
 			: selfId;
 		ResolveGiftCode(controller, appnameParam, fromId, toId);
 		return true;
-	}
-	if (domainParam == u"oauth"_q) {
-		const auto token = params.value(u"startapp"_q);
-		if (!token.isEmpty()) {
-			UrlAuthBox::ActivateUrl(
-				controller->uiShow(),
-				&controller->session(),
-				u"tg://resolve?domain=oauth&startapp="_q + token,
-				context);
-			return true;
-		}
 	}
 
 	// Fix t.me/s/username links.
@@ -835,13 +815,13 @@ bool ResolveSettings(
 			ShowPhonePrivacyBox(controller);
 			return {};
 		} else if (section == u"devices"_q) {
-			return ::Settings::SessionsId();
+			return ::Settings::Sessions::Id();
 		} else if (section == u"folders"_q) {
-			return ::Settings::FoldersId();
+			return ::Settings::Folders::Id();
 		} else if (section == u"privacy"_q) {
-			return ::Settings::PrivacySecurityId();
+			return ::Settings::PrivacySecurity::Id();
 		} else if (section == u"themes"_q) {
-			return ::Settings::ChatId();
+			return ::Settings::Chat::Id();
 		} else if (section == u"change_number"_q) {
 			controller->show(
 				Ui::MakeInformBox(tr::lng_change_phone_error()));
@@ -849,18 +829,18 @@ bool ResolveSettings(
 		} else if (section == u"auto_delete"_q) {
 			return ::Settings::GlobalTTLId();
 		} else if (section == u"information"_q) {
-			return ::Settings::InformationId();
+			return ::Settings::Information::Id();
 		} else if (section == u"login_email"_q) {
 			ShowLoginEmailSettings(controller);
 			return {};
 		}
-		return ::Settings::MainId();
+		return ::Settings::Main::Id();
 	}();
 
 	if (type.has_value()) {
 		if (!controller) {
 			return false;
-		} else if (*type == ::Settings::SessionsId()) {
+		} else if (*type == ::Settings::Sessions::Id()) {
 			controller->session().api().authorizations().reload();
 		}
 		controller->showSettings(*type);
@@ -1013,7 +993,7 @@ bool ShowEditBirthday(
 		const auto save = [=](Data::Birthday result) {
 			using BFlag = MTPDbirthday::Flag;
 			controller->session().api().request(MTPusers_SuggestBirthday(
-				targetUser->inputUser(),
+				targetUser->inputUser,
 				MTP_birthday(
 					MTP_flags(result.year() ? BFlag::f_year : BFlag()),
 					MTP_int(result.day()),
@@ -1105,12 +1085,14 @@ bool ShowEditBirthday(
 				std::move(isExactlyContacts),
 				tr::lng_settings_birthday_contacts(
 					lt_link,
-					tr::lng_settings_birthday_contacts_link(tr::url(link)),
-					tr::marked),
+					tr::lng_settings_birthday_contacts_link(
+					) | Ui::Text::ToLink(link),
+					Ui::Text::WithEntities),
 				tr::lng_settings_birthday_about(
 					lt_link,
-					tr::lng_settings_birthday_about_link(tr::url(link)),
-					tr::marked)));
+					tr::lng_settings_birthday_about_link(
+					) | Ui::Text::ToLink(link),
+					Ui::Text::WithEntities)));
 		}));
 
 	}
@@ -1129,7 +1111,7 @@ bool ShowEditBirthdayPrivacy(
 		Api::UserPrivacy::Key::Birthday
 	) | rpl::take(
 		1
-	) | rpl::on_next([=](const Api::UserPrivacy::Rule &value) {
+	) | rpl::start_with_next([=](const Api::UserPrivacy::Rule &value) {
 		if (isFromBox) {
 			using namespace ::Settings;
 			class Controller final : public BirthdayPrivacyController {
@@ -1164,22 +1146,6 @@ bool ShowEditPersonalChannel(
 	} else if (controller->showFrozenError()) {
 		return true;
 	}
-	const auto maybePeerId = match->captured(1);
-	const auto maybeRemove = match->captured(2);
-
-	if (!maybePeerId.isEmpty()) {
-		if (const auto peerId = PeerId(maybePeerId.toULongLong())) {
-			if (const auto peer = controller->session().data().peer(peerId)) {
-				if (const auto channel = peer->asChannel()) {
-					SavePersonalChannel(controller, channel);
-					return true;
-				}
-			}
-		}
-	} else if (!maybeRemove.isEmpty()) {
-		SavePersonalChannel(controller, nullptr);
-		return true;
-	}
 
 	auto listController = std::make_unique<PersonalChannelController>(
 		controller);
@@ -1196,7 +1162,7 @@ bool ShowEditPersonalChannel(
 		};
 
 		rawController->chosen(
-		) | rpl::on_next([=](not_null<ChannelData*> channel) {
+		) | rpl::start_with_next([=](not_null<ChannelData*> channel) {
 			save(channel);
 		}, box->lifetime());
 
@@ -1292,7 +1258,7 @@ bool EditPaidMessagesFee(
 			ShowEditChatPermissions(controller, channel);
 		}
 	} else {
-		controller->show(Box(EditMessagesPrivacyBox, controller, QString()));
+		controller->show(Box(EditMessagesPrivacyBox, controller));
 	}
 	return true;
 }
@@ -1615,10 +1581,10 @@ bool ResolveTopUp(
 					.text = tr::lng_credits_enough(
 						tr::now,
 						lt_link,
-						tr::link(
-							tr::bold(
+						Ui::Text::Link(
+							Ui::Text::Bold(
 								tr::lng_credits_enough_link(tr::now))),
-						tr::rich),
+						Ui::Text::RichLangValue),
 					.filter = filter,
 					.duration = 4 * crl::time(1000),
 				});
@@ -1723,35 +1689,7 @@ bool ResolveTonSettings(
 	return true;
 }
 
-bool ResolveOAuth(
-		Window::SessionController *controller,
-		const Match &match,
-		const QVariant &context) {
-	if (!controller) {
-		return false;
-	}
-	const auto params = url_parse_params(
-		match->captured(1),
-		qthelp::UrlParamNameTransform::ToLower);
-	const auto token = params.value(u"token"_q);
-	if (token.isEmpty()) {
-		return false;
-	}
-	UrlAuthBox::ActivateUrl(
-		controller->uiShow(),
-		&controller->session(),
-		u"tg://oauth?token="_q + token,
-		context);
-	return true;
-}
-
 } // namespace
-
-bool TryRouterForLocalUrl(
-		Window::SessionController *controller,
-		const QString &command) {
-	return DeepLinks::Router::Instance().tryHandle(controller, command);
-}
 
 const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 	static auto Result = std::vector<LocalUrlHandler>{
@@ -1864,10 +1802,6 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 			ResolveTonSettings
 		},
 		{
-			u"^oauth/?\\?(.+)(#|$)"_q,
-			ResolveOAuth
-		},
-		{
 			u"^([^\\?]+)(\\?|#|$)"_q,
 			HandleUnknown
 		},
@@ -1906,7 +1840,7 @@ const std::vector<LocalUrlHandler> &InternalUrlHandlers() {
 			ShowEditBirthdayPrivacy,
 		},
 		{
-			u"^edit_personal_channel(?::(?:(\\d{2,})|(remove)))?$"_q,
+			u"^edit_personal_channel$"_q,
 			ShowEditPersonalChannel,
 		},
 		{
@@ -2164,8 +2098,6 @@ void ResolveAndShowUniqueGift(
 		const auto &data = result.data();
 		session->data().processUsers(data.vusers());
 		if (const auto gift = Api::FromTL(session, data.vgift())) {
-			Core::App().hideMediaView();
-
 			using namespace ::Settings;
 			show->show(Box(
 				GlobalStarGiftBox,
@@ -2173,7 +2105,6 @@ void ResolveAndShowUniqueGift(
 				*gift,
 				StarGiftResaleInfo(),
 				st));
-			show->activate();
 		}
 	}).fail([=](const MTP::Error &error) {
 		clear();

@@ -240,6 +240,7 @@ void Bubble::paintBubble(QPainter &p, const QRect &r, const QBrush &brush) {
 		p.drawPath(bubblePath(r));
 	}
 	p.setPen(st::activeButtonFg);
+	p.setFont(_st.font);
 	const auto withSubtext = !_subtext.isEmpty();
 	const auto height = withSubtext
 		? (_st.font->height
@@ -331,7 +332,7 @@ BubbleWidget::BubbleWidget(
 
 	resizeTo(_bubble.width(), _bubble.height());
 	_bubble.widthChanges(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		resizeTo(_bubble.width(), _bubble.height());
 	}, lifetime());
 
@@ -341,9 +342,9 @@ BubbleWidget::BubbleWidget(
 	}
 	std::move(
 		showFinishes
-	) | rpl::take(1) | rpl::on_next([=] {
+	) | rpl::take(1) | rpl::start_with_next([=] {
 		_state.value(
-		) | rpl::on_next([=](BubbleRowState state) {
+		) | rpl::start_with_next([=](BubbleRowState state) {
 			animateTo(state);
 		}, lifetime());
 		if (instant) {
@@ -354,7 +355,7 @@ BubbleWidget::BubbleWidget(
 			_bubble.finishAnimating();
 		}
 
-		parent->widthValue() | rpl::on_next([=](int w) {
+		parent->widthValue() | rpl::start_with_next([=](int w) {
 			if (!_appearanceAnimation.animating()) {
 				const auto available = w
 					- _outerPadding.left()
@@ -383,7 +384,7 @@ void BubbleWidget::setupParticles(not_null<Ui::RpWidget*> parent) {
 
 	_particlesAnimation.init([=] { _particlesWidget->update(); });
 
-	_particlesWidget->paintRequest() | rpl::on_next([=] {
+	_particlesWidget->paintRequest() | rpl::start_with_next([=] {
 		if (!_particlesAnimation.animating()) {
 			_particlesAnimation.start();
 		}
@@ -410,17 +411,17 @@ void BubbleWidget::setupParticles(not_null<Ui::RpWidget*> parent) {
 
 		p.setClipPath(bubblePath);
 		_particles->setColor(st::premiumButtonFg->c);
-		_particles->paint(p, _particlesWidget->rect(), crl::now(), false);
+		_particles->paint(p, _particlesWidget->rect(), crl::now());
 		p.setClipping(false);
 
 		p.setClipPath(fullRect.subtracted(bubblePath));
 		_particles->setColor(_brushOverride
 			? st::groupCallMemberInactiveIcon->c
 			: st::creditsBg3->c);
-		_particles->paint(p, _particlesWidget->rect(), crl::now(), false);
+		_particles->paint(p, _particlesWidget->rect(), crl::now());
 	}, _particlesWidget->lifetime());
 
-	geometryValue() | rpl::on_next([=](QRect geometry) {
+	geometryValue() | rpl::start_with_next([=](QRect geometry) {
 		const auto particlesSize = QSize(
 			int(geometry.width() * 1.5),
 			int(geometry.height() * 1.5));
@@ -683,7 +684,7 @@ not_null<BubbleWidget*> AddBubbleRow(
 	rpl::combine(
 		container->sizeValue(),
 		bubble->sizeValue()
-	) | rpl::on_next([=](const QSize &parentSize, const QSize &size) {
+	) | rpl::start_with_next([=](const QSize &parentSize, const QSize &size) {
 		container->resize(parentSize.width(), size.height());
 	}, bubble->lifetime());
 	bubble->show();

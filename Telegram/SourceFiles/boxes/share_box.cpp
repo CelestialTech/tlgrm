@@ -33,7 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_helpers.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_context_menu.h" // CopyPostLink.
-#include "settings/sections/settings_premium.h"
+#include "settings/settings_premium.h"
 #include "window/window_session_controller.h"
 #include "boxes/peer_list_controllers.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
@@ -238,8 +238,8 @@ void ShareBox::prepareCommentField() {
 		_comment->heightValue(),
 		(_bottomWidget
 			? _bottomWidget->heightValue()
-			: (rpl::single(0) | rpl::type_erased))
-	) | rpl::on_next([=](int height, int comment, int bottom) {
+			: (rpl::single(0) | rpl::type_erased()))
+	) | rpl::start_with_next([=](int height, int comment, int bottom) {
 		_comment->moveToLeft(0, height - bottom - comment);
 		if (_bottomWidget) {
 			_bottomWidget->moveToLeft(0, height - bottom);
@@ -249,7 +249,7 @@ void ShareBox::prepareCommentField() {
 	const auto field = _comment->entity();
 
 	field->submits(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		submit({});
 	}, field->lifetime());
 
@@ -263,7 +263,7 @@ void ShareBox::prepareCommentField() {
 	}
 	field->setSubmitSettings(Core::App().settings().sendSubmitWay());
 
-	field->changes() | rpl::on_next([=] {
+	field->changes() | rpl::start_with_next([=] {
 		if (!field->getLastText().isEmpty()) {
 			setCloseByOutsideClick(false);
 		} else if (_inner->selected().empty()) {
@@ -323,18 +323,18 @@ void ShareBox::prepare() {
 		_comment->heightValue(),
 		(_bottomWidget
 			? _bottomWidget->heightValue()
-			: rpl::single(0) | rpl::type_erased)
-	) | rpl::on_next([=] {
+			: rpl::single(0) | rpl::type_erased())
+	) | rpl::start_with_next([=] {
 		updateScrollSkips();
 	}, _comment->lifetime());
 
 	_inner->searchRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		needSearchByUsername();
 	}, _inner->lifetime());
 
 	_inner->scrollToRequests(
-	) | rpl::on_next([=](const Ui::ScrollToRequest &request) {
+	) | rpl::start_with_next([=](const Ui::ScrollToRequest &request) {
 		scrollTo(request);
 	}, _inner->lifetime());
 
@@ -368,11 +368,11 @@ void ShareBox::prepare() {
 			},
 			Window::GifPauseReason::Layer);
 		chatsFilters->lower();
-		chatsFilters->heightValue() | rpl::on_next([this](int h) {
+		chatsFilters->heightValue() | rpl::start_with_next([this](int h) {
 			updateScrollSkips();
 			scrollToY(0);
 		}, lifetime());
-		_select->heightValue() | rpl::on_next([=](int h) {
+		_select->heightValue() | rpl::start_with_next([=](int h) {
 			chatsFilters->moveToLeft(0, h);
 		}, chatsFilters->lifetime());
 		_chatsFilters = chatsFilters;
@@ -557,7 +557,7 @@ void ShareBox::showMenu(not_null<Ui::RpWidget*> parent) {
 				nullptr);
 			std::move(
 				text
-			) | rpl::on_next([action = item->action()](QString text) {
+			) | rpl::start_with_next([action = item->action()](QString text) {
 				action->setText(text);
 			}, item->lifetime());
 			item->init(checked);
@@ -620,7 +620,7 @@ void ShareBox::createButtons() {
 
 		send->setAcceptBoth();
 		send->clicks(
-		) | rpl::on_next([=](Qt::MouseButton button) {
+		) | rpl::start_with_next([=](Qt::MouseButton button) {
 			if (button == Qt::RightButton) {
 				showMenu(send);
 			}
@@ -708,7 +708,7 @@ void ShareBox::submit(Api::SendOptions options) {
 		if (!waiting.empty()) {
 			_descriptor.session->changes().peerUpdates(
 				Data::PeerUpdate::Flag::FullInfo
-			) | rpl::on_next([=](const Data::PeerUpdate &update) {
+			) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
 				if (waiting.contains(update.peer)) {
 					withPaymentApproved(alreadyApproved);
 				}
@@ -718,7 +718,7 @@ void ShareBox::submit(Api::SendOptions options) {
 				_descriptor.session->credits().loadedValue(
 				) | rpl::filter(
 					rpl::mappers::_1
-				) | rpl::take(1) | rpl::on_next([=] {
+				) | rpl::take(1) | rpl::start_with_next([=] {
 					withPaymentApproved(alreadyApproved);
 				}, _submitLifetime);
 			}
@@ -830,7 +830,7 @@ ShareBox::Inner::Inner(
 		rpl::merge(
 			Data::AmPremiumValue(session) | rpl::to_empty,
 			session->api().premium().someMessageMoneyRestrictionsResolved()
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			refreshRestrictedRows();
 		}, lifetime());
 	}
@@ -863,24 +863,24 @@ ShareBox::Inner::Inner(
 
 	_descriptor.session->changes().peerUpdates(
 		Data::PeerUpdate::Flag::Photo
-	) | rpl::on_next([=](const Data::PeerUpdate &update) {
+	) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
 		updateChat(update.peer);
 	}, lifetime());
 
 	_descriptor.session->changes().realtimeNameUpdates(
-	) | rpl::on_next([=](const Data::NameUpdate &update) {
+	) | rpl::start_with_next([=](const Data::NameUpdate &update) {
 		_defaultChatsIndexed->peerNameChanged(
 			update.peer,
 			update.oldFirstLetters);
 	}, lifetime());
 
 	_descriptor.session->downloaderTaskFinished(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		update();
 	}, lifetime());
 
 	style::PaletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		invalidateCache();
 	}, lifetime());
 }
@@ -1313,12 +1313,6 @@ void ShareBox::Inner::updateUpon(const QPoint &pos) {
 	auto x = pos.x(), y = pos.y();
 	auto row = (y - _rowsTop) / _rowHeight;
 	auto column = qFloor((x - _rowsLeft) / _rowWidthReal);
-
-	if (column < 0 || column >= _columnCount) {
-		_upon = -1;
-		return;
-	}
-
 	auto left = _rowsLeft + qFloor(column * _rowWidthReal) + st::shareColumnSkip / 2;
 	auto top = _rowsTop + row * _rowHeight + st::sharePhotoTop;
 	auto xupon = (x >= left) && (x < left + (_rowWidth - st::shareColumnSkip));
@@ -1394,7 +1388,7 @@ void ShareBox::Inner::chooseForumTopic(not_null<Data::Forum*> forum) {
 		Assert(!chat->topic);
 		chat->topic = topic;
 		chat->topic->destroyed(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			changePeerCheckState(chat, false);
 		}, chat->topicLifetime);
 		updateChatName(chat);
@@ -1406,7 +1400,7 @@ void ShareBox::Inner::chooseForumTopic(not_null<Data::Forum*> forum) {
 		});
 
 		forum->destroyed(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			box->closeBox();
 		}, box->lifetime());
 	};
@@ -1442,7 +1436,7 @@ void ShareBox::Inner::chooseMonoforumSublist(
 		Assert(!chat->sublist);
 		chat->sublist = sublist;
 		chat->sublist->destroyed(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			changePeerCheckState(chat, false);
 		}, chat->sublistLifetime);
 		updateChatName(chat);
@@ -1454,7 +1448,7 @@ void ShareBox::Inner::chooseMonoforumSublist(
 		});
 
 		monoforum->destroyed(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			box->closeBox();
 		}, box->lifetime());
 	};
@@ -1737,14 +1731,14 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 			}
 			return result;
 		};
-		auto &api = history->session().api();
+		auto &api = history->owner().session().api();
 		auto &histories = history->owner().histories();
 		const auto donePhraseArgs = CreateForwardedMessagePhraseArgs(
 			result,
 			msgIds);
 		const auto showRecentForwardsToSelf = result.size() == 1
 			&& result.front()->peer()->isSelf()
-			&& history->session().premium();
+			&& history->owner().session().premium();
 		const auto requestType = Data::Histories::RequestType::Send;
 		for (const auto thread : result) {
 			if (!comment.text.isEmpty()) {
@@ -1782,24 +1776,22 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 						: Flag(0))
 					| (starsPaid ? Flag::f_allow_paid_stars : Flag())
 					| (sublistPeer ? Flag::f_reply_to : Flag())
-					| (options.suggest ? Flag::f_suggested_post : Flag())
-					| (options.effectId ? Flag::f_effect : Flag());
+					| (options.suggest ? Flag::f_suggested_post : Flag());
 				threadHistory->sendRequestId = api.request(
 					MTPmessages_ForwardMessages(
 						MTP_flags(sendFlags),
-						history->peer->input(),
+						history->peer->input,
 						MTP_vector<MTPint>(mtpMsgIds),
 						MTP_vector<MTPlong>(generateRandom()),
-						peer->input(),
+						peer->input,
 						MTP_int(topMsgId),
 						(sublistPeer
-							? MTP_inputReplyToMonoForum(sublistPeer->input())
+							? MTP_inputReplyToMonoForum(sublistPeer->input)
 							: MTPInputReplyTo()),
 						MTP_int(options.scheduled),
 						MTP_int(options.scheduleRepeatPeriod),
 						MTP_inputPeerEmpty(), // send_as
 						Data::ShortcutIdToMTP(session, options.shortcutId),
-						MTP_long(options.effectId),
 						MTP_int(videoTimestamp.value_or(0)),
 						MTP_long(starsPaid),
 						Api::SuggestToMTP(options.suggest)

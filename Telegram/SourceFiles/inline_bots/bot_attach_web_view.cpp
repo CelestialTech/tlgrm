@@ -57,7 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "payments/payments_checkout_process.h"
 #include "payments/payments_non_panel_process.h"
-#include "settings/sections/settings_premium.h"
+#include "settings/settings_premium.h"
 #include "storage/storage_account.h"
 #include "storage/storage_domain.h"
 #include "ui/basic_click_handlers.h"
@@ -157,9 +157,10 @@ constexpr auto kPopularAppBotsLimit = 100;
 				.requestWriteAccess = data.is_request_write_access(),
 			} : std::optional<AttachWebViewBot>();
 	});
-	if (const auto icon = result ? result->icon : nullptr) {
-		icon->forceToCache(true);
-
+	if (result && result->icon) {
+		result->icon->forceToCache(true);
+	}
+	if (const auto icon = result->icon) {
 		result->media = icon->createMediaView();
 		icon->save(Data::FileOrigin(), {});
 	}
@@ -286,7 +287,7 @@ void FillDisclaimerBox(
 	Ui::ConfirmBox(box, {
 		.text = tr::lng_mini_apps_disclaimer_text(
 			tr::now,
-			tr::rich),
+			Ui::Text::RichLangValue),
 		.confirmed = callback,
 		.cancelled = [=](Fn<void()> close) { done(false); close(); },
 		.confirmText = tr::lng_box_ok(),
@@ -304,10 +305,10 @@ void FillDisclaimerBox(
 			box.get(),
 			tr::lng_mini_apps_disclaimer_button(
 				lt_link,
-				rpl::single(tr::link(
+				rpl::single(Ui::Text::Link(
 					tr::lng_mini_apps_disclaimer_link(tr::now),
 					tr::lng_mini_apps_tos_url(tr::now))),
-				tr::marked),
+				Ui::Text::WithEntities),
 			st::urlAuthCheckbox,
 			std::move(checkView)),
 		{
@@ -387,9 +388,9 @@ void FillBotUsepic(
 		tr::lng_allow_bot_webview_details(
 			lt_emoji,
 			rpl::single(Ui::Text::IconEmoji(&st::textMoreIconEmoji)),
-			tr::rich
+			Ui::Text::RichLangValue
 		) | rpl::map([](TextWithEntities text) {
-			return tr::link(std::move(text), u"internal:"_q);
+			return Ui::Text::Link(std::move(text), u"internal:"_q);
 		}),
 		st::defaultFlatLabel);
 	const auto userpic = Ui::CreateChild<Ui::UserpicButton>(
@@ -412,28 +413,26 @@ void FillBotUsepic(
 		rpl::single(bot->name()),
 		box->getDelegate()->style().title);
 	const auto icon = bot->isVerified() ? &st::infoVerifiedStar : nullptr;
-	const auto iconCheck = icon
-		? &st::infoPeerBadge.verifiedCheck
-		: nullptr;
 	title->resize(
 		titleLabel->width() + (icon ? icon->width() : 0),
 		titleLabel->height());
 	title->widthValue(
-	) | rpl::distinct_until_changed() | rpl::on_next([=](int w) {
+	) | rpl::distinct_until_changed() | rpl::start_with_next([=](int w) {
 		titleLabel->resizeToWidth(w
 			- (icon ? icon->width() + st::lineWidth : 0));
 	}, title->lifetime());
 	if (icon) {
-		title->paintRequest() | rpl::on_next([=] {
+		title->paintRequest(
+		) | rpl::start_with_next([=] {
 			auto p = Painter(title);
 			p.fillRect(title->rect(), Qt::transparent);
-			const auto x = std::min(
-				titleLabel->textMaxWidth() + st::lineWidth,
-				title->width() - st::lineWidth - icon->width());
-			const auto y = (title->height() - icon->height()) / 2;
-			const auto w = title->width();
-			icon->paint(p, x, y, w);
-			iconCheck->paint(p, x, y, w);
+			icon->paint(
+				p,
+				std::min(
+					titleLabel->textMaxWidth() + st::lineWidth,
+					title->width() - st::lineWidth - icon->width()),
+				(title->height() - icon->height()) / 2,
+				title->width());
 		}, title->lifetime());
 	}
 
@@ -509,7 +508,7 @@ void ConfirmEmojiStatusAccessBox(
 
 	AddSkip(box->verticalLayout(), 2 * st::defaultVerticalListSkip);
 
-	auto name = tr::bold(bot->name());
+	auto name = Ui::Text::Bold(bot->name());
 	box->addRow(
 		object_ptr<Ui::FlatLabel>(
 			box,
@@ -518,7 +517,7 @@ void ConfirmEmojiStatusAccessBox(
 				rpl::single(name),
 				lt_name,
 				rpl::single(name),
-				tr::rich),
+				Ui::Text::RichLangValue),
 			st::botEmojiStatusText),
 		style::al_top);
 
@@ -571,8 +570,8 @@ void ConfirmEmojiStatusBox(
 			box,
 			tr::lng_bot_emoji_status_text(
 				lt_bot,
-				rpl::single(tr::bold(bot->name())),
-				tr::rich),
+				rpl::single(Ui::Text::Bold(bot->name())),
+				Ui::Text::RichLangValue),
 			st::botEmojiStatusText),
 		style::al_top);
 
@@ -599,7 +598,7 @@ void ConfirmEmojiStatusBox(
 	box->addButton(tr::lng_cancel(), [=] {
 		box->closeBox();
 	});
-	box->boxClosing() | rpl::on_next([=] {
+	box->boxClosing() | rpl::start_with_next([=] {
 		if (!*set) {
 			done(false);
 		}
@@ -609,7 +608,7 @@ void ConfirmEmojiStatusBox(
 class BotAction final : public Ui::Menu::ItemBase {
 public:
 	BotAction(
-		not_null<Ui::Menu::Menu*> parent,
+		not_null<Ui::RpWidget*> parent,
 		std::shared_ptr<Ui::Show> show,
 		const style::Menu &st,
 		const AttachWebViewBot &bot,
@@ -650,14 +649,14 @@ private:
 };
 
 BotAction::BotAction(
-	not_null<Ui::Menu::Menu*> parent,
+	not_null<Ui::RpWidget*> parent,
 	std::shared_ptr<Ui::Show> show,
 	const style::Menu &st,
 	const AttachWebViewBot &bot,
 	Fn<void()> callback)
 : ItemBase(parent, st)
 , _show(std::move(show))
-, _dummyAction(Ui::CreateChild<QAction>(parent))
+, _dummyAction(new QAction(parent))
 , _st(st)
 , _bot(bot)
 , _icon(this, _bot.media)
@@ -665,13 +664,13 @@ BotAction::BotAction(
 		+ _st.itemStyle.font->height
 		+ _st.itemPadding.bottom()) {
 	setAcceptBoth(false);
-	fitToMenuWidth();
-	setActionTriggered(std::move(callback));
+	initResizeHook(parent->sizeValue());
+	setClickedCallback(std::move(callback));
 
 	_icon.move(_st.itemIconPosition);
 
 	paintRequest(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		Painter p(this);
 		paint(p);
 	}, lifetime());
@@ -777,7 +776,7 @@ MenuBotIcon::MenuBotIcon(
 : RpWidget(parent)
 , _media(std::move(media)) {
 	style::PaletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_image = QImage();
 		update();
 	}, lifetime());
@@ -898,7 +897,7 @@ void WebViewInstance::requestFullBot() {
 	_bot->session().changes().peerUpdates(
 		_bot,
 		Data::PeerUpdate::Flag::FullInfo
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		if (_botFullWaitingArgs.has_value()) {
 			auto args = *base::take(_botFullWaitingArgs);
 			if (args.url.isEmpty()) {
@@ -991,7 +990,7 @@ void WebViewInstance::resolveApp(
 	const auto already = _session->data().findBotApp(_bot->id, appname);
 	_requestId = _session->api().request(MTPmessages_GetBotApp(
 		MTP_inputBotAppShortName(
-			_bot->inputUser(),
+			_bot->inputUser,
 			MTP_string(appname)),
 		MTP_long(already ? already->hash : 0)
 	)).done([=](const MTPmessages_BotApp &result) {
@@ -1058,10 +1057,10 @@ void WebViewInstance::confirmOpen(Fn<void()> done) {
 			.text = tr::lng_profile_open_app_about(
 				tr::now,
 				lt_terms,
-				tr::link(
+				Ui::Text::Link(
 					tr::lng_profile_open_app_terms(tr::now),
 					tr::lng_mini_apps_tos_url(tr::now)),
-				tr::rich),
+				Ui::Text::RichLangValue),
 			.confirmed = crl::guard(this, callback),
 			.cancelled = crl::guard(this, cancel),
 			.confirmText = tr::lng_view_button_bot_app(),
@@ -1095,10 +1094,10 @@ void WebViewInstance::confirmAppOpen(
 			tr::lng_profile_open_app_about(
 				tr::now,
 				lt_terms,
-				tr::link(
+				Ui::Text::Link(
 					tr::lng_profile_open_app_terms(tr::now),
 					tr::lng_mini_apps_tos_url(tr::now)),
-				tr::rich),
+				Ui::Text::RichLangValue),
 			crl::guard(this, callback),
 			crl::guard(this, cancelled),
 			tr::lng_view_button_bot_app(),
@@ -1110,8 +1109,8 @@ void WebViewInstance::confirmAppOpen(
 					tr::lng_url_auth_allow_messages(
 						tr::now,
 						lt_bot,
-						tr::bold(_bot->name()),
-						tr::marked),
+						Ui::Text::Bold(_bot->name()),
+						Ui::Text::WithEntities),
 					true,
 					st::urlAuthCheckbox),
 				style::margins(
@@ -1142,15 +1141,15 @@ void WebViewInstance::requestButton() {
 			| (action.replyTo ? Flag::f_reply_to : Flag(0))
 			| (action.options.sendAs ? Flag::f_send_as : Flag(0))
 			| (action.options.silent ? Flag::f_silent : Flag(0))),
-		action.history->peer->input(),
-		_bot->inputUser(),
+		action.history->peer->input,
+		_bot->inputUser,
 		MTP_bytes(_button.url),
 		MTP_string(_button.startCommand),
 		MTP_dataJSON(MTP_bytes(botThemeParams().json)),
 		MTP_string("tdesktop"),
 		action.mtpReplyTo(),
 		(action.options.sendAs
-			? action.options.sendAs->input()
+			? action.options.sendAs->input
 			: MTP_inputPeerEmpty())
 	)).done([=](const MTPWebViewResult &result) {
 		const auto &data = result.data();
@@ -1181,7 +1180,7 @@ void WebViewInstance::requestSimple() {
 						? Flag()
 						: Flag::f_start_param))
 				: Flag::f_url)),
-		_bot->inputUser(),
+		_bot->inputUser,
 		MTP_bytes(_button.url),
 		MTP_string(_button.startCommand),
 		MTP_dataJSON(MTP_bytes(botThemeParams().json)),
@@ -1211,8 +1210,8 @@ void WebViewInstance::requestMain() {
 					? Flag::f_compact
 					: Flag(0))
 				: Flag(0))),
-		_context.action->history->peer->input(),
-		_bot->inputUser(),
+		_context.action->history->peer->input,
+		_bot->inputUser,
 		MTP_string(_button.startCommand),
 		MTP_dataJSON(MTP_bytes(botThemeParams().json)),
 		MTP_string("tdesktop")
@@ -1241,7 +1240,7 @@ void WebViewInstance::requestApp(bool allowWrite) {
 		| (allowWrite ? Flag::f_write_allowed : Flag(0));
 	_requestId = _session->api().request(MTPmessages_RequestAppWebView(
 		MTP_flags(flags),
-		_context.action->history->peer->input(),
+		_context.action->history->peer->input,
 		MTP_inputBotAppID(MTP_long(app->id), MTP_long(app->accessHash)),
 		MTP_string(_appStartParam),
 		MTP_dataJSON(MTP_bytes(botThemeParams().json)),
@@ -1345,7 +1344,7 @@ void WebViewInstance::show(ShowArgs &&args) {
 		: nullptr;
 	if (titleBadge) {
 		const auto raw = titleBadge.data();
-		raw->paintRequest() | rpl::on_next([=] {
+		raw->paintRequest() | rpl::start_with_next([=] {
 			auto p = Painter(raw);
 			const auto w = raw->width();
 			st::infoVerifiedStar.paint(p, st::lineWidth, 0, w);
@@ -1435,14 +1434,14 @@ void WebViewInstance::started(uint64 queryId) {
 	_session->data().webViewResultSent(
 	) | rpl::filter([=](const Data::Session::WebViewResultSent &sent) {
 		return (sent.queryId == queryId);
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		close();
 	}, _panel->lifetime());
 
 	const auto action = *_context.action;
 	base::timer_each(
 		kProlongTimeout
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		using Flag = MTPmessages_ProlongWebView::Flag;
 		_session->api().request(base::take(_prolongId)).cancel();
 		_prolongId = _session->api().request(MTPmessages_ProlongWebView(
@@ -1450,12 +1449,12 @@ void WebViewInstance::started(uint64 queryId) {
 				| (action.replyTo ? Flag::f_reply_to : Flag(0))
 				| (action.options.sendAs ? Flag::f_send_as : Flag(0))
 				| (action.options.silent ? Flag::f_silent : Flag(0))),
-			action.history->peer->input(),
-			_bot->inputUser(),
+			action.history->peer->input,
+			_bot->inputUser,
 			MTP_long(queryId),
 			action.mtpReplyTo(),
 			(action.options.sendAs
-				? action.options.sendAs->input()
+				? action.options.sendAs->input
 				: MTP_inputPeerEmpty())
 		)).done([=] {
 			_prolongId = 0;
@@ -1624,8 +1623,8 @@ void WebViewInstance::botHandleMenuButton(
 				: tr::lng_bot_remove_from_menu_sure)(
 					tr::now,
 					lt_bot,
-					tr::bold(name),
-					tr::marked),
+					Ui::Text::Bold(name),
+					Ui::Text::WithEntities),
 			done,
 		}));
 	} break;
@@ -1678,7 +1677,7 @@ void WebViewInstance::botSendData(QByteArray data) {
 	}
 	_dataSent = true;
 	_session->api().request(MTPmessages_SendWebViewData(
-		_bot->inputUser(),
+		_bot->inputUser,
 		MTP_long(base::RandomValue<uint64>()),
 		MTP_string(_button.text),
 		MTP_bytes(data)
@@ -1721,7 +1720,7 @@ void WebViewInstance::botSwitchInlineQuery(
 
 void WebViewInstance::botCheckWriteAccess(Fn<void(bool allowed)> callback) {
 	_session->api().request(MTPbots_CanSendMessage(
-		_bot->inputUser()
+		_bot->inputUser
 	)).done([=](const MTPBool &result) {
 		callback(mtpIsTrue(result));
 	}).fail([=] {
@@ -1731,7 +1730,7 @@ void WebViewInstance::botCheckWriteAccess(Fn<void(bool allowed)> callback) {
 
 void WebViewInstance::botAllowWriteAccess(Fn<void(bool allowed)> callback) {
 	_session->api().request(MTPbots_AllowSendMessage(
-		_bot->inputUser()
+		_bot->inputUser
 	)).done([session = _session, callback](const MTPUpdates &result) {
 		session->api().applyUpdates(result);
 		callback(true);
@@ -1768,7 +1767,7 @@ void WebViewInstance::botRequestEmojiStatusAccess(
 			const auto session = &bot->session();
 			bot->botInfo->canManageEmojiStatus = true;
 			session->api().request(MTPbots_ToggleUserEmojiStatusPermission(
-				bot->inputUser(),
+				bot->inputUser,
 				MTP_bool(true)
 			)).done([=] {
 				callback(true);
@@ -1806,7 +1805,7 @@ void WebViewInstance::botInvokeCustomMethod(
 		Ui::BotWebView::CustomMethodRequest request) {
 	const auto callback = request.callback;
 	_session->api().request(MTPbots_InvokeWebViewCustomMethod(
-		_bot->inputUser(),
+		_bot->inputUser,
 		MTP_string(request.method),
 		MTP_dataJSON(MTP_bytes(request.params))
 	)).done([=](const MTPDataJSON &result) {
@@ -1828,7 +1827,7 @@ void WebViewInstance::botSendPreparedMessage(
 		return;
 	}
 	_session->api().request(MTPmessages_GetPreparedInlineMessage(
-		bot->inputUser(),
+		bot->inputUser,
 		MTP_string(request.id)
 	)).done([=](const MTPmessages_PreparedInlineMessage &result) {
 		const auto panel = weak.get();
@@ -1954,12 +1953,12 @@ void WebViewInstance::botSendPreparedMessage(
 				if (!checked) {
 					return;
 				}
-				[[maybe_unused]] const auto ongoing = base::take(state->send);
+				state->send = nullptr;
 				send({ strong }, options);
 			};
 			state->send({});
 		});
-		box->boxClosing() | rpl::on_next([=] {
+		box->boxClosing() | rpl::start_with_next([=] {
 			if (!state->sent) {
 				callback("USER_DECLINED");
 			}
@@ -1983,7 +1982,7 @@ void WebViewInstance::botSetEmojiStatus(
 	}
 	_session->data().customEmojiManager().resolve(
 		request.customEmojiId
-	) | rpl::on_next_error([=](not_null<DocumentData*> document) {
+	) | rpl::start_with_next_error([=](not_null<DocumentData*> document) {
 		const auto sticker = document->sticker();
 		if (!sticker || sticker->setType != Data::StickersType::Emoji) {
 			callback(u"SUGGESTED_EMOJI_INVALID"_q);
@@ -2019,7 +2018,7 @@ void WebViewInstance::botDownloadFile(
 		callback(true);
 	};
 	_session->api().request(MTPbots_CheckDownloadFileParams(
-		_bot->inputUser(),
+		_bot->inputUser,
 		MTP_string(request.name),
 		MTP_string(request.url)
 	)).done([=] {
@@ -2335,7 +2334,7 @@ void AttachWebView::requestAddToMenu(
 	}
 
 	process.requestId = _session->api().request(
-		MTPmessages_GetAttachMenuBot(bot->inputUser())
+		MTPmessages_GetAttachMenuBot(bot->inputUser)
 	).done([=](const MTPAttachMenuBotsBot &result) {
 		_addToMenu[bot].requestId = 0;
 		const auto &data = result.data();
@@ -2498,8 +2497,8 @@ void AttachWebView::confirmAddToMenu(
 				box,
 				tr::lng_bot_will_be_added(
 					lt_bot,
-					rpl::single(tr::bold(bot.name)),
-					tr::marked),
+					rpl::single(Ui::Text::Bold(bot.name)),
+					Ui::Text::WithEntities),
 				st::boxLabel));
 		} else {
 			Ui::ConfirmBox(box, {
@@ -2508,8 +2507,8 @@ void AttachWebView::confirmAddToMenu(
 					: tr::lng_bot_add_to_menu)(
 						tr::now,
 						lt_bot,
-						tr::bold(bot.name),
-						tr::marked),
+						Ui::Text::Bold(bot.name),
+						Ui::Text::WithEntities),
 				done,
 				(callback
 					? [=](Fn<void()> close) { callback(false); close(); }
@@ -2522,8 +2521,8 @@ void AttachWebView::confirmAddToMenu(
 						tr::lng_url_auth_allow_messages(
 							tr::now,
 							lt_bot,
-							tr::bold(bot.name),
-							tr::marked),
+							Ui::Text::Bold(bot.name),
+							Ui::Text::WithEntities),
 						true,
 						st::urlAuthCheckbox),
 					style::margins(
@@ -2548,7 +2547,7 @@ void AttachWebView::toggleInMenu(
 		MTP_flags((state == ToggledState::AllowedToWrite)
 			? Flag::f_write_allowed
 			: Flag()),
-		bot->inputUser(),
+		bot->inputUser,
 		MTP_bool(state != ToggledState::Removed)
 	)).done([=] {
 		_requestId = 0;
@@ -2720,13 +2719,13 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 			});
 		};
 		auto action = base::make_unique_q<BotAction>(
-			raw->menu(),
+			raw,
 			controller->uiShow(),
 			raw->menu()->st(),
 			bot,
 			callback);
 		action->forceShown(
-		) | rpl::on_next([=](bool shown) {
+		) | rpl::start_with_next([=](bool shown) {
 			if (shown) {
 				raw->setAutoHiding(false);
 			} else {

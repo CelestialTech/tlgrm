@@ -159,7 +159,7 @@ void ConfirmSubscriptionBox(
 	state->frame.setDevicePixelRatio(style::DevicePixelRatio());
 	const auto options = Images::Option::RoundCircle;
 	userpic->paintRequest(
-	) | rpl::on_next([=, small = Data::PhotoSize::Small] {
+	) | rpl::start_with_next([=, small = Data::PhotoSize::Small] {
 		state->frame.fill(Qt::transparent);
 		{
 			auto p = QPainter(&state->frame);
@@ -194,7 +194,7 @@ void ConfirmSubscriptionBox(
 		state->photoMedia->wanted(Data::PhotoSize::Small, Data::FileOrigin());
 		if (!state->photoMedia->image(Data::PhotoSize::Small)) {
 			session->downloaderTaskFinished(
-			) | rpl::on_next([=] {
+			) | rpl::start_with_next([=] {
 				userpic->update();
 			}, userpic->lifetime());
 		}
@@ -224,13 +224,13 @@ void ConfirmSubscriptionBox(
 			box,
 			tr::lng_channel_invite_subscription_about(
 				lt_channel,
-				rpl::single(tr::bold(name)),
+				rpl::single(Ui::Text::Bold(name)),
 				lt_price,
 				tr::lng_credits_summary_options_credits(
 					lt_count,
 					rpl::single(amount) | tr::to_count(),
-					tr::bold),
-				tr::marked),
+					Ui::Text::Bold),
+				Ui::Text::WithEntities),
 			st::inviteLinkSubscribeBoxAbout),
 		style::al_top);
 	Ui::AddSkip(content);
@@ -243,9 +243,9 @@ void ConfirmSubscriptionBox(
 					tr::lng_paid_react_agree_link(),
 					tr::lng_group_invite_subscription_about_url()
 				) | rpl::map([](const QString &text, const QString &url) {
-					return tr::link(text, url);
+					return Ui::Text::Link(text, url);
 				}),
-				tr::rich),
+				Ui::Text::RichLangValue),
 			st::inviteLinkSubscribeBoxTerms),
 		style::al_top);
 
@@ -260,7 +260,7 @@ void ConfirmSubscriptionBox(
 		rpl::combine(
 			balance->sizeValue(),
 			content->sizeValue()
-		) | rpl::on_next([=](const QSize &, const QSize &) {
+		) | rpl::start_with_next([=](const QSize &, const QSize &) {
 			balance->moveToRight(
 				st::creditsHistoryRightSkip * 2,
 				st::creditsHistoryRightSkip);
@@ -408,7 +408,7 @@ void CheckChatInvite(
 				box->boxClosing(
 				) | rpl::filter([=] {
 					return !invitePeekChannel->amIn();
-				}) | rpl::on_next([=] {
+				}) | rpl::start_with_next([=] {
 					if (const auto strong = weak.get()) {
 						strong->clearSectionStack(Window::SectionShow(
 							Window::SectionShow::Way::ClearStack,
@@ -527,7 +527,7 @@ ConfirmInviteBox::ConfirmInviteBox(
 		_photo->wanted(Data::PhotoSize::Small, Data::FileOrigin());
 		if (!_photo->image(Data::PhotoSize::Small)) {
 			_session->downloaderTaskFinished(
-			) | rpl::on_next([=] {
+			) | rpl::start_with_next([=] {
 				update();
 			}, lifetime());
 		}

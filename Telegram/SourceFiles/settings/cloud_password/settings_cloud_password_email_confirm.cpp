@@ -124,7 +124,7 @@ void EmailConfirm::setupContent() {
 		return;
 	}
 	cloudPassword().state(
-	) | rpl::on_next([=](const Core::CloudPasswordState &state) {
+	) | rpl::start_with_next([=](const Core::CloudPasswordState &state) {
 		if (!_requestLifetime
 			&& state.unconfirmedPattern.isEmpty()
 			&& recoverEmailPattern.isEmpty()) {
@@ -161,7 +161,7 @@ void EmailConfirm::setupContent() {
 
 	const auto error = AddError(content, nullptr);
 	newInput->changes(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		error->hide();
 	}, newInput->lifetime());
 	AddSkipInsteadOfField(content);
@@ -172,11 +172,11 @@ void EmailConfirm::setupContent() {
 		st::changePhoneLabel);
 	resendInfo->hide();
 	error->geometryValue(
-	) | rpl::on_next([=](const QRect &r) {
+	) | rpl::start_with_next([=](const QRect &r) {
 		resendInfo->setGeometry(r);
 	}, resendInfo->lifetime());
 	error->shownValue(
-	) | rpl::on_next([=](bool shown) {
+	) | rpl::start_with_next([=](bool shown) {
 		if (shown) {
 			resendInfo->hide();
 		}
@@ -190,7 +190,7 @@ void EmailConfirm::setupContent() {
 			return;
 		}
 		_requestLifetime = cloudPassword().resendEmailCode(
-		) | rpl::on_error_done([=](const QString &type) {
+		) | rpl::start_with_error_done([=](const QString &type) {
 			_requestLifetime.destroy();
 
 			error->show();
@@ -213,7 +213,7 @@ void EmailConfirm::setupContent() {
 					return;
 				}
 				_requestLifetime = cloudPassword().resetPassword(
-				) | rpl::on_next_error_done([=](
+				) | rpl::start_with_next_error_done([=](
 						Api::CloudPassword::ResetRetryDate retryDate) {
 					_requestLifetime.destroy();
 					const auto left = std::max(
@@ -236,7 +236,7 @@ void EmailConfirm::setupContent() {
 						return s.pendingResetDate != 0;
 					}) | rpl::take(
 						1
-					) | rpl::on_next([=](const PasswordState &s) {
+					) | rpl::start_with_next([=](const PasswordState &s) {
 						const auto left = (s.pendingResetDate
 							- base::unixtime::now());
 						if (left > 0) {
@@ -276,7 +276,7 @@ void EmailConfirm::setupContent() {
 		} else if (!_requestLifetime && recoverEmailPattern.isEmpty()) {
 			_requestLifetime = cloudPassword().confirmEmail(
 				newText
-			) | rpl::on_error_done([=](const QString &type) {
+			) | rpl::start_with_error_done([=](const QString &type) {
 				_requestLifetime.destroy();
 
 				newInput->setFocus();
@@ -313,7 +313,7 @@ void EmailConfirm::setupContent() {
 		} else if (!_requestLifetime) {
 			_requestLifetime = cloudPassword().checkRecoveryEmailAddressCode(
 				newText
-			) | rpl::on_error_done([=](const QString &type) {
+			) | rpl::start_with_error_done([=](const QString &type) {
 				_requestLifetime.destroy();
 
 				newInput->setFocus();
@@ -353,7 +353,7 @@ void EmailConfirm::setupContent() {
 
 	const auto submit = [=] { button->clicked({}, Qt::LeftButton); };
 	newInput->setAutoSubmit(currentStepDataCodeLength, submit);
-	newInput->submits() | rpl::on_next(submit, newInput->lifetime());
+	newInput->submits() | rpl::start_with_next(submit, newInput->lifetime());
 
 	setFocusCallback([=] { newInput->setFocus(); });
 

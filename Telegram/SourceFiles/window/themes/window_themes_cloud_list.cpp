@@ -357,12 +357,12 @@ void CloudList::setup() {
 		allShown()
 	) | rpl::map([=] {
 		return collectAll();
-	}) | rpl::on_next([=](std::vector<Data::CloudTheme> &&list) {
+	}) | rpl::start_with_next([=](std::vector<Data::CloudTheme> &&list) {
 		rebuildUsing(std::move(list));
 	}, _outer->lifetime());
 
 	_outer->widthValue(
-	) | rpl::on_next([=](int width) {
+	) | rpl::start_with_next([=](int width) {
 		updateGeometry();
 	}, _outer->lifetime());
 }
@@ -673,7 +673,7 @@ void CloudList::subscribeToDownloadFinished() {
 		return;
 	}
 	_window->session().downloaderTaskFinished(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		auto &&waiting = _elements | ranges::views::filter(&Element::waiting);
 		const auto still = ranges::count_if(waiting, [&](Element &element) {
 			if (!element.media) {

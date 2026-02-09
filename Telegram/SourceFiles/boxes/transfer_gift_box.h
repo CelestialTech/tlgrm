@@ -7,8 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-struct HistoryMessageSuggestion;
-
 namespace Window {
 class SessionController;
 } // namespace Window
@@ -37,15 +35,6 @@ void ShowTransferGiftBox(
 	not_null<Window::SessionController*> window,
 	std::shared_ptr<Data::UniqueGift> gift,
 	Data::SavedStarGiftId savedId);
-
-void ShowGiftSaleAcceptBox(
-	not_null<Window::SessionController*> controller,
-	not_null<HistoryItem*> item,
-	not_null<HistoryMessageSuggestion*> suggestion);
-void ShowGiftSaleRejectBox(
-	not_null<Window::SessionController*> controller,
-	not_null<HistoryItem*> item,
-	not_null<HistoryMessageSuggestion*> suggestion);
 
 void ShowBuyResaleGiftBox(
 	std::shared_ptr<ChatHelpers::Show> show,

@@ -24,7 +24,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/concurrent_timer.h"
 #include "base/invoke_queued.h"
-#include "base/options.h"
 #include "base/qthelp_url.h"
 #include "base/qthelp_regex.h"
 #include "ui/ui_utility.h"
@@ -36,18 +35,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/qpa/qplatformscreen.h>
 
 namespace Core {
-namespace {
-
-base::options::toggle OptionDeadlockDetector({
-	.id = kOptionDeadlockDetector,
-	.name = "Deadlock Detector",
-	.description = "Check once every 30 seconds that main thread is still responsive.",
-	.restartRequired = true,
-});
-
-} // namespace
-
-const char kOptionDeadlockDetector[] = "deadlock-detector";
 
 bool Sandbox::QuitOnStartRequested = false;
 
@@ -89,6 +76,9 @@ int Sandbox::start() {
 				gManyInstance = true;
 			}
 		}
+		// Always allow multiple instances (--many behavior by default)
+		gManyInstance = true;
+		LOG(("TData: Multiple instance mode enabled by default"));
 	}
 
 #if defined Q_OS_LINUX && QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
@@ -134,8 +124,24 @@ int Sandbox::start() {
 		manager.setRestartHint(QSessionManager::RestartNever);
 	});
 
-	LOG(("Connecting local socket to %1...").arg(_localServerName));
-	_localSocket.connectToServer(_localServerName);
+	// Check for MCP mode - skip socket dance and launch immediately
+	const auto args = QCoreApplication::arguments();
+	const bool mcpMode = args.contains(u"--mcp"_q);
+
+	if (mcpMode) {
+		LOG(("MCP mode detected - launching application directly"));
+		fprintf(stderr, "[MCP] Sandbox: MCP mode detected, skipping socket check\n");
+		fflush(stderr);
+
+		// For MCP mode, skip single instance check and launch immediately
+		// This ensures the application starts even when stdin is piped
+		crl::on_main(this, [=] {
+			singleInstanceChecked();
+		});
+	} else {
+		LOG(("Connecting local socket to %1...").arg(_localServerName));
+		_localSocket.connectToServer(_localServerName);
+	}
 
 	if (QuitOnStartRequested) {
 		closeApplication();
@@ -162,10 +168,12 @@ void Sandbox::launchApplication() {
 		}
 		setupScreenScale();
 
-		if (OptionDeadlockDetector.value()) {
+#ifndef _DEBUG
+		if (Logs::DebugEnabled()) {
 			using DeadlockDetector::PingThread;
 			_deadlockDetector = std::make_unique<PingThread>(this);
 		}
+#endif // !_DEBUG
 
 		_application = std::make_unique<Application>();
 
@@ -347,6 +355,11 @@ void Sandbox::singleInstanceChecked() {
 		new NotStartedWindow();
 		return;
 	}
+
+	// Check for MCP mode - skip crash report window entirely
+	const auto args = QCoreApplication::arguments();
+	const bool mcpMode = args.contains(u"--mcp"_q);
+
 	const auto result = CrashReports::Start();
 	v::match(result, [&](CrashReports::Status status) {
 		if (status == CrashReports::CantOpen) {
@@ -365,12 +378,21 @@ void Sandbox::singleInstanceChecked() {
 			}
 			return;
 		}
+		// In MCP mode, skip crash report window and launch directly
+		if (mcpMode) {
+			LOG(("MCP mode - skipping crash report dialog"));
+			fprintf(stderr, "[MCP] Skipping crash report dialog\n");
+			fflush(stderr);
+			CrashReports::Restart();
+			launchApplication();
+			return;
+		}
 		_lastCrashDump = crashdump;
 		auto window = new LastCrashedWindow(
 			_lastCrashDump,
 			[=] { launchApplication(); });
 		window->proxyChanges(
-		) | rpl::on_next([=](MTP::ProxyData &&proxy) {
+		) | rpl::start_with_next([=](MTP::ProxyData &&proxy) {
 			_sandboxProxy = std::move(proxy);
 			refreshGlobalProxy();
 		}, window->lifetime());

@@ -42,6 +42,7 @@ void TryAddingPaidReaction(
 void TryAddingPaidReaction(
 	not_null<Calls::GroupCall*> call,
 	int count,
+	std::optional<PeerId> shownPeer,
 	std::shared_ptr<Main::SessionShow> show,
 	Fn<void(bool)> finished = nullptr);
 

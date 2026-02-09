@@ -59,7 +59,7 @@ LayerWidget::LayerWidget(
 	_content->show();
 
 	paintRequest(
-	) | rpl::on_next([=](const QRect &clip) {
+	) | rpl::start_with_next([=](const QRect &clip) {
 		auto p = QPainter(this);
 		const auto faded = _backgroundFade.value(1.);
 		if (faded < 1.) {
@@ -83,12 +83,12 @@ void LayerWidget::start() {
 	_background = ProcessBackground(renderBackground(), _backgroundNight);
 
 	sizeValue(
-	) | rpl::on_next([=](const QSize &size) {
+	) | rpl::start_with_next([=](const QSize &size) {
 		checkBackgroundStale();
 		_content->resize(size);
 	}, lifetime());
 
-	style::PaletteChanged() | rpl::on_next([=] {
+	style::PaletteChanged() | rpl::start_with_next([=] {
 		checkBackgroundStale();
 	}, lifetime());
 }

@@ -73,13 +73,6 @@ constexpr auto kAdminBadgeTextOpacity = 0.6;
 	return minHeight / 2;
 }
 
-[[nodiscard]] int CountPriceRadius() {
-	const auto height = st::groupCallPricePadding.top()
-		+ st::normalFont->height
-		+ st::groupCallPricePadding.bottom();
-	return height / 2;
-}
-
 [[nodiscard]] int CountPinnedRadius() {
 	const auto height = st::groupCallUserpicPadding.top()
 		+ st::groupCallPinnedUserpic
@@ -311,7 +304,6 @@ struct MessagesUi::MessageView {
 	bool removed = false;
 	bool sending = false;
 	bool failed = false;
-	bool simple = false;
 	bool admin = false;
 	bool mine = false;
 };
@@ -341,7 +333,6 @@ MessagesUi::PayedBg::PayedBg(const Ui::StarsColoring &coloring)
 , pinnedLight(CountPinnedRadius(), light.color())
 , pinnedDark(CountPinnedRadius(), dark.color())
 , messageLight(CountMessageRadius(), light.color())
-, priceDark(CountPriceRadius(), dark.color())
 , badgeDark(st::roundRadiusLarge, dark.color()) {
 }
 
@@ -380,7 +371,7 @@ void MessagesUi::setupBadges() {
 	auto helper = Ui::Text::CustomEmojiHelper();
 	const auto liveText = helper.paletteDependent(
 		Ui::Text::CustomEmojiTextBadge(
-			tr::lng_video_stream_live(tr::now).toUpper(),
+			tr::lng_video_stream_live(tr::now),
 			st::groupCallMessageBadge,
 			st::groupCallMessageBadgeMargin));
 	_liveBadge.setMarkedText(
@@ -392,7 +383,7 @@ void MessagesUi::setupBadges() {
 	_adminBadge.setText(st::messageTextStyle, tr::lng_admin_badge(tr::now));
 
 	_topDonors.value(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		for (auto &entry : _views) {
 			const auto place = donorPlace(entry.from);
 			if (entry.place != place) {
@@ -419,7 +410,7 @@ void MessagesUi::setupList(
 	rpl::combine(
 		std::move(messages),
 		std::move(shown)
-	) | rpl::on_next([=](std::vector<Message> &&list, bool shown) {
+	) | rpl::start_with_next([=](std::vector<Message> &&list, bool shown) {
 		if (shown) {
 			_hidden = std::nullopt;
 		} else {
@@ -500,7 +491,7 @@ void MessagesUi::showList(const std::vector<Message> &list) {
 void MessagesUi::handleIdUpdates(rpl::producer<MessageIdUpdate> idUpdates) {
 	std::move(
 		idUpdates
-	) | rpl::on_next([=](MessageIdUpdate update) {
+	) | rpl::start_with_next([=](MessageIdUpdate update) {
 		const auto i = ranges::find(
 			_views,
 			update.localId,
@@ -527,7 +518,6 @@ void MessagesUi::animateMessageSent(MessageView &entry) {
 
 void MessagesUi::updateMessageSize(MessageView &entry) {
 	const auto &padding = st::groupCallMessagePadding;
-	const auto &pricePadding = st::groupCallPricePadding;
 
 	const auto hasUserpic = !entry.failed;
 	const auto userpicPadding = st::groupCallUserpicPadding;
@@ -542,9 +532,6 @@ void MessagesUi::updateMessageSize(MessageView &entry) {
 		entry.text,
 		std::min(st::groupCallWidth / 2, inner),
 		inner);
-	const auto price = entry.simple
-		? (pricePadding.left() + pricePadding.right() + entry.price.maxWidth())
-		: 0;
 	const auto space = st::normalFont->spacew;
 	const auto nameWidth = entry.name.isEmpty() ? 0 : entry.name.maxWidth();
 	const auto nameLineWidth = nameWidth
@@ -559,8 +546,8 @@ void MessagesUi::updateMessageSize(MessageView &entry) {
 		? 0
 		: st::messageTextStyle.font->height;
 	const auto textHeight = size.height();
-	entry.width = widthSkip
-		+ std::max(size.width() + price, std::min(nameLineWidth, inner));
+	entry.width = std::max(size.width(), std::min(nameLineWidth, inner))
+		+ widthSkip;
 	entry.left = _streamMode ? 0 : (_width - entry.width) / 2;
 	entry.textLeft = leftSkip;
 	entry.textTop = padding.top() + nameHeight;
@@ -643,15 +630,13 @@ void MessagesUi::setContentFailed(MessageView &entry) {
 		TextWithEntities().append(
 			QString::fromUtf8("\xe2\x9d\x97\xef\xb8\x8f")
 		).append(' ').append(
-			tr::italic(u"Failed to send the message."_q)),
+			Ui::Text::Italic(u"Failed to send the message."_q)),
 		kMarkupTextOptions,
 		st::groupCallWidth / 8);
 	entry.price = Ui::Text::String();
 }
 
 void MessagesUi::setContent(MessageView &entry) {
-	entry.simple = !entry.admin && entry.original.empty() && entry.stars > 0;
-
 	const auto name = nameText(entry.from, entry.place);
 	entry.name = entry.admin
 		? Ui::Text::String(
@@ -663,7 +648,7 @@ void MessagesUi::setContent(MessageView &entry) {
 		: Ui::Text::String();
 	if (const auto stars = entry.stars) {
 		entry.price = Ui::Text::String(
-			entry.simple ? st::messageTextStyle : st::whoReadDateStyle,
+			st::whoReadDateStyle,
 			Ui::Text::IconEmoji(
 				&st::starIconEmojiSmall
 			).append(Lang::FormatCountDecimal(stars)),
@@ -673,7 +658,7 @@ void MessagesUi::setContent(MessageView &entry) {
 	}
 	auto composed = entry.admin
 		? entry.original
-		: tr::link(name, 1).append(' ').append(entry.original);
+		: Ui::Text::Link(name, 1).append(' ').append(entry.original);
 	if (!entry.admin) {
 		composed.text.replace(QChar('\n'), QChar(' '));
 	}
@@ -683,14 +668,12 @@ void MessagesUi::setContent(MessageView &entry) {
 		kMarkupTextOptions,
 		st::groupCallWidth / 8,
 		_crownHelper.context([this, id = entry.id] { repaintMessage(id); }));
-	if (!entry.simple && !entry.price.isEmpty()) {
+	if (!entry.price.isEmpty()) {
 		entry.text.updateSkipBlock(
 			entry.price.maxWidth(),
 			st::normalFont->height);
 	}
-	if (!entry.simple && !entry.admin) {
-		entry.text.setLink(1, entry.fromLink);
-	}
+	entry.text.setLink(1, entry.fromLink);
 	if (entry.text.hasSpoilers()) {
 		const auto id = entry.id;
 		const auto guard = base::make_weak(_messages);
@@ -960,7 +943,7 @@ TextWithEntities MessagesUi::nameText(
 		}
 		result.append(Ui::Text::SingleCustomEmoji(i->second)).append(' ');
 	}
-	result.append(tr::bold(peer->shortName()));
+	result.append(Ui::Text::Bold(peer->shortName()));
 	return result;
 }
 
@@ -1008,7 +991,7 @@ void MessagesUi::startReactionAnimation(MessageView &entry) {
 		rpl::combine(
 			_scroll->scrollTopValue(),
 			_scroll->RpWidget::positionValue()
-		) | rpl::on_next([=](int yshift, QPoint point) {
+		) | rpl::start_with_next([=](int yshift, QPoint point) {
 			_reactionBasePosition = point - QPoint(0, yshift);
 			for (auto &view : _views) {
 				updateReactionPosition(view);
@@ -1029,7 +1012,7 @@ void MessagesUi::startReactionAnimation(MessageView &entry) {
 	const auto effectSize = st::reactionInlineImage * 2;
 	const auto animation = entry.reactionAnimation.get();
 	raw->resize(effectSize, effectSize);
-	raw->paintRequest() | rpl::on_next([=] {
+	raw->paintRequest() | rpl::start_with_next([=] {
 		if (animation->finished()) {
 			crl::on_main(raw, [=] {
 				removeReaction(raw);
@@ -1166,7 +1149,7 @@ void MessagesUi::setupMessagesWidget() {
 		scroll->scrollTopValue(),
 		scroll->heightValue(),
 		_messages->heightValue()
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateTopFade();
 		updateBottomFade();
 	}, scroll->lifetime());
@@ -1177,7 +1160,7 @@ void MessagesUi::setupMessagesWidget() {
 		receiveAllMouseEvents();
 	}
 
-	_messages->paintRequest() | rpl::on_next([=](QRect clip) {
+	_messages->paintRequest() | rpl::start_with_next([=](QRect clip) {
 		const auto start = scroll->scrollTop();
 		const auto end = start + scroll->height();
 		const auto ratio = style::DevicePixelRatio();
@@ -1224,19 +1207,18 @@ void MessagesUi::setupMessagesWidget() {
 				p.setOpacity(scale);
 				p.translate(-mx, -my);
 			}
-			auto bg = (std::unique_ptr<PayedBg>*)nullptr;
 			if (!_streamMode) {
 				_messageBgRect.paint(p, { x, y, width, use });
 			} else if (entry.stars) {
 				const auto coloring = Ui::StarsColoringForCount(
 					colorings,
 					entry.stars);
-				bg = &_bgs[ColoringKey(coloring)];
-				if (!*bg) {
-					*bg = std::make_unique<PayedBg>(coloring);
+				auto &bg = _bgs[ColoringKey(coloring)];
+				if (!bg) {
+					bg = std::make_unique<PayedBg>(coloring);
 				}
 				p.setOpacity(kColoredMessageBgOpacity);
-				(*bg)->messageLight.paint(p, { x, y, width, use });
+				bg->messageLight.paint(p, { x, y, width, use });
 				p.setOpacity(1.);
 				if (_highlightAnimation.animating()
 					&& entry.id == _highlightId) {
@@ -1254,6 +1236,7 @@ void MessagesUi::setupMessagesWidget() {
 			}
 
 			const auto textLeft = entry.textLeft;
+			const auto priceSkip = padding.right() / 2;
 			const auto hasUserpic = !entry.failed;
 			if (hasUserpic) {
 				const auto userpicSize = st::groupCallUserpic;
@@ -1316,49 +1299,23 @@ void MessagesUi::setupMessagesWidget() {
 				});
 				p.setOpacity(1.);
 			}
-			const auto pricePadding = st::groupCallPricePadding;
-			const auto textRight = padding.right()
-				+ (entry.simple
-					? (entry.price.maxWidth()
-						+ pricePadding.left()
-						+ pricePadding.right())
-					: 0);
 			entry.text.draw(p, {
 				.position = {
 					x + textLeft,
 					y + entry.textTop,
 				},
-				.availableWidth = entry.width - textLeft - textRight,
+				.availableWidth = entry.width - textLeft - padding.right(),
 				.palette = &st::groupCallMessagePalette,
 				.spoiler = Ui::Text::DefaultSpoilerCache(),
 				.now = now,
 				.paused = !_messages->window()->isActiveWindow(),
 			});
 			if (!entry.price.isEmpty()) {
-				const auto priceRight = x
-					+ entry.width
-					- entry.price.maxWidth();
-				const auto priceLeft = entry.simple
-					? (priceRight
-						- (padding.top() - pricePadding.top())
-						- pricePadding.right())
-					: (priceRight - (padding.right() / 2));
-				const auto priceTop = entry.simple
-					? (y + entry.textTop)
-					: (y + use - st::normalFont->height);
-				if (entry.simple && bg) {
-					p.setOpacity(kDarkOverOpacity);
-					const auto r = QRect(
-						priceLeft,
-						priceTop,
-						entry.price.maxWidth(),
-						st::normalFont->height
-					).marginsAdded(pricePadding);
-					(*bg)->priceDark.paint(p, r);
-					p.setOpacity(1.);
-				}
 				entry.price.draw(p, {
-					.position = { priceLeft, priceTop },
+					.position = {
+						x + entry.width - entry.price.maxWidth() - priceSkip,
+						y + use - st::normalFont->height,
+					},
 					.availableWidth = entry.price.maxWidth(),
 				});
 			}
@@ -1429,7 +1386,7 @@ void MessagesUi::receiveSomeMouseEvents() {
 }
 
 void MessagesUi::receiveAllMouseEvents() {
-	_messages->events() | rpl::on_next([=](not_null<QEvent*> e) {
+	_messages->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
 		const auto type = e->type();
 		if (type != QEvent::MouseButtonPress) {
 			return;
@@ -1529,7 +1486,7 @@ void MessagesUi::setupPinnedWidget() {
 		scroll->scrollLeftValue(),
 		scroll->widthValue(),
 		_pinned->widthValue()
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateLeftFade();
 		updateRightFade();
 	}, scroll->lifetime());
@@ -1570,7 +1527,7 @@ void MessagesUi::setupPinnedWidget() {
 	});
 	animation->seconds.callEach(crl::time(1000));
 
-	_pinned->paintRequest() | rpl::on_next([=](QRect clip) {
+	_pinned->paintRequest() | rpl::start_with_next([=](QRect clip) {
 		const auto session = &_show->session();
 		const auto &colorings = session->appConfig().groupCallColorings();
 		const auto start = scroll->scrollLeft();
@@ -1713,7 +1670,7 @@ void MessagesUi::setupPinnedWidget() {
 		}
 		return MsgId();
 	};
-	_pinned->events() | rpl::on_next([=](not_null<QEvent*> e) {
+	_pinned->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
 		const auto type = e->type();
 		if (type == QEvent::MouseButtonPress) {
 			const auto pos = static_cast<QMouseEvent*>(e.get())->pos();

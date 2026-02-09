@@ -79,12 +79,12 @@ void ConfirmSwitchBox::prepare() {
 		? tr::lng_language_switch_about_official
 		: tr::lng_language_switch_about_unofficial)(
 			lt_lang_name,
-			rpl::single(tr::bold(_name)),
+			rpl::single(Ui::Text::Bold(_name)),
 			lt_percent,
-			rpl::single(tr::bold(QString::number(_percent))),
+			rpl::single(Ui::Text::Bold(QString::number(_percent))),
 			lt_link,
-			tr::lng_language_switch_link(tr::url(_editLink)),
-			tr::marked);
+			tr::lng_language_switch_link() | Ui::Text::ToLink(_editLink),
+			Ui::Text::WithEntities);
 	const auto content = Ui::CreateChild<Ui::PaddingWrap<Ui::FlatLabel>>(
 		this,
 		object_ptr<Ui::FlatLabel>(
@@ -103,7 +103,7 @@ void ConfirmSwitchBox::prepare() {
 
 	content->resizeToWidth(st::boxWideWidth);
 	content->heightValue(
-	) | rpl::on_next([=](int height) {
+	) | rpl::start_with_next([=](int height) {
 		setDimensions(st::boxWideWidth, height);
 	}, lifetime());
 }
@@ -120,10 +120,10 @@ void NotReadyBox::prepare() {
 
 	auto text = tr::lng_language_not_ready_about(
 		lt_lang_name,
-		rpl::single(tr::marked(_name)),
+		rpl::single(_name) | Ui::Text::ToWithEntities(),
 		lt_link,
-		tr::lng_language_not_ready_link(tr::url(_editLink)),
-		tr::marked);
+		tr::lng_language_not_ready_link() | Ui::Text::ToLink(_editLink),
+		Ui::Text::WithEntities);
 	const auto content = Ui::CreateChild<Ui::PaddingWrap<Ui::FlatLabel>>(
 		this,
 		object_ptr<Ui::FlatLabel>(
@@ -137,7 +137,7 @@ void NotReadyBox::prepare() {
 
 	content->resizeToWidth(st::boxWidth);
 	content->heightValue(
-	) | rpl::on_next([=](int height) {
+	) | rpl::start_with_next([=](int height) {
 		setDimensions(st::boxWidth, height);
 	}, lifetime());
 }
@@ -162,9 +162,9 @@ CloudManager::CloudManager(Instance &langpack)
 	Core::App().domain().activeValue(
 	) | rpl::filter([=](Main::Account *account) {
 		return (account != nullptr);
-	}) | rpl::on_next_done([=](Main::Account *account) {
+	}) | rpl::start_with_next_done([=](Main::Account *account) {
 		*mtpLifetime = account->mtpMainSessionValue(
-		) | rpl::on_next([=](not_null<MTP::Instance*> instance) {
+		) | rpl::start_with_next([=](not_null<MTP::Instance*> instance) {
 			_api.emplace(instance);
 			resendRequests();
 		});
@@ -333,7 +333,7 @@ void CloudManager::offerSwitchLangPack() {
 
 	if (!showOfferSwitchBox()) {
 		languageListChanged(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			showOfferSwitchBox();
 		}, _lifetime);
 		requestLanguageList();

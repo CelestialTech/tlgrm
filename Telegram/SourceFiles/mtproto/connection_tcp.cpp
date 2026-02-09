@@ -547,27 +547,27 @@ void TcpConnection::connectToServer(
 	CONNECTION_LOG_INFO("Connecting...");
 
 	_socket->connected(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		socketConnected();
 	}, _connectedLifetime);
 
 	_socket->disconnected(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		socketDisconnected();
 	}, _lifetime);
 
 	_socket->readyRead(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		socketRead();
 	}, _lifetime);
 
 	_socket->error(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		socketError();
 	}, _lifetime);
 
 	_socket->syncTimeRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		syncTimeRequest();
 	}, _lifetime);
 

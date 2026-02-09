@@ -138,7 +138,7 @@ Preview::Preview(QWidget *slider, rpl::producer<QImage> userpic)
 , _slider(slider)
 , _ratio(style::DevicePixelRatio())
 , _window(Ui::Platform::TranslucentWindowsSupported()) {
-	std::move(userpic) | rpl::on_next([=](QImage &&userpic) {
+	std::move(userpic) | rpl::start_with_next([=](QImage &&userpic) {
 		_userpicOriginal = std::move(userpic);
 		if (!_userpicImage.isNull()) {
 			_userpicImage = {};
@@ -282,13 +282,13 @@ void Preview::init() {
 	});
 
 	_widget.paintRequest(
-	) | rpl::on_next([=](QRect clip) {
+	) | rpl::start_with_next([=](QRect clip) {
 		auto p = Painter(&_widget);
 		paint(p, clip);
 	}, _widget.lifetime());
 
 	style::PaletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_bubbleCorners = {};
 		_bubbleTail = {};
 		_bubbleShadowBottomRight = {};

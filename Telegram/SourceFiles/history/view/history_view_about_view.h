@@ -34,7 +34,6 @@ public:
 	[[nodiscard]] auto sendIntroSticker() const
 		-> rpl::producer<not_null<DocumentData*>>;
 	[[nodiscard]] rpl::producer<> refreshRequests() const;
-	[[nodiscard]] rpl::producer<> destroyRequests() const;
 	[[nodiscard]] rpl::lifetime &lifetime();
 
 	int top = 0;
@@ -74,7 +73,6 @@ private:
 	bool _commonGroupsRequested = false;
 	std::vector<not_null<PeerData*>> _commonGroups;
 	rpl::event_stream<> _refreshRequests;
-	rpl::event_stream<> _destroyRequests;
 	rpl::lifetime _lifetime;
 
 };

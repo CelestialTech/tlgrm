@@ -409,7 +409,7 @@ void Media::drawSpoilerTag(
 					tr::now,
 					lt_price,
 					price,
-					tr::marked),
+					Ui::Text::WithEntities),
 				kMarkupTextOptions);
 		}
 		const auto width = iconSkip + text.maxWidth();

@@ -41,7 +41,6 @@ public:
 	void setCustomPadding(const QMargins &padding = QMargins());
 	void setBackgroundMargins(const QMargins &margins = QMargins());
 	void setCustomRadius(int radius);
-	void setCustomDuration(crl::time duration);
 
 	~MediaPreviewWidget();
 
@@ -94,7 +93,6 @@ private:
 	QMargins _customPadding;
 	QMargins _backgroundMargins;
 	int _customRadius = 0;
-	crl::time _customDuration = 0;
 
 };
 

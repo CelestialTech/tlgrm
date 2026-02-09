@@ -449,7 +449,7 @@ QImage *PeerData::userpicCloudImage(Ui::PeerUserpicView &view) const {
 }
 
 void PeerData::paintUserpic(
-		QPainter &p,
+		Painter &p,
 		Ui::PeerUserpicView &view,
 		PaintUserpicContext context) const {
 	if (const auto broadcast = monoforumBroadcast()) {
@@ -463,7 +463,7 @@ void PeerData::paintUserpic(
 	const auto cloud = userpicCloudImage(view);
 	const auto ratio = style::DevicePixelRatio();
 	if (context.shape == Ui::PeerUserpicShape::Auto) {
-		context.shape = (isForum() && !isBot())
+		context.shape = isForum()
 			? Ui::PeerUserpicShape::Forum
 			: isMonoforum()
 			? Ui::PeerUserpicShape::Monoforum
@@ -599,7 +599,7 @@ void PeerData::updateUserpic(
 				isSelf() ? peerToUser(id) : UserId(),
 				MTP_inputPeerPhotoFileLocation(
 					MTP_flags(0),
-					input(),
+					input,
 					MTP_long(photoId))) },
 			kUserpicSize,
 			kUserpicSize),
@@ -874,7 +874,7 @@ void PeerData::saveTranslationDisabled(bool disabled) {
 	using Flag = MTPmessages_TogglePeerTranslations::Flag;
 	session().api().request(MTPmessages_TogglePeerTranslations(
 		MTP_flags(disabled ? Flag::f_disabled : Flag()),
-		input()
+		input
 	)).send();
 }
 
@@ -1055,9 +1055,8 @@ bool PeerData::changeColorCollectible(
 
 bool PeerData::changeColor(
 		const tl::conditional<MTPPeerColor> &cloudColor) {
-	const auto maybeColorIndex = Data::ColorIndexFromColor(cloudColor);
-	const auto changed1 = maybeColorIndex
-		? changeColorIndex(*maybeColorIndex)
+	const auto changed1 = cloudColor
+		? changeColorIndex(Data::ColorIndexFromColor(cloudColor))
 		: clearColorIndex();
 	const auto changed2 = changeBackgroundEmojiId(
 		Data::BackgroundEmojiIdFromColor(cloudColor));
@@ -1067,9 +1066,8 @@ bool PeerData::changeColor(
 
 bool PeerData::changeColorProfile(
 		const tl::conditional<MTPPeerColor> &cloudColor) {
-	const auto maybeColorIndex = Data::ColorIndexFromColor(cloudColor);
-	const auto changed1 = maybeColorIndex
-		? changeColorProfileIndex(*maybeColorIndex)
+	const auto changed1 = cloudColor
+		? changeColorProfileIndex(Data::ColorIndexFromColor(cloudColor))
 		: clearColorProfileIndex();
 	const auto changed2 = changeProfileBackgroundEmojiId(
 		Data::BackgroundEmojiIdFromColor(cloudColor));
@@ -1294,7 +1292,7 @@ not_null<const PeerData*> PeerData::userpicPaintingPeer() const {
 }
 
 Ui::PeerUserpicShape PeerData::userpicShape() const {
-	return isForum() && !isBot()
+	return isForum()
 		? Ui::PeerUserpicShape::Forum
 		: isMonoforum()
 		? Ui::PeerUserpicShape::Monoforum
@@ -2016,41 +2014,6 @@ int PeerData::peerGiftsCount() const {
 	return 0;
 }
 
-MTPInputPeer PeerData::input() const {
-	if (const auto user = asUser()) {
-		const auto specific = user->inputUser();
-		return specific.match([](const MTPDinputUser &data) {
-			return MTP_inputPeerUser(data.vuser_id(), data.vaccess_hash());
-		}, [](const MTPDinputUserFromMessage &data) {
-			return MTP_inputPeerUserFromMessage(
-				data.vpeer(),
-				data.vmsg_id(),
-				data.vuser_id());
-		}, [](const MTPDinputUserEmpty &) {
-			return MTP_inputPeerEmpty();
-		}, [](const MTPDinputUserSelf &) {
-			return MTP_inputPeerSelf();
-		});
-	} else if (const auto chat = asChat()) {
-		return MTP_inputPeerChat(chat->inputChat());
-	} else if (const auto channel = asChannel()) {
-		const auto &specific = channel->inputChannel();
-		return specific.match([](const MTPDinputChannel &data) {
-			return MTP_inputPeerChannel(
-				data.vchannel_id(),
-				data.vaccess_hash());
-		}, [](const MTPDinputChannelFromMessage &data) {
-			return MTP_inputPeerChannelFromMessage(
-				data.vpeer(),
-				data.vmsg_id(),
-				data.vchannel_id());
-		}, [](const MTPDinputChannelEmpty &) {
-			return MTP_inputPeerEmpty();
-		});
-	}
-	return MTP_inputPeerEmpty();
-}
-
 void PeerData::setIsBlocked(bool is) {
 	const auto status = is
 		? BlockStatus::Blocked
@@ -2209,22 +2172,17 @@ uint64 BackgroundEmojiIdFromColor(const MTPPeerColor *color) {
 	});
 }
 
-std::optional<uint8> ColorIndexFromColor(const MTPPeerColor *color) {
+uint8 ColorIndexFromColor(const MTPPeerColor *color) {
 	if (!color) {
-		return std::nullopt;
+		return 0;
 	}
-	return color->match([](const MTPDpeerColor &d) -> std::optional<uint8> {
-		return d.vcolor() ? std::make_optional(d.vcolor()->v) : std::nullopt;
-	}, [](const auto &) -> std::optional<uint8> {
-		return std::nullopt;
+	return color->match([](const MTPDpeerColor &data) -> uint8 {
+		return data.vcolor().value_or_empty();
+	}, [](const MTPDpeerColorCollectible &data) -> uint8 {
+		return 0;
+	}, [](const MTPDinputPeerColorCollectible &) -> uint8 {
+		return 0;
 	});
-}
-
-bool IsBotCanManageTopics(not_null<PeerData*> peer) {
-	if (const auto user = peer->asUser()) {
-		return user->botInfo && user->botInfo->canManageTopics;
-	}
-	return false;
 }
 
 } // namespace Data

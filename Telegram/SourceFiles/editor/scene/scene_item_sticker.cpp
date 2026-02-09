@@ -46,7 +46,7 @@ ItemSticker::ItemSticker(
 					* style::DevicePixelRatio(),
 				Lottie::Quality::High);
 			_lottie.player->updates(
-			) | rpl::on_next([=] {
+			) | rpl::start_with_next([=] {
 				updatePixmap(_lottie.player->frame());
 				_lottie.player = nullptr;
 				_lottie.lifetime.destroy();
@@ -84,8 +84,8 @@ ItemSticker::ItemSticker(
 		return true;
 	};
 	if (!updateThumbnail()) {
-		_document->session().downloaderTaskFinished(
-		) | rpl::on_next([=] {
+		_document->owner().session().downloaderTaskFinished(
+		) | rpl::start_with_next([=] {
 			if (updateThumbnail()) {
 				_loadingLifetime.destroy();
 				update();

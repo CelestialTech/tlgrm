@@ -69,6 +69,12 @@ constexpr auto kStarsStatsShortPollDelay = 30 * crl::time(1000);
 	return PinFinishDate(message.peer, message.date, message.stars);
 }
 
+[[nodiscard]] std::optional<PeerId> MaybeShownPeer(
+		uint32 privacySet,
+		PeerId shownPeer) {
+	return privacySet ? shownPeer : std::optional<PeerId>();
+}
+
 } // namespace
 
 Messages::Messages(not_null<GroupCall*> call, not_null<MTP::Sender*> api)
@@ -80,7 +86,7 @@ Messages::Messages(not_null<GroupCall*> call, not_null<MTP::Sender*> api)
 , _starsStatsTimer([=] { requestStarsStats(); }) {
 	Ui::PostponeCall(_call, [=] {
 		_call->real(
-		) | rpl::on_next([=](not_null<Data::GroupCall*> call) {
+		) | rpl::start_with_next([=](not_null<Data::GroupCall*> call) {
 			_real = call;
 			if (ready()) {
 				sendPending();
@@ -98,7 +104,9 @@ Messages::~Messages() {
 		finishPaidSending({
 			.count = int(_paid.sending),
 			.valid = true,
-			.shownPeer = _paid.sendingShownPeer,
+			.shownPeer = MaybeShownPeer(
+				_paid.sendingPrivacySet,
+				_paid.sendingShownPeer),
 		}, false);
 	}
 }
@@ -179,7 +187,7 @@ void Messages::send(TextWithTags text, int stars) {
 			MTP_long(randomId),
 			serialized,
 			MTP_long(stars),
-			from->input()
+			from->input
 		)).done([=](
 				const MTPUpdates &result,
 				const MTP::Response &response) {
@@ -509,23 +517,26 @@ PeerId Messages::reactionsLocalShownPeer() const {
 				return entry.peer ? entry.peer->id : PeerId();
 			}
 		}
-		return _call->messagesFrom()->id;
+		return _session->userPeerId();
 		//const auto api = &_session->api();
 		//return api->globalPrivacy().paidReactionShownPeerCurrent();
 	};
-	return _paid.scheduledFlag
+	return (_paid.scheduledFlag && _paid.scheduledPrivacySet)
 		? _paid.scheduledShownPeer
-		: _paid.sendingFlag
+		: (_paid.sendingFlag && _paid.sendingPrivacySet)
 		? _paid.sendingShownPeer
 		: minePaidShownPeer();
 }
 
-void Messages::reactionsPaidAdd(int count) {
+void Messages::reactionsPaidAdd(int count, std::optional<PeerId> shownPeer) {
 	Expects(count >= 0);
 
 	_paid.scheduled += count;
 	_paid.scheduledFlag = 1;
-	_paid.scheduledShownPeer = _call->messagesFrom()->id;
+	if (shownPeer.has_value()) {
+		_paid.scheduledShownPeer = *shownPeer;
+		_paid.scheduledPrivacySet = true;
+	}
 	if (count > 0) {
 		_session->credits().lock(CreditsAmount(count));
 	}
@@ -544,6 +555,7 @@ void Messages::reactionsPaidScheduledCancel() {
 	_paid.scheduled = 0;
 	_paid.scheduledFlag = 0;
 	_paid.scheduledShownPeer = 0;
+	_paid.scheduledPrivacySet = 0;
 	_paidChanges.fire({});
 }
 
@@ -558,13 +570,17 @@ Data::PaidReactionSend Messages::startPaidReactionSending() {
 	_paid.sending = _paid.scheduled;
 	_paid.sendingFlag = _paid.scheduledFlag;
 	_paid.sendingShownPeer = _paid.scheduledShownPeer;
+	_paid.sendingPrivacySet = _paid.scheduledPrivacySet;
 	_paid.scheduled = 0;
 	_paid.scheduledFlag = 0;
 	_paid.scheduledShownPeer = 0;
+	_paid.scheduledPrivacySet = 0;
 	return {
 		.count = int(_paid.sending),
 		.valid = true,
-		.shownPeer = _paid.sendingShownPeer,
+		.shownPeer = MaybeShownPeer(
+			_paid.sendingPrivacySet,
+			_paid.sendingShownPeer),
 	};
 }
 
@@ -573,24 +589,25 @@ void Messages::finishPaidSending(
 		bool success) {
 	Expects(send.count == _paid.sending);
 	Expects(send.valid == (_paid.sendingFlag == 1));
-	Expects(send.shownPeer == _paid.sendingShownPeer);
+	Expects(send.shownPeer == MaybeShownPeer(
+		_paid.sendingPrivacySet,
+		_paid.sendingShownPeer));
 
 	_paid.sending = 0;
 	_paid.sendingFlag = 0;
 	_paid.sendingShownPeer = 0;
+	_paid.sendingPrivacySet = 0;
 	if (const auto amount = send.count) {
 		if (success) {
-			const auto from = _session->data().peer(*send.shownPeer);
 			_session->credits().withdrawLocked(CreditsAmount(amount));
 
 			auto &donors = _paid.top.topDonors;
-			const auto i = ranges::find(donors, true, &StarsDonor::my);
+			const auto i = ranges::find(donors, true, &StarsTopDonor::my);
 			if (i != end(donors)) {
-				i->peer = from;
 				i->stars += amount;
 			} else {
 				donors.push_back({
-					.peer = from,
+					.peer = _session->user(),
 					.stars = amount,
 					.my = true,
 				});
@@ -615,7 +632,7 @@ void Messages::reactionsPaidSend() {
 	const auto randomId = base::RandomValue<uint64>();
 	_sendingIdByRandomId.emplace(randomId, localId);
 
-	const auto from = _session->data().peer(*send.shownPeer);
+	const auto from = _call->messagesFrom();
 	const auto stars = int(send.count);
 	const auto skip = skipMessage({}, stars);
 	if (skip) {
@@ -636,7 +653,7 @@ void Messages::reactionsPaidSend() {
 		MTP_long(randomId),
 		MTP_textWithEntities(MTP_string(), MTP_vector<MTPMessageEntity>()),
 		MTP_long(stars),
-		from->input()
+		from->input
 	)).done([=](
 			const MTPUpdates &result,
 			const MTP::Response &response) {
@@ -659,7 +676,7 @@ void Messages::undoScheduledPaidOnDestroy() {
 
 Messages::PaidLocalState Messages::starsLocalState() const {
 	const auto &donors = _paid.top.topDonors;
-	const auto i = ranges::find(donors, true, &StarsDonor::my);
+	const auto i = ranges::find(donors, true, &StarsTopDonor::my);
 	const auto local = int(_paid.scheduled);
 	const auto my = (i != end(donors) ? i->stars : 0) + local;
 	const auto total = _paid.top.total + local;
@@ -679,7 +696,7 @@ void Messages::deleteConfirmed(MessageDeleteRequest request) {
 		_api->request(MTPphone_DeleteGroupCallParticipantMessages(
 			MTP_flags(request.reportSpam ? Flag::f_report_spam : Flag()),
 			_call->inputCall(),
-			from->input()
+			from->input
 		)).send();
 		eraseFrom(ranges::remove(_messages, not_null(from), &Message::peer));
 	} else {
@@ -711,7 +728,7 @@ void Messages::addStars(not_null<PeerData*> from, int stars, bool mine) {
 	const auto i = ranges::find(
 		_paid.top.topDonors,
 		from.get(),
-		&StarsDonor::peer);
+		&StarsTopDonor::peer);
 	if (i != end(_paid.top.topDonors)) {
 		i->stars += stars;
 	} else {
@@ -724,8 +741,8 @@ void Messages::addStars(not_null<PeerData*> from, int stars, bool mine) {
 	ranges::stable_sort(
 		_paid.top.topDonors,
 		ranges::greater(),
-		&StarsDonor::stars);
-	_paidChanges.fire({ .peer = from, .stars = stars });
+		&StarsTopDonor::stars);
+	_paidChanges.fire({});
 }
 
 } // namespace Calls::Group

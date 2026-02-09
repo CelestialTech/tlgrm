@@ -26,7 +26,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_service_message.h"
 #include "history/view/history_view_cursor_state.h"
 #include "history/view/history_view_translate_tracker.h"
-#include "history/view/history_view_top_peers_selector.h"
 #include "history/view/history_view_quick_action.h"
 #include "chat_helpers/message_field.h"
 #include "mainwindow.h"
@@ -56,7 +55,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/chat_theme.h"
 #include "ui/chat/chat_style.h"
 #include "ui/painter.h"
-#include "ui/rect.h"
 #include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
 #include "boxes/delete_messages_box.h"
@@ -418,29 +416,25 @@ ListWidget::ListWidget(
 	setMouseTracking(true);
 	_scrollDateHideTimer.setCallback([this] { scrollDateHideByTimer(); });
 	_session->data().viewRepaintRequest(
-	) | rpl::on_next([this](Data::RequestViewRepaint data) {
-		if (data.view->delegate() == this) {
-			repaintItem(data.view, data.rect);
+	) | rpl::start_with_next([this](auto view) {
+		if (view->delegate() == this) {
+			repaintItem(view);
 		}
 	}, lifetime());
 	_session->data().viewResizeRequest(
-	) | rpl::on_next([this](auto view) {
+	) | rpl::start_with_next([this](auto view) {
 		if (view->delegate() == this) {
 			resizeItem(view);
 		}
 	}, lifetime());
 	_session->data().itemViewRefreshRequest(
-	) | rpl::on_next([this](auto item) {
+	) | rpl::start_with_next([this](auto item) {
 		if (const auto view = viewForItem(item)) {
 			refreshItem(view);
 		}
 	}, lifetime());
-	_session->data().itemShowHighlightRequest(
-	) | rpl::on_next([this](auto item) {
-		showItemHighlight(item);
-	}, lifetime());
 	_session->data().viewLayoutChanged(
-	) | rpl::on_next([this](auto view) {
+	) | rpl::start_with_next([this](auto view) {
 		if (view->delegate() == this) {
 			if (view->isUnderCursor()) {
 				mouseActionUpdate();
@@ -448,31 +442,31 @@ ListWidget::ListWidget(
 		}
 	}, lifetime());
 	_session->data().itemDataChanges(
-	) | rpl::on_next([=](not_null<HistoryItem*> item) {
+	) | rpl::start_with_next([=](not_null<HistoryItem*> item) {
 		if (const auto view = viewForItem(item)) {
 			view->itemDataChanged();
 		}
 	}, lifetime());
 
 	_session->downloaderTaskFinished(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		update();
 	}, lifetime());
 
 	_session->data().peerDecorationsUpdated(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		update();
 	}, lifetime());
 
 	_session->data().itemRemoved(
-	) | rpl::on_next([=](not_null<const HistoryItem*> item) {
+	) | rpl::start_with_next([=](not_null<const HistoryItem*> item) {
 		itemRemoved(item);
 	}, lifetime());
 
 	using MessageUpdateFlag = Data::MessageUpdate::Flag;
 	_session->changes().realtimeMessageUpdates(
 		MessageUpdateFlag::NewUnreadReaction
-	) | rpl::on_next([=](const Data::MessageUpdate &update) {
+	) | rpl::start_with_next([=](const Data::MessageUpdate &update) {
 		maybeMarkReactionsRead(update.item);
 	}, lifetime());
 
@@ -480,13 +474,13 @@ ListWidget::ListWidget(
 		_session->changes().historyUpdates(
 			history,
 			Data::HistoryUpdate::Flag::TranslatedTo
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			update();
 		}, lifetime());
 	}
 
 	_session->data().itemVisibilityQueries(
-	) | rpl::on_next([=](
+	) | rpl::start_with_next([=](
 			const Data::Session::ItemVisibilityQuery &query) {
 		if (const auto view = viewForItem(query.item)) {
 			const auto top = itemTop(view);
@@ -500,7 +494,7 @@ ListWidget::ListWidget(
 
 	if (_reactionsManager) {
 		_reactionsManager->chosen(
-		) | rpl::on_next([=](ChosenReaction reaction) {
+		) | rpl::start_with_next([=](ChosenReaction reaction) {
 			_reactionsManager->updateButton({});
 			reactionChosen(reaction);
 		}, lifetime());
@@ -510,7 +504,7 @@ ListWidget::ListWidget(
 			_reactionsItem.value());
 
 		Core::App().settings().cornerReactionValue(
-		) | rpl::on_next([=](bool value) {
+		) | rpl::start_with_next([=](bool value) {
 			_useCornerReaction = value;
 			if (!value) {
 				_reactionsManager->updateButton({});
@@ -519,12 +513,12 @@ ListWidget::ListWidget(
 	}
 
 	_delegate->listChatWideValue(
-	) | rpl::on_next([=](bool wide) {
+	) | rpl::start_with_next([=](bool wide) {
 		_isChatWide = wide;
 	}, lifetime());
 
 	_selectScroll.scrolls(
-	) | rpl::on_next([=](int d) {
+	) | rpl::start_with_next([=](int d) {
 		delegate->listScrollTo(_visibleTop + d, false);
 	}, lifetime());
 }
@@ -548,7 +542,7 @@ void ListWidget::refreshViewer() {
 		_aroundPosition,
 		_idsLimit,
 		_idsLimit
-	) | rpl::on_next([=](Data::MessagesSlice &&slice) {
+	) | rpl::start_with_next([=](Data::MessagesSlice &&slice) {
 		_refreshingViewer = false;
 		std::swap(_slice, slice);
 		refreshRows(slice);
@@ -1551,10 +1545,6 @@ void ListWidget::clearTextSelection() {
 void ListWidget::setTextSelection(
 		not_null<Element*> view,
 		TextSelection selection) {
-	if (!selection.empty()) {
-		// We started selecting text in web page preview.
-		ClickHandler::unpressed();
-	}
 	clearSelected();
 	const auto item = view->data();
 	if (_selectedTextItem != item) {
@@ -2213,7 +2203,6 @@ Ui::ChatPaintContext ListWidget::preparePaintContext(
 		.visibleAreaPositionGlobal = mapToGlobal(QPoint(0, _visibleTop)),
 		.visibleAreaTop = _visibleTop,
 		.visibleAreaWidth = width(),
-		.visibleAreaHeight = _visibleBottom - _visibleTop,
 	});
 }
 
@@ -2851,30 +2840,6 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		: _overElement
 		? _overElement->data().get()
 		: nullptr;
-	if (link
-		&& link->property(kFastShareProperty).value<bool>()
-		&& overItem) {
-		if (const auto view = viewForItem(overItem)) {
-			const auto rightSize = view->rightActionSize().value_or(QSize());
-			const auto reactionsSkip = view->embedReactionsInBubble()
-				? 0
-				: view->reactionButtonParameters({}, {}).reactionsHeight;
-			const auto top = itemTop(view)
-				+ view->height()
-				- reactionsSkip
-				- _visibleTop
-				- rightSize.height();
-			const auto right = rect::right(view->innerGeometry())
-				- st::historyFastShareLeft
-				- rightSize.width();
-			ShowTopPeersSelector(
-				this,
-				controller()->uiShow(),
-				overItem->fullId(),
-				parentWidget()->mapToGlobal(QPoint(right, top)));
-			return;
-		}
-	}
 	const auto clickedReaction = Reactions::ReactionIdOfLink(link);
 	const auto linkPhoneNumber = link
 		? link->property(kPhoneNumberLinkProperty).toString()
@@ -3472,11 +3437,7 @@ void ListWidget::mouseActionStart(
 		Ui::MarkInactivePress(window(), false);
 	}
 
-	const auto pressed = ClickHandler::getPressed();
-	if (pressed
-		&& (!_overElement
-			|| _overState.pointState == PointState::Outside
-			|| !_overElement->allowTextSelectionByHandler(pressed))) {
+	if (ClickHandler::getPressed()) {
 		_mouseAction = MouseAction::PrepareDrag;
 	} else if (hasSelectedItems()) {
 		if (overSelectedItems()) {
@@ -3608,7 +3569,9 @@ void ListWidget::mouseActionFinish(
 
 	_wasSelectedText = false;
 
-	if (_mouseAction == MouseAction::Dragging || needItemSelectionToggle) {
+	if (_mouseAction == MouseAction::Dragging
+		|| _mouseAction == MouseAction::Selecting
+		|| needItemSelectionToggle) {
 		activated = nullptr;
 	} else if (activated) {
 		mouseActionCancel();
@@ -4067,17 +4030,6 @@ void ListWidget::repaintItem(const Element *view) {
 	}
 }
 
-void ListWidget::repaintItem(const Element *view, QRect rect) {
-	if (rect.isNull()) {
-		return repaintItem(view);
-	}
-	if (!view) {
-		return;
-	}
-	const auto top = itemTop(view);
-	update(rect.translated(0, top));
-}
-
 void ListWidget::repaintItem(FullMsgId itemId) {
 	if (const auto view = viewForItem(itemId)) {
 		repaintItem(view);
@@ -4169,25 +4121,6 @@ void ListWidget::refreshItem(not_null<const Element*> view) {
 		viewReplaced(view, i->second.get());
 
 		refreshAttachmentsAtIndex(index);
-	}
-}
-
-void ListWidget::showItemHighlight(not_null<HistoryItem*> item) {
-	const auto history = _delegate->listTranslateHistory();
-	if (history && item->history() != history) {
-		return;
-	} else if (!history && !viewForItem(item)) {
-		return;
-	}
-	const auto position = item->position();
-	auto params = Window::SectionShow{
-		Window::SectionShow::Way::Forward
-	};
-	params.animated = anim::type::normal;
-	if (!showAtPositionNow(position, params, nullptr)) {
-		showAroundPosition(position, [=, this] {
-			return showAtPositionNow(position, params, nullptr);
-		});
 	}
 }
 

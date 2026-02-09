@@ -102,10 +102,10 @@ void AddAction(
 							: tr::lng_mediaview_saved_to)(
 						tr::now,
 						lt_downloads,
-						tr::link(
+						Ui::Text::Link(
 							tr::lng_mediaview_downloads(tr::now),
 							"internal:show_saved_message"),
-						tr::marked),
+						Ui::Text::WithEntities),
 					.filter = filter,
 					.st = &st::defaultToast,
 				});
@@ -150,7 +150,7 @@ void AddAction(
 		} else {
 			auto lifetime = std::make_shared<rpl::lifetime>();
 			session->downloaderTaskFinished(
-			) | rpl::on_next([=]() mutable {
+			) | rpl::start_with_next([=]() mutable {
 				if (finalCheck()) {
 					saveToFiles();
 					base::take(lifetime)->destroy();

@@ -326,13 +326,13 @@ ShareBoxResult Shown::shareBox(ShareBoxDescriptor &&descriptor) {
 	layer->setHideByBackgroundClick(false);
 	layer->move(0, 0);
 	wrap->sizeValue(
-	) | rpl::on_next([=](QSize size) {
+	) | rpl::start_with_next([=](QSize size) {
 		layer->resize(size);
 	}, layer->lifetime());
 	layer->hideFinishEvents(
 	) | rpl::filter([=] {
 		return !!lookup(); // Last hide finish is sent from destructor.
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		state->destroyRequests.fire({});
 	}, wrap->lifetime());
 
@@ -357,7 +357,7 @@ ShareBoxResult Shown::shareBox(ShareBoxDescriptor &&descriptor) {
 			) | rpl::filter([=](QWindow *focused) {
 				const auto handle = layer->window()->windowHandle();
 				return handle && (focused == handle);
-			}) | rpl::on_next([=] {
+			}) | rpl::start_with_next([=] {
 				waiting->destroy();
 				set();
 			});
@@ -388,7 +388,7 @@ void Shown::createController() {
 	) | rpl::start_to_stream(_events, _controller->lifetime());
 
 	_controller->dataRequests(
-	) | rpl::on_next([=](Webview::DataRequest request) {
+	) | rpl::start_with_next([=](Webview::DataRequest request) {
 		const auto requested = QString::fromStdString(request.id);
 		const auto id = QStringView(requested);
 		if (id.startsWith(u"photo/")) {
@@ -507,7 +507,7 @@ void Shown::streamFile(
 		}).first->second;
 
 	file.loader->parts(
-	) | rpl::on_next([=](Media::Streaming::LoadedPart &&part) {
+	) | rpl::start_with_next([=](Media::Streaming::LoadedPart &&part) {
 		const auto i = _streams.find(documentId);
 		Assert(i != end(_streams));
 		processPartInFile(i->second, std::move(part));
@@ -552,7 +552,7 @@ void Shown::subscribeToDocuments() {
 	_documentLifetime = _session->data().documentLoadProgress(
 	) | rpl::filter([=](not_null<DocumentData*> document) {
 		return !document->loading();
-	}) | rpl::on_next([=](not_null<DocumentData*> document) {
+	}) | rpl::start_with_next([=](not_null<DocumentData*> document) {
 		const auto i = _files.find(document->id);
 		if (i == end(_files)) {
 			return;
@@ -829,6 +829,7 @@ void Instance::show(
 		not_null<Window::SessionController*> controller,
 		not_null<Data*> data,
 		QString hash) {
+	_delegate->ivSetLastSourceWindow(controller->widget());
 	show(controller->uiShow(), data, hash);
 }
 
@@ -857,7 +858,7 @@ void Instance::show(
 	}
 	_shown = std::make_unique<Shown>(_delegate, session, data, hash);
 	_shownSession = session;
-	_shown->events() | rpl::on_next([=](Controller::Event event) {
+	_shown->events() | rpl::start_with_next([=](Controller::Event event) {
 		using Type = Controller::Event::Type;
 		const auto lower = event.url.toLower();
 		const auto urlChecked = lower.startsWith("http://")
@@ -965,7 +966,7 @@ void Instance::show(
 
 	session->changes().peerUpdates(
 		::Data::PeerUpdate::Flag::ChannelAmIn
-	) | rpl::on_next([=](const ::Data::PeerUpdate &update) {
+	) | rpl::start_with_next([=](const ::Data::PeerUpdate &update) {
 		if (const auto channel = update.peer->asChannel()) {
 			if (channel->amIn()) {
 				const auto i = _joining.find(session);
@@ -1091,7 +1092,7 @@ void Instance::showTonSite(
 		return;
 	}
 	_tonSite = std::make_unique<TonSite>(_delegate, uri);
-	_tonSite->events() | rpl::on_next([=](Controller::Event event) {
+	_tonSite->events() | rpl::start_with_next([=](Controller::Event event) {
 		using Type = Controller::Event::Type;
 		const auto lower = event.url.toLower();
 		const auto urlChecked = lower.startsWith("http://")

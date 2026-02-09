@@ -35,7 +35,6 @@ struct UserPhotosAddNew;
 struct UserPhotosAddSlice;
 struct UserPhotosRemoveOne;
 struct UserPhotosRemoveAfter;
-struct UserPhotosReplace;
 struct UserPhotosQuery;
 struct UserPhotosResult;
 struct UserPhotosSliceUpdate;
@@ -65,7 +64,6 @@ public:
 	void add(UserPhotosAddSlice &&query);
 	void remove(UserPhotosRemoveOne &&query);
 	void remove(UserPhotosRemoveAfter &&query);
-	void replace(UserPhotosReplace &&query);
 
 	rpl::producer<UserPhotosResult> query(UserPhotosQuery &&query) const;
 	rpl::producer<UserPhotosSliceUpdate> userPhotosSliceUpdated() const;

@@ -93,11 +93,11 @@ void ProcessZoom(
 		return;
 	}
 	widget->zoomRequests(
-	) | rpl::on_next([=](float64 x) {
+	) | rpl::start_with_next([=](float64 x) {
 		d.api->requestZoom(
 			zoomToken,
 			x
-		) | rpl::on_next_error_done([=](
+		) | rpl::start_with_next_error_done([=](
 				const Data::StatisticalGraph &graph) {
 			if (graph.chart) {
 				widget->setZoomedChartData(graph.chart, x, type);
@@ -165,7 +165,7 @@ void FillStatistic(
 			descriptor.api->requestZoom(
 				graphData.zoomToken,
 				0
-			) | rpl::on_next_error_done([=, graphPtr = &graphData](
+			) | rpl::start_with_next_error_done([=, graphPtr = &graphData](
 					const Data::StatisticalGraph &graph) mutable {
 				{
 					// Save the loaded async data to cache.
@@ -287,7 +287,6 @@ void FillStatistic(
 				Type::Bar);
 		}
 	}
-	Statistic::FixCacheForHighDPIChartWidget(content);
 	if (!state->pendingCount) {
 		++state->pendingCount;
 		singlePendingDone();
@@ -394,7 +393,7 @@ void FillOverview(
 		sub->setTextColorOverride(st::windowSubTextFg->c);
 
 		primary->geometryValue(
-		) | rpl::on_next([=](const QRect &g) {
+		) | rpl::start_with_next([=](const QRect &g) {
 			const auto &padding = st::statisticsOverviewSecondValuePadding;
 			second->moveToLeft(
 				rect::right(g) + padding.left(),
@@ -540,7 +539,7 @@ void FillOverview(
 	}
 	container->showChildren();
 	container->sizeValue() | rpl::distinct_until_changed(
-	) | rpl::on_next([=](const QSize &s) {
+	) | rpl::start_with_next([=](const QSize &s) {
 		const auto halfWidth = s.width() / 2;
 		{
 			const auto &p = st::statisticsOverviewValuePadding;
@@ -585,7 +584,7 @@ void FillLoading(
 
 	(
 		std::move(showFinished) | rpl::take(1)
-	) | rpl::on_next([animate = std::move(icon.animate)] {
+	) | rpl::start_with_next([animate = std::move(icon.animate)] {
 		animate(anim::repeat::loop);
 	}, icon.widget->lifetime());
 	content->add(std::move(icon.widget));
@@ -647,10 +646,10 @@ void InnerWidget::load() {
 		_showFinished.events());
 
 	_showFinished.events(
-	) | rpl::take(1) | rpl::on_next([=] {
+	) | rpl::take(1) | rpl::start_with_next([=] {
 		if (!_contextId && !_storyId) {
 			descriptor.api->request(
-			) | rpl::on_done([=] {
+			) | rpl::start_with_done([=] {
 				_state.stats = Data::AnyStatistics{
 					descriptor.api->channelStats(),
 					descriptor.api->supergroupStats(),
@@ -840,7 +839,7 @@ void InnerWidget::fillRecentPosts(not_null<Ui::VerticalLayout*> container) {
 		_messagePreviews.push_back(raw);
 		raw->show();
 		button->sizeValue(
-		) | rpl::on_next([=](const QSize &s) {
+		) | rpl::start_with_next([=](const QSize &s) {
 			if (!s.isNull()) {
 				raw->setGeometry(Rect(s)
 					- st::statisticsRecentPostButton.padding);

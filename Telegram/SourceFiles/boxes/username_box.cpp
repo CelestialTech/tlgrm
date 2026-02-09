@@ -312,10 +312,9 @@ QString UsernameEditor::getName() const {
 
 } // namespace
 
-void FillUsernamesBox(
+void UsernamesBox(
 		not_null<Ui::GenericBox*> box,
-		not_null<PeerData*> peer,
-		Fn<void()> onSaved) {
+		not_null<PeerData*> peer) {
 	const auto isBot = peer && peer->isUser() && peer->asUser()->isBot();
 	box->setTitle(isBot
 		? tr::lng_bot_username_title()
@@ -334,20 +333,20 @@ void FillUsernamesBox(
 	auto description = [&]() -> rpl::producer<TextWithEntities> {
 		if (!isBot) {
 			return rpl::combine(
-				tr::lng_username_description1(tr::rich),
-				tr::lng_username_description2(tr::rich)
+				tr::lng_username_description1(Ui::Text::RichLangValue),
+				tr::lng_username_description2(Ui::Text::RichLangValue)
 			) | rpl::map([](TextWithEntities d1, TextWithEntities d2) {
 				return d1.append("\n\n").append(std::move(d2));
 			});
 		}
 		if (const auto url = AppConfig::FragmentLink(&peer->session())) {
-			const auto link = tr::link(
+			const auto link = Ui::Text::Link(
 				tr::lng_bot_username_description1_link(tr::now),
 				*url);
 			return tr::lng_bot_username_description1(
 				lt_link,
 				rpl::single(link),
-				tr::rich);
+				Ui::Text::RichLangValue);
 		}
 		return rpl::single<TextWithEntities>({});
 	}();
@@ -371,18 +370,15 @@ void FillUsernamesBox(
 
 	const auto finish = [=] {
 		list->save(
-		) | rpl::on_done([=] {
+		) | rpl::start_with_done([=] {
 			editor->save(
-			) | rpl::on_done([=] {
-				if (onSaved) {
-					onSaved();
-				}
+			) | rpl::start_with_done([=] {
 				box->closeBox();
 			}, box->lifetime());
 		}, box->lifetime());
 	};
 	editor->submitted(
-	) | rpl::on_next(finish, editor->lifetime());
+	) | rpl::start_with_next(finish, editor->lifetime());
 
 	if (isBot) {
 		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
@@ -390,19 +386,6 @@ void FillUsernamesBox(
 		box->addButton(tr::lng_settings_save(), finish);
 		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 	}
-}
-
-void UsernamesBox(
-		not_null<Ui::GenericBox*> box,
-		not_null<PeerData*> peer) {
-	FillUsernamesBox(box, peer, nullptr);
-}
-
-void UsernamesBoxWithCallback(
-		not_null<Ui::GenericBox*> box,
-		not_null<PeerData*> peer,
-		Fn<void()> onSaved) {
-	FillUsernamesBox(box, peer, std::move(onSaved));
 }
 
 void AddUsernameCheckLabel(
@@ -427,7 +410,7 @@ void AddUsernameCheckLabel(
 	rpl::combine(
 		std::move(checkInfo),
 		container->widthValue()
-	) | rpl::on_next([=](const UsernameCheckInfo &info, int w) {
+	) | rpl::start_with_next([=](const UsernameCheckInfo &info, int w) {
 		using Type = UsernameCheckInfo::Type;
 		label->setMarkedText(info.text);
 		const auto &color = (info.type == Type::Good)
@@ -450,10 +433,10 @@ UsernameCheckInfo UsernameCheckInfo::PurchaseAvailable(
 			.text = tr::lng_username_purchase_available(
 				tr::now,
 				lt_link,
-				tr::link(
+				Ui::Text::Link(
 					tr::lng_username_purchase_available_link(tr::now),
 					(*fragmentLink) + u"/username/"_q + username),
-				tr::rich),
+				Ui::Text::RichLangValue),
 		};
 	} else {
 		return {

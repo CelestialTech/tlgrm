@@ -330,7 +330,7 @@ ShortcutMessages::ShortcutMessages(
 	not_null<Ui::ScrollArea*> scroll,
 	rpl::producer<Container> containerValue,
 	BusinessShortcutId shortcutId)
-: AbstractSection(parent, controller)
+: AbstractSection(parent)
 , WindowListDelegate(controller)
 , _controller(controller)
 , _session(&controller->session())
@@ -347,7 +347,7 @@ ShortcutMessages::ShortcutMessages(
 	const auto messages = &_session->data().shortcutMessages();
 
 	messages->shortcutIdChanged(
-	) | rpl::on_next([=](Data::ShortcutIdChange change) {
+	) | rpl::start_with_next([=](Data::ShortcutIdChange change) {
 		if (change.oldId == _shortcutId.current()) {
 			if (change.newId) {
 				_shortcutId = change.newId;
@@ -357,12 +357,12 @@ ShortcutMessages::ShortcutMessages(
 		}
 	}, lifetime());
 	messages->shortcutsChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_shortcut = messages->lookupShortcut(_shortcutId.current()).name;
 	}, lifetime());
 
 	controller->chatStyle()->paletteChanged(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_scroll->updateBars();
 	}, _scroll->lifetime());
 
@@ -378,22 +378,22 @@ ShortcutMessages::ShortcutMessages(
 
 	_scroll->sizeValue() | rpl::filter([](QSize size) {
 		return !size.isEmpty();
-	}) | rpl::on_next([=] {
+	}) | rpl::start_with_next([=] {
 		outerResized();
 	}, lifetime());
 
 	_scroll->scrolls(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		processScroll();
 	}, lifetime());
 
-	_shortcut.value() | rpl::on_next([=] {
+	_shortcut.value() | rpl::start_with_next([=] {
 		refreshEmptyText();
 		_inner->update();
 	}, lifetime());
 
 	_inner->editMessageRequested(
-	) | rpl::on_next([=](auto fullId) {
+	) | rpl::start_with_next([=](auto fullId) {
 		if (const auto item = _session->data().message(fullId)) {
 			const auto media = item->media();
 			if (!media || media->webpage() || media->allowsEditCaption()) {
@@ -406,7 +406,7 @@ ShortcutMessages::ShortcutMessages(
 		}
 	}, _inner->lifetime());
 
-	_inner->heightValue() | rpl::on_next([=](int height) {
+	_inner->heightValue() | rpl::start_with_next([=](int height) {
 		resize(width(), height);
 	}, lifetime());
 }
@@ -420,21 +420,21 @@ void ShortcutMessages::refreshEmptyText() {
 	auto text = away
 		? tr::lng_away_empty_title(
 			tr::now,
-			tr::bold
+			Ui::Text::Bold
 		).append("\n\n").append(tr::lng_away_empty_about(tr::now))
 		: greeting
 		? tr::lng_greeting_empty_title(
 			tr::now,
-			tr::bold
+			Ui::Text::Bold
 		).append("\n\n").append(tr::lng_greeting_empty_about(tr::now))
 		: tr::lng_replies_empty_title(
 			tr::now,
-			tr::bold
+			Ui::Text::Bold
 		).append("\n\n").append(tr::lng_replies_empty_about(
 			tr::now,
 			lt_shortcut,
-			tr::bold('/' + shortcut),
-			tr::marked));
+			Ui::Text::Bold('/' + shortcut),
+			Ui::Text::WithEntities));
 	_emptyIcon = away
 		? &st::awayEmptyIcon
 		: greeting
@@ -624,7 +624,7 @@ void ShortcutMessages::updateComposeControlsPosition() {
 }
 
 void ShortcutMessages::setupComposeControls() {
-	_shortcutId.value() | rpl::on_next([=](BusinessShortcutId id) {
+	_shortcutId.value() | rpl::start_with_next([=](BusinessShortcutId id) {
 		_composeControls->updateShortcutId(id);
 	}, lifetime());
 
@@ -632,7 +632,7 @@ void ShortcutMessages::setupComposeControls() {
 		.key = Dialogs::Key{ _history },
 		.section = Dialogs::EntryState::Section::ShortcutMessages,
 		.currentReplyTo = replyTo(),
-		.currentSuggest = SuggestOptions(),
+		.currentSuggest = SuggestPostOptions(),
 	};
 	_composeControls->setCurrentDialogsEntryState(state);
 
@@ -655,28 +655,28 @@ void ShortcutMessages::setupComposeControls() {
 	});
 
 	_composeControls->cancelRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		listCancelRequest();
 	}, lifetime());
 
 	_composeControls->sendRequests(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		send();
 	}, lifetime());
 
 	_composeControls->sendVoiceRequests(
-	) | rpl::on_next([=](ComposeControls::VoiceToSend &&data) {
+	) | rpl::start_with_next([=](ComposeControls::VoiceToSend &&data) {
 		sendVoice(std::move(data));
 	}, lifetime());
 
 	_composeControls->sendCommandRequests(
-	) | rpl::on_next([=](const QString &command) {
+	) | rpl::start_with_next([=](const QString &command) {
 		listSendBotCommand(command, FullMsgId());
 	}, lifetime());
 
 	const auto saveEditMsgRequestId = lifetime().make_state<mtpRequestId>(0);
 	_composeControls->editRequests(
-	) | rpl::on_next([=](auto data) {
+	) | rpl::start_with_next([=](auto data) {
 		if (const auto item = _session->data().message(data.fullId)) {
 			if (item->isBusinessShortcut()) {
 				const auto spoiler = data.spoilered;
@@ -688,7 +688,7 @@ void ShortcutMessages::setupComposeControls() {
 	_composeControls->attachRequests(
 	) | rpl::filter([=] {
 		return !_choosingAttach;
-	}) | rpl::on_next([=](std::optional<bool> overrideCompress) {
+	}) | rpl::start_with_next([=](std::optional<bool> overrideCompress) {
 		_choosingAttach = true;
 		base::call_delayed(st::historyAttach.ripple.hideDuration, this, [=] {
 			_choosingAttach = false;
@@ -697,23 +697,23 @@ void ShortcutMessages::setupComposeControls() {
 	}, lifetime());
 
 	_composeControls->fileChosen(
-	) | rpl::on_next([=](ChatHelpers::FileChosen data) {
+	) | rpl::start_with_next([=](ChatHelpers::FileChosen data) {
 		_controller->hideLayer(anim::type::normal);
 		sendExistingDocument(data.document, {}, std::nullopt);
 	}, lifetime());
 
 	_composeControls->photoChosen(
-	) | rpl::on_next([=](ChatHelpers::PhotoChosen chosen) {
+	) | rpl::start_with_next([=](ChatHelpers::PhotoChosen chosen) {
 		sendExistingPhoto(chosen.photo);
 	}, lifetime());
 
 	_composeControls->inlineResultChosen(
-	) | rpl::on_next([=](ChatHelpers::InlineChosen chosen) {
+	) | rpl::start_with_next([=](ChatHelpers::InlineChosen chosen) {
 		sendInlineResult(chosen.result, chosen.bot);
 	}, lifetime());
 
 	_composeControls->jumpToItemRequests(
-	) | rpl::on_next([=](FullReplyTo to) {
+	) | rpl::start_with_next([=](FullReplyTo to) {
 		if (const auto item = _session->data().message(to.messageId)) {
 			showAtPosition(item->position());
 		}
@@ -722,12 +722,12 @@ void ShortcutMessages::setupComposeControls() {
 	rpl::merge(
 		_composeControls->scrollKeyEvents(),
 		_inner->scrollKeyEvents()
-	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
+	) | rpl::start_with_next([=](not_null<QKeyEvent*> e) {
 		_scroll->keyPressEvent(e);
 	}, lifetime());
 
 	_composeControls->editLastMessageRequests(
-	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
+	) | rpl::start_with_next([=](not_null<QKeyEvent*> e) {
 		if (!_inner->lastMessageEditRequestNotify()) {
 			_scroll->keyPressEvent(e);
 		}
@@ -748,22 +748,22 @@ void ShortcutMessages::setupComposeControls() {
 	});
 
 	_composeControls->lockShowStarts(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		_cornerButtons.updateJumpDownVisibility();
 		_cornerButtons.updateUnreadThingsVisibility();
 	}, lifetime());
 
 	_composeControls->viewportEvents(
-	) | rpl::on_next([=](not_null<QEvent*> e) {
+	) | rpl::start_with_next([=](not_null<QEvent*> e) {
 		_scroll->viewportEvent(e);
 	}, lifetime());
 
-	_controlsWrap->widthValue() | rpl::on_next([=](int width) {
+	_controlsWrap->widthValue() | rpl::start_with_next([=](int width) {
 		_composeControls->resizeToWidth(width);
 	}, _controlsWrap->lifetime());
 
 	_composeControls->height(
-	) | rpl::on_next([=](int height) {
+	) | rpl::start_with_next([=](int height) {
 		const auto wasMax = (_scroll->scrollTopMax() == _scroll->scrollTop());
 		_controlsWrap->resize(width(), height - st::boxRadius);
 		updateComposeControlsPosition();

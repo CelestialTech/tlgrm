@@ -31,7 +31,7 @@ GroupCallScheduledLeft::GroupCallScheduledLeft(TimeId date)
 , _timer([=] { update(); }) {
 	update();
 	base::unixtime::updates(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		restart();
 	}, _lifetime);
 }
@@ -120,7 +120,7 @@ GroupCallBar::GroupCallBar(
 	_shadow->hide();
 
 	_wrap.entity()->paintRequest(
-	) | rpl::on_next([=](QRect clip) {
+	) | rpl::start_with_next([=](QRect clip) {
 		QPainter(_wrap.entity()).fillRect(clip, st::historyPinnedBg);
 	}, lifetime());
 	_wrap.setAttribute(Qt::WA_OpaquePaintEvent);
@@ -131,7 +131,7 @@ GroupCallBar::GroupCallBar(
 
 	rpl::duplicate(
 		copy
-	) | rpl::on_next([=](GroupCallBarContent &&content) {
+	) | rpl::start_with_next([=](GroupCallBarContent &&content) {
 		_content = content;
 		_userpics->update(_content.users, !_wrap.isHidden());
 		_inner->update();
@@ -145,7 +145,7 @@ GroupCallBar::GroupCallBar(
 		copy
 	) | rpl::map([=](const GroupCallBarContent &content) {
 		return !content.shown;
-	}) | rpl::on_next_done([=](bool hidden) {
+	}) | rpl::start_with_next_done([=](bool hidden) {
 		_shouldBeShown = !hidden;
 		if (!_forceHidden) {
 			_wrap.toggle(_shouldBeShown, anim::type::normal);
@@ -191,7 +191,6 @@ void GroupCallBar::refreshScheduledProcess() {
 				_inner.get(),
 				tr::lng_group_call_join(),
 				st::groupCallTopBarJoin);
-			_join->setTextTransform(RoundButton::TextTransform::NoTransform);
 			setupRightButton(_join.get());
 		}
 	} else if (!_scheduledProcess) {
@@ -203,7 +202,7 @@ void GroupCallBar::refreshScheduledProcess() {
 			st::groupCallTopBarOpen);
 		setupRightButton(_open.get());
 		_open->widthValue(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			refreshOpenBrush();
 		}, _open->lifetime());
 	} else {
@@ -214,7 +213,7 @@ void GroupCallBar::refreshScheduledProcess() {
 void GroupCallBar::setupInner() {
 	_inner->resize(0, st::historyReplyHeight);
 	_inner->paintRequest(
-	) | rpl::on_next([=](QRect rect) {
+	) | rpl::start_with_next([=](QRect rect) {
 		auto p = Painter(_inner);
 		paint(p);
 	}, _inner->lifetime());
@@ -238,7 +237,7 @@ void GroupCallBar::setupInner() {
 	) | rpl::to_empty | rpl::start_to_stream(_barClicks, _inner->lifetime());
 
 	_wrap.geometryValue(
-	) | rpl::on_next([=](QRect rect) {
+	) | rpl::start_with_next([=](QRect rect) {
 		updateShadowGeometry(rect);
 		updateControlsGeometry(rect);
 	}, _inner->lifetime());
@@ -249,7 +248,7 @@ void GroupCallBar::setupRightButton(not_null<RoundButton*> button) {
 	rpl::combine(
 		_inner->widthValue(),
 		button->widthValue()
-	) | rpl::on_next([=](int outerWidth, int buttonWidth) {
+	) | rpl::start_with_next([=](int outerWidth, int buttonWidth) {
 		// Skip shadow of the bar above.
 		const auto top = (st::historyReplyHeight
 			- st::lineWidth

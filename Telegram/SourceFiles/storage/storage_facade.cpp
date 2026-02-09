@@ -34,7 +34,6 @@ public:
 	void add(UserPhotosAddSlice &&query);
 	void remove(UserPhotosRemoveOne &&query);
 	void remove(UserPhotosRemoveAfter &&query);
-	void replace(UserPhotosReplace &&query);
 	rpl::producer<UserPhotosResult> query(UserPhotosQuery &&query) const;
 	rpl::producer<UserPhotosSliceUpdate> userPhotosSliceUpdated() const;
 
@@ -118,10 +117,6 @@ void Facade::Impl::remove(UserPhotosRemoveOne &&query) {
 
 void Facade::Impl::remove(UserPhotosRemoveAfter &&query) {
 	return _userPhotos.remove(std::move(query));
-}
-
-void Facade::Impl::replace(UserPhotosReplace &&query) {
-	return _userPhotos.replace(std::move(query));
 }
 
 rpl::producer<UserPhotosResult> Facade::Impl::query(UserPhotosQuery &&query) const {
@@ -209,10 +204,6 @@ void Facade::remove(UserPhotosRemoveOne &&query) {
 
 void Facade::remove(UserPhotosRemoveAfter &&query) {
 	return _impl->remove(std::move(query));
-}
-
-void Facade::replace(UserPhotosReplace &&query) {
-	return _impl->replace(std::move(query));
 }
 
 rpl::producer<UserPhotosResult> Facade::query(UserPhotosQuery &&query) const {

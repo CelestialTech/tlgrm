@@ -58,7 +58,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_send_action.h"
 #include "dialogs/dialogs_main_list.h"
 #include "chat_helpers/emoji_interactions.h"
-#include "base/call_delayed.h"
 #include "base/unixtime.h"
 #include "support/support_helper.h"
 #include "apiwrap.h"
@@ -132,7 +131,7 @@ TopBarWidget::TopBarWidget(
 	setAttribute(Qt::WA_OpaquePaintEvent);
 
 	Lang::Updated(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		refreshLang();
 	}, lifetime());
 
@@ -143,16 +142,9 @@ TopBarWidget::TopBarWidget(
 	_delete->setClickedCallback([=] { _deleteSelection.fire({}); });
 	_delete->setWidthChangedCallback([=] { updateControlsGeometry(); });
 	_clear->setClickedCallback([=] { _clearSelection.fire({}); });
-	_call->setClickedCallback([=] { call({}); });
-	_call->setAcceptBoth(true, true);
-	_call->addClickHandler([=](Qt::MouseButton button) {
-		if (button == Qt::RightButton) {
-			showCallMenu();
-		}
-	});
+	_call->setClickedCallback([=] { call(); });
 	_groupCall->setClickedCallback([=] { groupCall(); });
-	_menuToggle->addClickHandler([=](auto) { showPeerMenu(); });
-	_menuToggle->setAcceptBoth(true, true);
+	_menuToggle->setClickedCallback([=] { showPeerMenu(); });
 	_infoToggle->setClickedCallback([=] { toggleInfoSection(); });
 	_back->setAcceptBoth();
 	_back->addClickHandler([=](Qt::MouseButton) {
@@ -174,7 +166,7 @@ TopBarWidget::TopBarWidget(
 		const auto activeChanged = (active != std::get<0>(previous));
 		const auto searchInChat = search && (active == search);
 		return std::make_tuple(searchInChat, activeChanged);
-	}) | rpl::on_next([=](
+	}) | rpl::start_with_next([=](
 			bool searchInActiveChat,
 			bool activeChanged) {
 		auto animated = activeChanged
@@ -184,7 +176,7 @@ TopBarWidget::TopBarWidget(
 	}, lifetime());
 
 	controller->adaptive().changes(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateAdaptiveLayout();
 	}, lifetime());
 
@@ -194,7 +186,7 @@ TopBarWidget::TopBarWidget(
 		session().data().sendActionManager().animationUpdated(
 		) | rpl::filter([=](const AnimationUpdate &update) {
 			return (update.thread == _activeChat.key.thread());
-		}) | rpl::on_next([=] {
+		}) | rpl::start_with_next([=] {
 			update();
 		}, lifetime());
 	}
@@ -207,7 +199,7 @@ TopBarWidget::TopBarWidget(
 		| UpdateFlag::SupportInfo
 		| UpdateFlag::Rights
 		| UpdateFlag::EmojiStatus
-	) | rpl::on_next([=](const Data::PeerUpdate &update) {
+	) | rpl::start_with_next([=](const Data::PeerUpdate &update) {
 		if (update.flags & UpdateFlag::HasCalls) {
 			if (update.peer->isUser()
 				&& (update.peer->isSelf()
@@ -237,23 +229,16 @@ TopBarWidget::TopBarWidget(
 	rpl::combine(
 		Core::App().settings().thirdSectionInfoEnabledValue(),
 		Core::App().settings().tabbedReplacedWithInfoValue()
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateInfoToggleActive();
 	}, lifetime());
 
 	Core::App().settings().proxy().connectionTypeValue(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateConnectingState();
 	}, lifetime());
 
 	setCursor(style::cur_pointer);
-	_call->setAccessibleName(tr::lng_profile_action_short_call(tr::now));
-	_groupCall->setAccessibleName(tr::lng_group_call_title(tr::now));
-	_search->setAccessibleName(tr::lng_shortcuts_search(tr::now));
-	_infoToggle->setAccessibleName(tr::lng_settings_section_info(tr::now));
-	_menuToggle->setAccessibleName(tr::lng_chat_menu(tr::now));
-	_back->setAccessibleName(tr::lng_go_back(tr::now));
-	_cancelChoose->setAccessibleName(tr::lng_cancel(tr::now));
 }
 
 TopBarWidget::~TopBarWidget() = default;
@@ -291,12 +276,12 @@ void TopBarWidget::refreshLang() {
 	InvokeQueued(this, [this] { updateControlsGeometry(); });
 }
 
-void TopBarWidget::call(Calls::StartOutgoingCallArgs args) {
+void TopBarWidget::call() {
 	if (_controller->showFrozenError()) {
 		return;
 	} else if (const auto peer = _activeChat.key.peer()) {
 		if (const auto user = peer->asUser()) {
-			Core::App().calls().startOutgoingCall(user, std::move(args));
+			Core::App().calls().startOutgoingCall(user, false);
 		}
 	}
 }
@@ -345,17 +330,13 @@ void TopBarWidget::setChooseForReportReason(
 		: style::cur_default);
 }
 
-bool TopBarWidget::createMenu(
-		not_null<Ui::IconButton*> button,
-		bool withIcons) {
+bool TopBarWidget::createMenu(not_null<Ui::IconButton*> button) {
 	if (!_activeChat.key || _menu) {
 		return false;
 	}
 	_menu = base::make_unique_q<Ui::PopupMenu>(
 		this,
-		withIcons
-			? st::popupMenuExpandedSeparator
-			: st::defaultPopupMenu);
+		st::popupMenuExpandedSeparator);
 	_menu->setDestroyedCallback([
 			weak = base::make_weak(this),
 			weakButton = base::make_weak(button),
@@ -381,14 +362,9 @@ void TopBarWidget::showPeerMenu() {
 		_menu = nullptr;
 	} else {
 		_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
-		_menu->popup(Ui::PopupMenu::ConstrainToParentScreen(
-			_menu,
-			mapToGlobal(
-				QPoint(
-					width()
-						+ st::topBarMenuPosition.x()
-						+ _menu->st().shadow.extend.right(),
-					st::topBarMenuPosition.y()))));
+		_menu->popup(mapToGlobal(QPoint(
+			width() + st::topBarMenuPosition.x(),
+			st::topBarMenuPosition.y())));
 	}
 }
 
@@ -402,30 +378,6 @@ void TopBarWidget::showGroupCallMenu(not_null<PeerData*> peer) {
 	_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
 	_menu->popup(mapToGlobal(QPoint(
 		_groupCall->x() + _groupCall->width() + st::topBarMenuGroupCallSkip,
-		st::topBarMenuPosition.y())));
-}
-
-void TopBarWidget::showCallMenu() {
-	const auto created = createMenu(_call, false);
-	if (!created) {
-		return;
-	}
-	const auto perform = [&](bool video) {
-		return [=] {
-			base::call_delayed(st::defaultPopupMenu.showDuration, this, [=] {
-				call({ .video = video, .isConfirmed = true });
-			});
-		};
-	};
-	_menu->addAction(
-		tr::lng_profile_action_short_call(tr::now),
-		perform(false));
-	_menu->addAction(
-		tr::lng_call_start_video(tr::now),
-		perform(true));
-	_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
-	_menu->popup(mapToGlobal(QPoint(
-		_call->x() + _call->width() + st::topBarMenuGroupCallSkip,
 		st::topBarMenuPosition.y())));
 }
 
@@ -576,9 +528,7 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			p.drawTextLeft(nameleft, statustop, width(), _customTitleText);
 		}
 	} else if (folder
-		|| (peer
-			&& (peer->sharedMediaInfo() || peer->isVerifyCodes())
-			&& _activeChat.section != Section::SavedSublist)
+		|| (peer && (peer->sharedMediaInfo() || peer->isVerifyCodes()))
 		|| (_activeChat.section == Section::Scheduled)
 		|| (_activeChat.section == Section::Pinned)) {
 		auto text = (_activeChat.section == Section::Scheduled)
@@ -869,7 +819,7 @@ void TopBarWidget::setActiveChat(
 			) | rpl::map([](int count) {
 				return (count == 0);
 			}) | rpl::distinct_until_changed(
-			) | rpl::on_next([=] {
+			) | rpl::start_with_next([=] {
 				updateControlsVisibility();
 				updateControlsGeometry();
 			}, _activeChatLifetime);
@@ -891,7 +841,7 @@ void TopBarWidget::setActiveChat(
 			_controller->emojiInteractions().seen(
 			) | rpl::filter([=](const InteractionSeen &seen) {
 				return (seen.peer == history->peer);
-			}) | rpl::on_next([=](const InteractionSeen &seen) {
+			}) | rpl::start_with_next([=](const InteractionSeen &seen) {
 				handleEmojiInteractionSeen(seen.emoticon);
 			}, _activeChatLifetime);
 		}
@@ -899,7 +849,7 @@ void TopBarWidget::setActiveChat(
 		if (const auto topic = _activeChat.key.topic()) {
 			Info::Profile::NameValue(
 				topic->peer()
-			) | rpl::on_next([=](const QString &name) {
+			) | rpl::start_with_next([=](const QString &name) {
 				_titlePeerText.setText(st::dialogsTextStyle, name);
 				_titlePeerTextOnline = false;
 				update();
@@ -908,7 +858,7 @@ void TopBarWidget::setActiveChat(
 			// _menuToggle visibility depends on "View topic info",
 			// "View topic info" visibility depends on activeChatCurrent.
 			_controller->activeChatChanges(
-			) | rpl::on_next([=] {
+			) | rpl::start_with_next([=] {
 				updateControlsVisibility();
 			}, _activeChatLifetime);
 		}
@@ -995,19 +945,11 @@ void TopBarWidget::refreshInfoButton() {
 			st::topBarInfoButton,
 			infoPeer->userpicShape());
 		info->showSavedMessagesOnSelf(true);
-		info->showMyNotesOnSelf(true);
 		_info.destroy();
 		_info = std::move(info);
 	}
 	if (_info) {
 		_info->setAttribute(Qt::WA_TransparentForMouseEvents);
-		_info->setAccessibleName(tr::lng_settings_section_info(tr::now));
-		if (_back && _info) {
-			QWidget::setTabOrder(_back.data(), _info.data());
-		}
-		if (_info && _search) {
-			QWidget::setTabOrder(_info.data(), _search.data());
-		}
 	}
 }
 
@@ -1411,11 +1353,11 @@ bool TopBarWidget::toggleSearch(bool shown, anim::type animated) {
 		_searchCancel->show(anim::type::instant);
 		_searchCancel->setClickedCallback([=] { _searchCancelled.fire({}); });
 		_searchField->submits(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			_searchSubmitted.fire({});
 		}, _searchField->lifetime());
 		_searchField->changes(
-		) | rpl::on_next([=] {
+		) | rpl::start_with_next([=] {
 			const auto was = _searchQuery.current();
 			const auto now = _searchField->getLastText();
 			if (_jumpToDate && was.isEmpty() != now.isEmpty()) {
@@ -1613,7 +1555,7 @@ void TopBarWidget::refreshUnreadBadge() {
 	rpl::combine(
 		_back->geometryValue(),
 		_unreadBadge->widthValue()
-	) | rpl::on_next([=](QRect geometry, int width) {
+	) | rpl::start_with_next([=](QRect geometry, int width) {
 		_unreadBadge->move(
 			geometry.x() + geometry.width() - width,
 			geometry.y() + st::titleUnreadCounterTop);
@@ -1622,7 +1564,7 @@ void TopBarWidget::refreshUnreadBadge() {
 	_unreadBadge->setVisible(!rootChatsListBar());
 	_unreadBadge->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_controller->session().data().unreadBadgeChanges(
-	) | rpl::on_next([=] {
+	) | rpl::start_with_next([=] {
 		updateUnreadBadge();
 	}, _unreadBadge->lifetime());
 	updateUnreadBadge();
@@ -1670,7 +1612,7 @@ void TopBarWidget::setupDragOnBackButton() {
 	_back->events(
 	) | rpl::filter([=](not_null<QEvent*> e) {
 		return e->type() == QEvent::DragEnter;
-	}) | rpl::on_next([=](not_null<QEvent*> e) {
+	}) | rpl::start_with_next([=](not_null<QEvent*> e) {
 		using namespace Storage;
 		const auto d = static_cast<QDragEnterEvent*>(e.get());
 		const auto data = d->mimeData();
@@ -1687,7 +1629,7 @@ void TopBarWidget::setupDragOnBackButton() {
 		) | rpl::filter([=](not_null<QEvent*> e) {
 			return e->type() == QEvent::DragMove
 				|| e->type() == QEvent::DragLeave;
-		}) | rpl::on_next([=](not_null<QEvent*> e) {
+		}) | rpl::start_with_next([=](not_null<QEvent*> e) {
 			if (e->type() == QEvent::DragMove) {
 				timer->callOnce(ChoosePeerByDragTimeout);
 			} else if (e->type() == QEvent::DragLeave) {

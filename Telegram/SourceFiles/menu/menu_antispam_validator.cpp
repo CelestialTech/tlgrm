@@ -93,20 +93,20 @@ object_ptr<Ui::RpWidget> AntiSpamValidator::createButton() const {
 	_channel->session().changes().peerUpdates(
 		_channel,
 		UpdateFlag::Members | UpdateFlag::Admins
-	) | rpl::on_next(updateLocked, button->lifetime());
+	) | rpl::start_with_next(updateLocked, button->lifetime());
 	updateLocked();
 	button->toggledValue(
-	) | rpl::on_next([=, controller = _controller](bool toggled) {
+	) | rpl::start_with_next([=, controller = _controller](bool toggled) {
 		if (state->locked.current() && toggled) {
 			state->toggled.fire(false);
 			controller->showToast(tr::lng_manage_peer_antispam_not_enough(
 				tr::now,
 				lt_count,
 				EnableAntiSpamMinMembers(channel),
-				tr::rich));
+				Ui::Text::RichLangValue));
 		} else {
 			channel->session().api().request(MTPchannels_ToggleAntiSpam(
-				channel->inputChannel(),
+				channel->inputChannel,
 				MTP_bool(toggled)
 			)).done([=](const MTPUpdates &result) {
 				channel->session().api().applyUpdates(result);
@@ -157,11 +157,11 @@ void AntiSpamValidator::addAction(
 		const auto text = tr::lng_admin_log_antispam_menu_report_toast(
 			tr::now,
 			lt_link,
-			tr::link(
+			Ui::Text::Link(
 				tr::lng_admin_log_antispam_menu_report_toast_link(
 					tr::now),
 				"internal:show"),
-			tr::rich);
+			Ui::Text::RichLangValue);
 		const auto showToast = [=,
 				window = _controller,
 				channel = _channel] {
@@ -184,7 +184,7 @@ void AntiSpamValidator::addAction(
 			[=, channel = _channel] {
 				_channel->session().api().request(
 					MTPchannels_ReportAntiSpamFalsePositive(
-						channel->inputChannel(),
+						channel->inputChannel,
 						MTP_int(eventId)
 				)).done(showToast).send();
 			},

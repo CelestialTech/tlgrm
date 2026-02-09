@@ -19,15 +19,12 @@ using Flags = base::flags<Flag>;
 
 namespace Ui {
 class GenericBox;
-class RpWidget;
 } // namespace Ui
 
 namespace Settings {
 
-void PowerSavingBox(
-	not_null<Ui::GenericBox*> box,
-	PowerSaving::Flags highlightFlags = PowerSaving::Flags());
+void PowerSavingBox(not_null<Ui::GenericBox*> box);
 
 [[nodiscard]] EditFlagsDescriptor<PowerSaving::Flags> PowerSavingLabels();
 
-} // namespace Settings
+} // namespace PowerSaving

@@ -12,7 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_sticker.h"
 
 class Image;
-struct HistoryMessageSuggestion;
 
 namespace Data {
 class DocumentMedia;
@@ -132,14 +131,12 @@ private:
 
 };
 
-class GiftServiceBox final
-	: public ServiceBoxContent
-	, public base::has_weak_ptr {
+class GiftThemeBox final : public ServiceBoxContent {
 public:
-	GiftServiceBox(
+	GiftThemeBox(
 		not_null<Element*> parent,
 		not_null<Data::MediaGiftBox*> gift);
-	~GiftServiceBox();
+	~GiftThemeBox();
 
 	int top() override;
 	int width() override;
@@ -154,8 +151,6 @@ public:
 		const QRect &geometry) override;
 	ClickHandlerPtr createViewLink() override;
 
-	rpl::producer<> changes() override;
-
 	bool hideServiceText() override;
 	void stickerClearLoopPlayed() override;
 	std::unique_ptr<StickerPlayer> stickerTakePlayer(
@@ -168,10 +163,6 @@ public:
 private:
 	void ensureStickerCreated() const;
 	void cacheUniqueBackground(int width, int height);
-	void checkKeyboardRemoval(
-		not_null<const HistoryMessageSuggestion*> suggestion,
-		bool expired);
-	void clearKeyboard();
 
 	const not_null<Element*> _parent;
 	const Data::GiftCode &_data;
@@ -180,8 +171,6 @@ private:
 	base::flat_map<float64, QImage> _patternCache;
 	bool _backroundPatterned = false;
 	mutable std::optional<Sticker> _sticker;
-	rpl::event_stream<> _changes;
-	base::Timer _changeTimer;
 
 };
 

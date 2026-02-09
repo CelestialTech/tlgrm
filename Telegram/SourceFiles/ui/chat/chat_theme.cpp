@@ -567,20 +567,19 @@ void ChatTheme::finishCreateOnMain() {
 ChatPaintContext ChatTheme::preparePaintContext(
 		not_null<const ChatStyle*> st,
 		QRect viewport,
-		QRect area,
 		QRect clip,
 		bool paused) {
-	const auto size = viewport.size();
+	const auto area = viewport.size();
 	const auto now = crl::now();
 	if (!_bubblesBackgroundPrepared.isNull()
-		&& _bubblesBackground.area != size) {
+		&& _bubblesBackground.area != area) {
 		if (!_cacheBubblesTimer) {
 			_cacheBubblesTimer.emplace([=] { cacheBubbles(); });
 		}
-		if (_cacheBubblesArea != size
+		if (_cacheBubblesArea != area
 			|| (!_cacheBubblesTimer->isActive()
 				&& !_bubblesCachingRequest)) {
-			_cacheBubblesArea = size;
+			_cacheBubblesArea = area;
 			_lastBubblesAreaChangeTime = now;
 			_cacheBubblesTimer->callOnce(kCacheBackgroundFastTimeout);
 		}
@@ -589,7 +588,6 @@ ChatPaintContext ChatTheme::preparePaintContext(
 		.st = st,
 		.bubblesPattern = _bubblesBackgroundPattern.get(),
 		.viewport = viewport,
-		.area = area,
 		.clip = clip,
 		.now = now,
 		.paused = paused,

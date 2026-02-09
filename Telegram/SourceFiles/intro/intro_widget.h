@@ -65,8 +65,7 @@ struct Data {
 
 	EmailStatus emailStatus = EmailStatus::None;
 	QString email;
-	QString emailPatternSetup;
-	QString emailPatternLogin;
+	QString emailPattern;
 
 	Core::CloudPasswordState pwdState;
 
