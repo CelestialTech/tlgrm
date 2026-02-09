@@ -1,5 +1,7 @@
 # Tlgrm - Telegram Desktop with MCP Integration
 
+![Tlgrm](docs/assets/tlgrm-main.png)
+
 A custom fork of [Telegram Desktop](https://github.com/telegramdesktop/tdesktop) with an embedded Model Context Protocol (MCP) server, enabling AI assistants like Claude to interact directly with your Telegram data.
 
 ## Features
