@@ -63,25 +63,105 @@ void ChooseFormatBox(
 		Output::Format format,
 		Fn<void(Output::Format)> done) {
 	using Format = Output::Format;
-	const auto group = std::make_shared<Ui::RadioenumGroup<Format>>(format);
-	const auto addFormatOption = [&](QString label, Format format) {
-		box->addRow(
-			object_ptr<Ui::Radioenum<Format>>(
-				box,
-				group,
-				format,
-				label,
-				st::defaultBoxCheckbox),
-			st::exportSettingPadding);
+
+	// Helper to check if format includes a specific type
+	const auto hasHtml = [](Format f) {
+		return f == Format::Html || f == Format::HtmlAndJson
+			|| f == Format::HtmlAndMarkdown || f == Format::All;
 	};
+	const auto hasJson = [](Format f) {
+		return f == Format::Json || f == Format::HtmlAndJson
+			|| f == Format::JsonAndMarkdown || f == Format::All;
+	};
+	const auto hasMarkdown = [](Format f) {
+		return f == Format::Markdown || f == Format::HtmlAndMarkdown
+			|| f == Format::JsonAndMarkdown || f == Format::All;
+	};
+
+	// Track individual checkbox states
+	const auto htmlChecked = std::make_shared<bool>(hasHtml(format));
+	const auto jsonChecked = std::make_shared<bool>(hasJson(format));
+	const auto markdownChecked = std::make_shared<bool>(hasMarkdown(format));
+
+	// Store checkbox pointers
+	const auto htmlBox = std::make_shared<Ui::Checkbox*>(nullptr);
+	const auto jsonBox = std::make_shared<Ui::Checkbox*>(nullptr);
+	const auto markdownBox = std::make_shared<Ui::Checkbox*>(nullptr);
+
+	// Helper to count checked boxes
+	const auto countChecked = [=]() {
+		return (*htmlChecked ? 1 : 0) + (*jsonChecked ? 1 : 0) + (*markdownChecked ? 1 : 0);
+	};
+
 	box->setTitle(tr::lng_export_option_choose_format());
-	addFormatOption(tr::lng_export_option_html(tr::now), Format::Html);
-	addFormatOption(tr::lng_export_option_json(tr::now), Format::Json);
-	addFormatOption(
-		tr::lng_export_option_html_and_json(tr::now),
-		Format::HtmlAndJson);
-	addFormatOption(QString("Markdown"), Format::Markdown);
-	box->addButton(tr::lng_settings_save(), [=] { done(group->current()); });
+
+	// HTML checkbox
+	*htmlBox = box->addRow(
+		object_ptr<Ui::Checkbox>(
+			box,
+			tr::lng_export_option_html(tr::now),
+			*htmlChecked,
+			st::defaultBoxCheckbox),
+		st::exportSettingPadding);
+	(*htmlBox)->checkedChanges(
+	) | rpl::start_with_next([=](bool checked) {
+		if (!checked && countChecked() == 1) {
+			// Prevent unchecking last one
+			(*htmlBox)->setChecked(true);
+		} else {
+			*htmlChecked = checked;
+		}
+	}, (*htmlBox)->lifetime());
+
+	// JSON checkbox
+	*jsonBox = box->addRow(
+		object_ptr<Ui::Checkbox>(
+			box,
+			tr::lng_export_option_json(tr::now),
+			*jsonChecked,
+			st::defaultBoxCheckbox),
+		st::exportSettingPadding);
+	(*jsonBox)->checkedChanges(
+	) | rpl::start_with_next([=](bool checked) {
+		if (!checked && countChecked() == 1) {
+			(*jsonBox)->setChecked(true);
+		} else {
+			*jsonChecked = checked;
+		}
+	}, (*jsonBox)->lifetime());
+
+	// Markdown checkbox
+	*markdownBox = box->addRow(
+		object_ptr<Ui::Checkbox>(
+			box,
+			QString("Markdown"),
+			*markdownChecked,
+			st::defaultBoxCheckbox),
+		st::exportSettingPadding);
+	(*markdownBox)->checkedChanges(
+	) | rpl::start_with_next([=](bool checked) {
+		if (!checked && countChecked() == 1) {
+			(*markdownBox)->setChecked(true);
+		} else {
+			*markdownChecked = checked;
+		}
+	}, (*markdownBox)->lifetime());
+
+	// Compute combined Format from checkbox states
+	const auto computeFormat = [=]() -> Format {
+		const bool h = *htmlChecked;
+		const bool j = *jsonChecked;
+		const bool m = *markdownChecked;
+		if (h && j && m) return Format::All;
+		if (h && j) return Format::HtmlAndJson;
+		if (h && m) return Format::HtmlAndMarkdown;
+		if (j && m) return Format::JsonAndMarkdown;
+		if (h) return Format::Html;
+		if (j) return Format::Json;
+		return Format::Markdown;
+	};
+
+	box->addButton(tr::lng_settings_save(), [=] { done(computeFormat()); });
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 }
 
@@ -296,9 +376,13 @@ void SettingsWidget::setupOtherOptions(
 void SettingsWidget::setupPathAndFormat(
 		not_null<Ui::VerticalLayout*> container) {
 	if (_singlePeerId != 0) {
+		// Add vertical spacing before Format section
+		addHeader(container, tr::lng_export_header_format(tr::now));
 		addSinglePeerFormatLabel(container);
 		addSinglePeerPathLabel(container);
 		addLimitsLabel(container);
+		// Add extra vertical spacing before Unrestricted mode
+		container->add(object_ptr<Ui::FixedHeightWidget>(container, 8));
 		addUnrestrictedModeCheckbox(container);
 		return;
 	}
@@ -447,13 +531,30 @@ void SettingsWidget::addSinglePeerFormatLabel(
 		return data.format;
 	}) | rpl::distinct_until_changed(
 	) | rpl::map([](Format format) {
-		const auto formatName = (format == Format::Html)
-			? u"HTML"_q
-			: (format == Format::Json)
-			? u"JSON"_q
-			: (format == Format::Markdown)
-			? u"Markdown"_q
-			: tr::lng_export_option_html_and_json(tr::now);
+		QString formatName;
+		switch (format) {
+		case Format::Html:
+			formatName = u"HTML"_q;
+			break;
+		case Format::Json:
+			formatName = u"JSON"_q;
+			break;
+		case Format::Markdown:
+			formatName = u"Markdown"_q;
+			break;
+		case Format::HtmlAndJson:
+			formatName = u"HTML, JSON"_q;
+			break;
+		case Format::HtmlAndMarkdown:
+			formatName = u"HTML, Markdown"_q;
+			break;
+		case Format::JsonAndMarkdown:
+			formatName = u"JSON, Markdown"_q;
+			break;
+		case Format::All:
+			formatName = u"HTML, JSON, Markdown"_q;
+			break;
+		}
 		auto result = TextWithEntities{ u"Format: "_q };
 		result.append(Ui::Text::Link(formatName, u"internal:edit_format"_q));
 		return result;
@@ -501,11 +602,18 @@ void SettingsWidget::addSinglePeerPathLabel(
 
 void SettingsWidget::addUnrestrictedModeCheckbox(
 		not_null<Ui::VerticalLayout*> container) {
+	// Default to true (pre-selected)
+	const auto initialChecked = true;
+	if (!readData().gradualMode) {
+		changeData([](Settings &data) {
+			data.gradualMode = true;
+		});
+	}
 	const auto checkbox = container->add(
 		object_ptr<Ui::Checkbox>(
 			container,
 			QString::fromUtf8("Unrestricted mode"),
-			readData().gradualMode,
+			initialChecked,
 			st::defaultBoxCheckbox),
 		st::exportSettingPadding);
 	checkbox->checkedChanges(

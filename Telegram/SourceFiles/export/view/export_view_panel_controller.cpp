@@ -177,7 +177,9 @@ void PanelController::createPanel() {
 		: singlePeer
 		? tr::lng_export_header_chats
 		: tr::lng_export_title)());
-	_panel->setInnerSize(st::exportPanelSize);
+	_panel->setInnerSize(singlePeer
+		? st::exportSinglePeerPanelSize
+		: st::exportPanelSize);
 	_panel->closeRequests(
 	) | rpl::on_next([=] {
 		LOG(("Export Info: Panel Hide By Close."));
