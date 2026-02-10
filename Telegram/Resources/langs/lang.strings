@@ -6335,6 +6335,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_export_option_html" = "Human-readable HTML";
 "lng_export_option_json" = "Machine-readable JSON";
 "lng_export_option_html_and_json" = "Both";
+"lng_export_option_format" = "Format: {format}";
+"lng_export_option_download_path" = "Download path: {path}";
+"lng_export_option_unrestricted_mode" = "Unrestricted mode";
 "lng_export_limits" = "From: {from}, to: {till}";
 "lng_export_beginning" = "the oldest message";
 "lng_export_end" = "present";

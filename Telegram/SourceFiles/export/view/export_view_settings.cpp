@@ -80,6 +80,7 @@ void ChooseFormatBox(
 	addFormatOption(
 		tr::lng_export_option_html_and_json(tr::now),
 		Format::HtmlAndJson);
+	addFormatOption(QString("Markdown"), Format::Markdown);
 	box->addButton(tr::lng_settings_save(), [=] { done(group->current()); });
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 }
@@ -218,7 +219,36 @@ void SettingsWidget::setupFullExportOptions(
 void SettingsWidget::setupMediaOptions(
 		not_null<Ui::VerticalLayout*> container) {
 	if (_singlePeerId != 0) {
-		addMediaOptions(container);
+		// For single peer export, add media options without size slider
+		addMediaOption(
+			container,
+			tr::lng_export_option_photos(tr::now),
+			MediaType::Photo);
+		addMediaOption(
+			container,
+			tr::lng_export_option_video_files(tr::now),
+			MediaType::Video);
+		addMediaOption(
+			container,
+			tr::lng_export_option_voice_messages(tr::now),
+			MediaType::VoiceMessage);
+		addMediaOption(
+			container,
+			tr::lng_export_option_video_messages(tr::now),
+			MediaType::VideoMessage);
+		addMediaOption(
+			container,
+			tr::lng_export_option_stickers(tr::now),
+			MediaType::Sticker);
+		addMediaOption(
+			container,
+			tr::lng_export_option_gifs(tr::now),
+			MediaType::GIF);
+		addMediaOption(
+			container,
+			tr::lng_export_option_files(tr::now),
+			MediaType::File);
+		// No size slider for single peer export
 		return;
 	}
 	const auto mediaWrap = container->add(
@@ -266,8 +296,10 @@ void SettingsWidget::setupOtherOptions(
 void SettingsWidget::setupPathAndFormat(
 		not_null<Ui::VerticalLayout*> container) {
 	if (_singlePeerId != 0) {
-		addFormatAndLocationLabel(container);
+		addSinglePeerFormatLabel(container);
+		addSinglePeerPathLabel(container);
 		addLimitsLabel(container);
+		addUnrestrictedModeCheckbox(container);
 		return;
 	}
 	const auto formatGroup = std::make_shared<Ui::RadioenumGroup<Format>>(
@@ -292,6 +324,22 @@ void SettingsWidget::setupPathAndFormat(
 	addFormatOption(tr::lng_export_option_html(tr::now), Format::Html);
 	addFormatOption(tr::lng_export_option_json(tr::now), Format::Json);
 	addFormatOption(tr::lng_export_option_html_and_json(tr::now), Format::HtmlAndJson);
+	addFormatOption(QString("Markdown"), Format::Markdown);
+
+	// Gradual mode checkbox
+	const auto gradualCheck = container->add(
+		object_ptr<Ui::Checkbox>(
+			container,
+			QString("Gradual export mode (bypasses restrictions)"),
+			false,
+			st::defaultBoxCheckbox),
+		st::exportSettingPadding);
+	gradualCheck->checkedChanges(
+	) | rpl::start_with_next([=](bool checked) {
+		changeData([&](Settings &data) {
+			data.gradualMode = checked;
+		});
+	}, gradualCheck->lifetime());
 }
 
 void SettingsWidget::addLocationLabel(
@@ -393,26 +441,109 @@ void SettingsWidget::addFormatAndLocationLabel(
 #endif // OS_MAC_STORE
 }
 
+void SettingsWidget::addSinglePeerFormatLabel(
+		not_null<Ui::VerticalLayout*> container) {
+	auto formatText = value() | rpl::map([](const Settings &data) {
+		return data.format;
+	}) | rpl::distinct_until_changed(
+	) | rpl::map([](Format format) {
+		const auto formatName = (format == Format::Html)
+			? u"HTML"_q
+			: (format == Format::Json)
+			? u"JSON"_q
+			: (format == Format::Markdown)
+			? u"Markdown"_q
+			: tr::lng_export_option_html_and_json(tr::now);
+		auto result = TextWithEntities{ u"Format: "_q };
+		result.append(Ui::Text::Link(formatName, u"internal:edit_format"_q));
+		return result;
+	});
+	const auto label = container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			std::move(formatText),
+			st::exportLocationLabel),
+		st::exportLocationPadding);
+	label->overrideLinkClickHandler([=] {
+		chooseFormat();
+	});
+}
+
+void SettingsWidget::addSinglePeerPathLabel(
+		not_null<Ui::VerticalLayout*> container) {
+#ifndef OS_MAC_STORE
+	auto pathText = value() | rpl::map([](const Settings &data) {
+		return data.path;
+	}) | rpl::distinct_until_changed(
+	) | rpl::map([=](const QString &path) {
+		const auto pathDisplay = IsDefaultPath(_session, path)
+			? Core::App().canReadDefaultDownloadPath()
+			? u"Downloads/"_q + File::DefaultDownloadPathFolder(_session)
+			: tr::lng_download_path_temp(tr::now)
+			: path;
+		auto result = TextWithEntities{ u"Download path: "_q };
+		result.append(Ui::Text::Link(
+			QDir::toNativeSeparators(pathDisplay),
+			u"internal:edit_export_path"_q));
+		return result;
+	});
+	const auto label = container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			std::move(pathText),
+			st::exportLocationLabel),
+		st::exportLocationPadding);
+	label->overrideLinkClickHandler([=] {
+		chooseFolder();
+	});
+#endif // OS_MAC_STORE
+}
+
+void SettingsWidget::addUnrestrictedModeCheckbox(
+		not_null<Ui::VerticalLayout*> container) {
+	const auto checkbox = container->add(
+		object_ptr<Ui::Checkbox>(
+			container,
+			QString::fromUtf8("Unrestricted mode"),
+			readData().gradualMode,
+			st::defaultBoxCheckbox),
+		st::exportSettingPadding);
+	checkbox->checkedChanges(
+	) | rpl::start_with_next([=](bool checked) {
+		changeData([&](Settings &data) {
+			data.gradualMode = checked;
+		});
+	}, checkbox->lifetime());
+}
+
 void SettingsWidget::addLimitsLabel(
 		not_null<Ui::VerticalLayout*> container) {
+	const auto makeLink = [](const QString &text, const QString &url) {
+		return Ui::Text::Link(text, url);
+	};
+
 	auto fromDateLink = value() | rpl::map([](const Settings &data) {
 		return data.singlePeerFrom;
 	}) | rpl::distinct_until_changed(
-	) | rpl::map([](TimeId from) {
+	) | rpl::map([=](TimeId from) {
 		return (from
 			? rpl::single(langDayOfMonthFull(
 				base::unixtime::parse(from).date()))
 			: tr::lng_export_beginning()
-		) | Ui::Text::ToLink(u"internal:edit_from"_q);
+		) | rpl::map([=](const QString &text) {
+			return makeLink(text, u"internal:edit_from"_q);
+		});
 	}) | rpl::flatten_latest();
 
-	const auto mapToTime = [](TimeId id, const QString &link) {
+	const auto mapToTime = [=](TimeId id, const QString &link) {
 		return rpl::single(id
 			? QLocale().toString(
 				base::unixtime::parse(id).time(),
 				QLocale::ShortFormat)
 			: QString()
-		) | Ui::Text::ToLink(link);
+		) | rpl::map([=](const QString &text) {
+			return makeLink(text, link);
+		});
 	};
 
 	const auto concat = [](TextWithEntities date, TextWithEntities link) {
@@ -436,12 +567,14 @@ void SettingsWidget::addLimitsLabel(
 	auto tillDateLink = value() | rpl::map([](const Settings &data) {
 		return data.singlePeerTill;
 	}) | rpl::distinct_until_changed(
-	) | rpl::map([](TimeId till) {
+	) | rpl::map([=](TimeId till) {
 		return (till
 			? rpl::single(langDayOfMonthFull(
 				base::unixtime::parse(till).date()))
 			: tr::lng_export_end()
-		) | Ui::Text::ToLink(u"internal:edit_till"_q);
+		) | rpl::map([=](const QString &text) {
+			return makeLink(text, u"internal:edit_till"_q);
+		});
 	}) | rpl::flatten_latest();
 
 	auto tillTimeLink = value() | rpl::map([](const Settings &data) {
@@ -470,8 +603,8 @@ void SettingsWidget::addLimitsLabel(
 		object_ptr<Ui::FlatLabel>(
 			container,
 			std::move(datesText),
-			st::boxLabel),
-		st::exportLimitsPadding);
+			st::exportLocationLabel),
+		st::exportLocationPadding);
 
 	const auto removeTime = [](TimeId dateTime) {
 		return base::unixtime::serialize(

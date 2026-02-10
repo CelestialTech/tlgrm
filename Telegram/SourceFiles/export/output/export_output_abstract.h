@@ -40,6 +40,10 @@ enum class Format {
 	Html,
 	Json,
 	HtmlAndJson,
+	Markdown,
+	HtmlAndMarkdown,
+	JsonAndMarkdown,
+	All,
 };
 
 class AbstractWriter {

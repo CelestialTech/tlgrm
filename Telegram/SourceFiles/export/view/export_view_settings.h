@@ -86,6 +86,12 @@ private:
 		not_null<Ui::VerticalLayout*> container);
 	void addFormatAndLocationLabel(
 		not_null<Ui::VerticalLayout*> container);
+	void addSinglePeerFormatLabel(
+		not_null<Ui::VerticalLayout*> container);
+	void addSinglePeerPathLabel(
+		not_null<Ui::VerticalLayout*> container);
+	void addUnrestrictedModeCheckbox(
+		not_null<Ui::VerticalLayout*> container);
 	void addLimitsLabel(
 		not_null<Ui::VerticalLayout*> container);
 	void chooseFolder();

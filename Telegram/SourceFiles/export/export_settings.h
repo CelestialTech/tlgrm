@@ -34,10 +34,10 @@ struct MediaSettings {
 	friend inline constexpr auto is_flag_type(Type) { return true; };
 
 	Types types = DefaultTypes();
-	int64 sizeLimit = 8 * 1024 * 1024;
+	int64 sizeLimit = 4000 * int64(1024 * 1024); // No limit (4GB max)
 
 	static inline Types DefaultTypes() {
-		return Type::Photo;
+		return Type::AllMask;
 	}
 
 };
@@ -89,6 +89,8 @@ struct Settings {
 	TimeId singlePeerTill = 0;
 
 	TimeId availableAt = 0;
+
+	bool gradualMode = false;
 
 	bool onlySinglePeer() const {
 		return singlePeer.type() != mtpc_inputPeerEmpty;
