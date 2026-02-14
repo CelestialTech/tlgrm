@@ -604,17 +604,6 @@ void Launcher::processArguments() {
 		LOG(("TData: Custom working directory requested: %1").arg(_customWorkingDir));
 		_customWorkingDir = QDir(_customWorkingDir).absolutePath() + '/';
 		LOG(("TData: Custom working directory (absolute): %1").arg(_customWorkingDir));
-	} else {
-		// Auto-detect tdata directory in home directory
-		const auto homeDir = QDir::homePath();
-		const auto homeTdataPath = homeDir + "/tdata";
-		if (QDir(homeTdataPath).exists()) {
-			LOG(("TData: Auto-detected tdata directory at: %1").arg(homeTdataPath));
-			_customWorkingDir = homeDir + '/';
-			LOG(("TData: Auto-setting working directory to home: %1").arg(_customWorkingDir));
-		} else {
-			LOG(("TData: No tdata found in home directory, using default working directory"));
-		}
 	}
 
 	const auto startUrls = parseResult.value("--", {});

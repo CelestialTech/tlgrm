@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/bytes.h"
 #include "base/options.h"
 #include "base/random.h"
+#include <QTimer>
 #include <set>
 #include <deque>
 
@@ -371,6 +372,40 @@ auto ApiWrap::mainRequest(Request &&request) {
 		[=](const MTP::Error &result) { error(result); });
 }
 
+// Direct request that bypasses takeout session (for gradual mode)
+template <typename Request>
+auto ApiWrap::directRequest(Request &&request) {
+	auto original = std::move(_mtp.request(
+		std::forward<Request>(request)
+	).toDC(MTP::ShiftDcId(0, MTP::kExportDcShift)));
+
+	return RequestBuilder<Request>(
+		std::move(original),
+		[=](const MTP::Error &result) { error(result); });
+}
+
+bool ApiWrap::isGradualMode() const {
+	return _settings && _settings->gradualMode;
+}
+
+void ApiWrap::scheduleGradualDelay(FnMut<void()> callback) {
+	// Add delay between requests to avoid flood detection (1-3 seconds random)
+	const auto delay = base::RandomValue<uint32>() % 2000 + 1000;
+	crl::on_main([callback = std::move(callback), delay]() mutable {
+		QTimer::singleShot(delay, std::move(callback));
+	});
+}
+
+// Direct split request that bypasses takeout session (for gradual mode)
+template <typename Request>
+auto ApiWrap::directSplitRequest(int index, Request &&request) {
+	Expects(index < _splits.size());
+
+	return directRequest(MTPInvokeWithMessagesRange<Request>(
+		_splits[index],
+		std::forward<Request>(request)));
+}
+
 template <typename Request>
 auto ApiWrap::splitRequest(int index, Request &&request) {
 	Expects(index < _splits.size());
@@ -386,6 +421,7 @@ auto ApiWrap::splitRequest(int index, Request &&request) {
 auto ApiWrap::fileRequest(const Data::FileLocation &location, int64 offset) {
 	Expects(location.dcId != 0
 		|| location.data.type() == mtpc_inputTakeoutFileLocation);
+	Expects(!isGradualMode()); // In gradual mode, use loadFilePartDirect instead
 	Expects(_takeoutId.has_value());
 	Expects(_fileProcess->requestId == 0);
 
@@ -741,6 +777,16 @@ void ApiWrap::startMainSession(FnMut<void()> done) {
 			error("Could not retrieve selfId.");
 			return;
 		}
+
+		// In gradual mode, skip takeout session to avoid detection
+		if (isGradualMode()) {
+			// Use a fake takeout ID to satisfy code that checks for it
+			// The directRequest/directSplitRequest methods won't use it
+			_takeoutId = 0;
+			done();
+			return;
+		}
+
 		_mtp.request(MTPaccount_InitTakeoutSession(
 			MTP_flags(flags),
 			MTP_long(sizeLimit)
@@ -1908,24 +1954,78 @@ void ApiWrap::requestChatMessages(
 		? splitIndex
 		: (splitsCount + splitIndex);
 	if (_chatProcess->info.onlyMyMessages) {
-		splitRequest(realSplitIndex, MTPmessages_Search(
-			MTP_flags(MTPmessages_Search::Flag::f_from_id),
+		// In gradual mode, use direct requests to avoid takeout detection
+		if (isGradualMode()) {
+			directSplitRequest(realSplitIndex, MTPmessages_Search(
+				MTP_flags(MTPmessages_Search::Flag::f_from_id),
+				realPeerInput,
+				MTP_string(), // query
+				outgoingInput,
+				MTPInputPeer(), // saved_peer_id
+				MTPVector<MTPReaction>(), // saved_reaction
+				MTPint(), // top_msg_id
+				MTP_inputMessagesFilterEmpty(),
+				MTP_int(0), // min_date
+				MTP_int(0), // max_date
+				MTP_int(offsetId),
+				MTP_int(addOffset),
+				MTP_int(limit),
+				MTP_int(0), // max_id
+				MTP_int(0), // min_id
+				MTP_long(0) // hash
+			)).done(doneHandler).send();
+		} else {
+			splitRequest(realSplitIndex, MTPmessages_Search(
+				MTP_flags(MTPmessages_Search::Flag::f_from_id),
+				realPeerInput,
+				MTP_string(), // query
+				outgoingInput,
+				MTPInputPeer(), // saved_peer_id
+				MTPVector<MTPReaction>(), // saved_reaction
+				MTPint(), // top_msg_id
+				MTP_inputMessagesFilterEmpty(),
+				MTP_int(0), // min_date
+				MTP_int(0), // max_date
+				MTP_int(offsetId),
+				MTP_int(addOffset),
+				MTP_int(limit),
+				MTP_int(0), // max_id
+				MTP_int(0), // min_id
+				MTP_long(0) // hash
+			)).done(doneHandler).send();
+		}
+	} else if (isGradualMode()) {
+		// In gradual mode, use direct requests to avoid takeout detection
+		directSplitRequest(realSplitIndex, MTPmessages_GetHistory(
 			realPeerInput,
-			MTP_string(), // query
-			outgoingInput,
-			MTPInputPeer(), // saved_peer_id
-			MTPVector<MTPReaction>(), // saved_reaction
-			MTPint(), // top_msg_id
-			MTP_inputMessagesFilterEmpty(),
-			MTP_int(0), // min_date
-			MTP_int(0), // max_date
 			MTP_int(offsetId),
+			MTP_int(0), // offset_date
 			MTP_int(addOffset),
 			MTP_int(limit),
 			MTP_int(0), // max_id
 			MTP_int(0), // min_id
-			MTP_long(0) // hash
-		)).done(doneHandler).send();
+			MTP_long(0)  // hash
+		)).fail([=](const MTP::Error &error) {
+			Expects(_chatProcess != nullptr);
+
+			if (error.type() == u"CHANNEL_PRIVATE"_q) {
+				if (realPeerInput.type() == mtpc_inputPeerChannel
+					&& !_chatProcess->info.onlyMyMessages) {
+
+					// Perhaps we just left / were kicked from channel.
+					// Just switch to only my messages.
+					_chatProcess->info.onlyMyMessages = true;
+					requestChatMessages(
+						splitIndex,
+						offsetId,
+						addOffset,
+						limit,
+						base::take(_chatProcess->requestDone));
+					return true;
+				}
+			}
+			return false;
+		}).done(doneHandler).send();
 	} else {
 		splitRequest(realSplitIndex, MTPmessages_GetHistory(
 			realPeerInput,
@@ -2415,14 +2515,41 @@ void ApiWrap::loadFilePart() {
 	}
 
 	const auto offset = _fileProcess->offset;
+	const auto &location = _fileProcess->location;
 	_fileProcess->requests.push_back({ offset });
-	_fileProcess->requestId = fileRequest(
-		_fileProcess->location,
-		_fileProcess->offset
-	).done([=](const MTPupload_File &result) {
-		_fileProcess->requestId = 0;
-		filePartDone(offset, result);
-	}).send();
+
+	// In gradual mode, use direct file requests without takeout wrapper
+	if (isGradualMode()) {
+		_fileProcess->requestId = _mtp.request(MTPupload_GetFile(
+			MTP_flags(0),
+			location.data,
+			MTP_long(offset),
+			MTP_int(kFileChunkSize)
+		)).done([=](const MTPupload_File &result) {
+			_fileProcess->requestId = 0;
+			filePartDone(offset, result);
+		}).fail([=](const MTP::Error &result) {
+			_fileProcess->requestId = 0;
+			if (result.type() == u"LOCATION_INVALID"_q
+				|| result.type() == u"VERSION_INVALID"_q
+				|| result.type() == u"LOCATION_NOT_AVAILABLE"_q) {
+				filePartUnavailable();
+			} else if (result.code() == 400
+				&& result.type().startsWith(u"FILE_REFERENCE_"_q)) {
+				filePartRefreshReference(offset);
+			} else {
+				error(result);
+			}
+		}).toDC(MTP::ShiftDcId(location.dcId, MTP::kExportMediaDcShift)).send();
+	} else {
+		_fileProcess->requestId = fileRequest(
+			location,
+			offset
+		).done([=](const MTPupload_File &result) {
+			_fileProcess->requestId = 0;
+			filePartDone(offset, result);
+		}).send();
+	}
 	_fileProcess->offset += kFileChunkSize;
 
 	if (_fileProcess->size > 0

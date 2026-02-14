@@ -307,9 +307,12 @@ Account::ReadMapResult Account::readMapWith(
 	auto ms = crl::now();
 
 	FileReadDescriptor mapData;
+	qWarning() << "[TData] readMapWith: trying to read map from" << _basePath;
 	if (!ReadFile(mapData, u"map"_q, _basePath)) {
+		qWarning() << "[TData] readMapWith: ReadFile FAILED for map in" << _basePath;
 		return ReadMapResult::Failed;
 	}
+	qWarning() << "[TData] readMapWith: ReadFile SUCCESS for map";
 	LOG(("App Info: reading map..."));
 
 	QByteArray legacySalt, legacyKeyEncrypted, mapEncrypted;
@@ -339,9 +342,11 @@ Account::ReadMapResult Account::readMapWith(
 
 	EncryptedDescriptor map;
 	if (!DecryptLocal(map, mapEncrypted, localKey)) {
+		qWarning() << "[TData] readMapWith: DecryptLocal FAILED for map";
 		LOG(("App Error: could not decrypt map."));
 		return ReadMapResult::Failed;
 	}
+	qWarning() << "[TData] readMapWith: DecryptLocal SUCCESS for map";
 	LOG(("App Info: reading encrypted map..."));
 
 	QByteArray selfSerialized;
@@ -381,6 +386,7 @@ Account::ReadMapResult Account::readMapWith(
 		} break;
 		case lskSelfSerialized: {
 			map.stream >> selfSerialized;
+			qWarning() << "[TData] readMapWith: lskSelfSerialized found, size=" << selfSerialized.size();
 		} break;
 		case lskDraftPosition: {
 			quint32 count = 0;
@@ -569,6 +575,7 @@ Account::ReadMapResult Account::readMapWith(
 	auto stored = readSessionSettings();
 	readMtpData();
 
+	qWarning() << "[TData] readMapWith: COMPLETED. selfSerialized.size()=" << selfSerialized.size();
 	DEBUG_LOG(("selfSerialized set: %1").arg(selfSerialized.size()));
 	_owner->setSessionFromStorage(
 		std::move(stored),
@@ -1122,9 +1129,15 @@ std::unique_ptr<Main::SessionSettings> Account::applyReadContext(
 		Assert(_cacheBigFileTotalSizeLimit > normal.maxDataSize);
 	}
 
+	fprintf(stderr, "[MCP] applyReadContext: mtpAuthorization.size()=%d, isEmpty=%d\n",
+		(int)context.mtpAuthorization.size(), context.mtpAuthorization.isEmpty() ? 1 : 0);
+	fflush(stderr);
+
 	if (!context.mtpAuthorization.isEmpty()) {
 		_owner->setMtpAuthorization(context.mtpAuthorization);
 	} else {
+		fprintf(stderr, "[MCP] applyReadContext: No mtpAuthorization, using legacy keys\n");
+		fflush(stderr);
 		for (auto &key : context.mtpLegacyKeys) {
 			_owner->setLegacyMtpKey(std::move(key));
 		}

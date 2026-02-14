@@ -85,6 +85,8 @@ struct Settings {
 	MediaSettings media;
 
 	MTPInputPeer singlePeer = MTP_inputPeerEmpty();
+	QString singlePeerName;  // Name for export directory
+	QString singlePeerType;  // "Chat", "Group", or "Channel"
 	TimeId singlePeerFrom = 0;
 	TimeId singlePeerTill = 0;
 

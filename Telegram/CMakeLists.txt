@@ -1218,6 +1218,12 @@ PRIVATE
     mcp/mcp_server.h
     mcp/chat_archiver.cpp
     mcp/chat_archiver.h
+    mcp/gradual_archiver.cpp
+    mcp/gradual_archiver.h
+    mcp/export_html.cpp
+    mcp/export_html.h
+    mcp/export_markdown.cpp
+    mcp/export_markdown.h
     mcp/analytics.cpp
     mcp/analytics.h
     mcp/semantic_search.cpp

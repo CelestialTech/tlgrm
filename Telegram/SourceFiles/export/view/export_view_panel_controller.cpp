@@ -21,6 +21,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "main/main_session.h"
 #include "data/data_session.h"
+#include "data/data_peer.h"
+#include "data/data_user.h"
+#include "data/data_channel.h"
 #include "base/platform/base_platform_info.h"
 #include "base/unixtime.h"
 #include "base/qt/qt_common_adapters.h"
@@ -132,6 +135,42 @@ void ResolveSettings(not_null<Main::Session*> session, Settings &settings) {
 	}
 	if (!settings.onlySinglePeer()) {
 		settings.singlePeerFrom = settings.singlePeerTill = 0;
+	} else {
+		// Populate peer name and type for directory naming
+		const auto peerId = settings.singlePeer.match([](const MTPDinputPeerUser &data) {
+			return peerFromUser(data.vuser_id().v);
+		}, [](const MTPDinputPeerUserFromMessage &data) {
+			return peerFromUser(data.vuser_id().v);
+		}, [](const MTPDinputPeerChat &data) {
+			return peerFromChat(data.vchat_id().v);
+		}, [](const MTPDinputPeerChannel &data) {
+			return peerFromChannel(data.vchannel_id().v);
+		}, [](const MTPDinputPeerChannelFromMessage &data) {
+			return peerFromChannel(data.vchannel_id().v);
+		}, [&](const MTPDinputPeerSelf &data) {
+			return session->userPeerId();
+		}, [](const MTPDinputPeerEmpty &data) {
+			return PeerId(0);
+		});
+
+		if (peerId) {
+			if (const auto peer = session->data().peerLoaded(peerId)) {
+				settings.singlePeerName = peer->name();
+				// Determine peer type for directory naming
+				if (peer->isUser()) {
+					settings.singlePeerType = u"Chat"_q;
+				} else if (const auto channel = peer->asChannel()) {
+					if (channel->isBroadcast()) {
+						settings.singlePeerType = u"Channel"_q;
+					} else {
+						settings.singlePeerType = u"Group"_q;
+					}
+				} else {
+					// Legacy chat (basic group)
+					settings.singlePeerType = u"Group"_q;
+				}
+			}
+		}
 	}
 }
 

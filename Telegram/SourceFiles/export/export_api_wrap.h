@@ -256,11 +256,20 @@ private:
 	[[nodiscard]] auto mainRequest(Request &&request);
 
 	template <typename Request>
+	[[nodiscard]] auto directRequest(Request &&request);
+
+	template <typename Request>
 	[[nodiscard]] auto splitRequest(int index, Request &&request);
+
+	template <typename Request>
+	[[nodiscard]] auto directSplitRequest(int index, Request &&request);
 
 	[[nodiscard]] auto fileRequest(
 		const Data::FileLocation &location,
 		int64 offset);
+
+	[[nodiscard]] bool isGradualMode() const;
+	void scheduleGradualDelay(FnMut<void()> callback);
 
 	void error(const MTP::Error &error);
 	void error(const QString &text);

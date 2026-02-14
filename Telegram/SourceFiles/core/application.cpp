@@ -426,48 +426,80 @@ void Application::run() {
 		});
 	}
 
-	// Start MCP server and IPC bridge if --mcp flag is present
+	// MCP is a feature of Tlgrm, not a mode
+	// Always start MCP server and bridge; --mcp flag only enables stdio transport
 	const auto args = QCoreApplication::arguments();
+	bool hasMcpStdioFlag = args.contains(u"--mcp"_q);
 
-	// DEBUG: Print all arguments
-	fprintf(stderr, "[MCP] Command-line arguments (%lld total):\n", (long long)args.size());
-	for (int i = 0; i < args.size(); i++) {
-		fprintf(stderr, "[MCP]   [%d]: %s\n", i, args.at(i).toUtf8().constData());
-	}
-	fflush(stderr);
+	// Create MCP server (always)
+	_mcpServer = std::make_unique<MCP::Server>();
 
-	bool hasMcpFlag = args.contains(u"--mcp"_q);
-	fprintf(stderr, "[MCP] --mcp flag detected: %s\n", hasMcpFlag ? "YES" : "NO");
-	fflush(stderr);
+	// Determine transport type: stdio if --mcp flag, otherwise IPC-only
+	const auto transport = hasMcpStdioFlag
+		? MCP::TransportType::Stdio
+		: MCP::TransportType::IPC;
 
-	if (hasMcpFlag) {
-		_mcpServer = std::make_unique<MCP::Server>();
-		if (_mcpServer->start(MCP::TransportType::Stdio)) {
-			DEBUG_LOG(("MCP: Server started successfully"));
+	if (_mcpServer->start(transport)) {
+		DEBUG_LOG(("MCP: Server started (transport: %1)").arg(hasMcpStdioFlag ? "stdio" : "ipc"));
 
-			// Subscribe to domain's active session changes
-			domain().activeSessionValue(
-			) | rpl::start_with_next([=](Main::Session *session) {
-				if (session && _mcpServer) {
-					_mcpServer->setSession(session);
-					fprintf(stderr, "[MCP] Session integrated with MCP server\n");
-					fflush(stderr);
-				}
-			}, _lifetime);
-
-			// Start IPC bridge for Python integration
-			_mcpBridge = std::make_unique<MCP::Bridge>();
-			if (_mcpBridge->start("/tmp/tdesktop_mcp.sock")) {
-				_mcpBridge->setServer(_mcpServer.get());
-				DEBUG_LOG(("MCP: IPC Bridge started on /tmp/tdesktop_mcp.sock"));
-			} else {
-				LOG(("MCP Error: Failed to start IPC bridge"));
-				_mcpBridge = nullptr;
+		// Subscribe to domain's active session changes
+		domain().activeSessionValue(
+		) | rpl::start_with_next([=](Main::Session *session) {
+			if (session && _mcpServer) {
+				_mcpServer->setSession(session);
+				fprintf(stderr, "[MCP] Session integrated with MCP server (via activeSessionValue)\n");
+				fflush(stderr);
 			}
+		}, _lifetime);
+
+		// Wait for domain to start, then subscribe to each account's session
+		(
+			domain().activeValue(
+			) | rpl::to_empty | rpl::filter([=] {
+				return domain().started();
+			}) | rpl::take(1)
+		) | rpl::start_with_next([=] {
+			fprintf(stderr, "[MCP] Domain started! Subscribing to account sessions...\n");
+			fflush(stderr);
+
+			// Now subscribe to each account's session value
+			for (const auto &[index, account] : domain().accounts()) {
+				fprintf(stderr, "[MCP] Subscribing to sessionValue for account %d\n", index);
+				fflush(stderr);
+
+				// Check if session already exists
+				if (auto *existingSession = account->maybeSession()) {
+					if (_mcpServer && !_mcpServer->hasSession()) {
+						_mcpServer->setSession(existingSession);
+						fprintf(stderr, "[MCP] Found existing session for account %d\n", index);
+						fflush(stderr);
+					}
+				}
+
+				// Also subscribe for future session changes
+				account->sessionValue(
+				) | rpl::start_with_next([this, idx = index](Main::Session *session) {
+					if (session && _mcpServer && !_mcpServer->hasSession()) {
+						_mcpServer->setSession(session);
+						fprintf(stderr, "[MCP] Session loaded for account %d, integrated with MCP server\n", idx);
+						fflush(stderr);
+					}
+				}, _lifetime);
+			}
+		}, _lifetime);
+
+		// Always start IPC bridge (for Python/external tool integration)
+		_mcpBridge = std::make_unique<MCP::Bridge>();
+		if (_mcpBridge->start("/tmp/tdesktop_mcp.sock")) {
+			_mcpBridge->setServer(_mcpServer.get());
+			DEBUG_LOG(("MCP: IPC Bridge started on /tmp/tdesktop_mcp.sock"));
 		} else {
-			LOG(("MCP Error: Failed to start server"));
-			_mcpServer = nullptr;
+			LOG(("MCP Error: Failed to start IPC bridge"));
+			_mcpBridge = nullptr;
 		}
+	} else {
+		LOG(("MCP Error: Failed to start server"));
+		_mcpServer = nullptr;
 	}
 
 	processCreatedWindow(_lastActivePrimaryWindow);

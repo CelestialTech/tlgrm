@@ -995,3 +995,91 @@ _tools.append(yourTool);
 **Messages**:
 - `history->blocks()` - Message blocks
 - `history->peer()` - Chat peer
+
+---
+
+## CRITICAL LESSONS LEARNED (Mistakes to Never Repeat)
+
+### 1. Never Assume - Always Verify Against Stock Source Code
+
+**Mistake**: Assumed official Telegram Desktop uses `"datas"` in `cDataFile()` because the fork's tdata directory had `key_datas`.
+
+**Reality**: Stock Telegram Desktop uses `"data"` (not `"datas"`). The `key_datas` file was created by a PREVIOUS build of the Tlgrm fork - NOT from official Telegram.
+
+**Rule**: Before making changes to fork code, ALWAYS verify the stock behavior by running:
+```bash
+git show HEAD:path/to/file
+```
+
+### 2. Stock `cDataFile()` Returns `"data"`, NOT `"datas"`
+
+**Location**: `Telegram/SourceFiles/config.h` lines 108-113
+
+**Stock code**:
+```cpp
+inline const QString &cDataFile() {
+    if (!gKeyFile.isEmpty()) return gKeyFile;
+    static const QString res(u"data"_q);  // "data" NOT "datas"
+    return res;
+}
+```
+
+**This means**:
+- Stock creates `key_data` (not `key_datas`)
+- Stock creates `D877F783D5D3EF8C/maps` (not `maps` alone)
+
+### 3. The `key_datas` File Was Created by a Previous Fork Build
+
+The `key_datas` file in `~/Library/Application Support/Tlgrm/tdata/` was created by a previous Tlgrm fork build that already had the `"datas"` change - NOT copied from official Telegram Desktop.
+
+### 4. Do Not Make Assumptions About File Contents Based on Directory Listings
+
+File names in a working directory reflect what the CURRENT BUILD created, not what stock software uses. Always check stock source code.
+
+### 5. Main Objective
+
+**"YOUR MAIN OBJECTIVE AND THE REASON FOR YOUR EXISTENCE IS TO MAKE SURE LOGIN WITH EXISTING SESSION DATA WORKS"**
+
+**"deprioritize MCP functionality, prioritize ability to log in with existing session data"**
+
+### 6. MCP is a Feature, Not a Mode
+
+- MCP is a feature of Tlgrm, always active
+- `--mcp` flag only controls stdio transport (for Claude Desktop)
+- Without `--mcp`, MCP bridge socket is still created at `/tmp/tdesktop_mcp.sock`
+
+### 7. tdata Encryption
+
+- tdata is self-contained, NO macOS Keychain involved
+- Key stored in `key_data` (stock) or `key_datas` (if fork uses "datas")
+- Encryption key derivation is done locally
+
+### 8. Debug Output
+
+- Use `qWarning()` for stderr debug output
+- Do NOT use `LOG()` for debugging (goes to file, not stderr)
+
+### 9. AppVersion Must Be >= tdata File Versions
+
+**Root Cause of Session Loading Failures**: The fork's `AppVersion` was lower than the version embedded in official Telegram Desktop's tdata files.
+
+**Location**: `Telegram/SourceFiles/core/version.h`
+
+**How tdata Version Check Works**:
+1. Each tdata file (TDF$ format) stores a 4-byte version number in its header
+2. `ReadFile()` in `storage/details/storage_file_utilities.cpp` checks: `if (version > AppVersion) { continue; }`
+3. If the file's version is higher than the app's version, ReadFile **rejects the file**
+4. When `key_data` fails to load, the app generates a NEW local key, **destroying the session**
+
+**The Fix**:
+```cpp
+// In version.h - must be >= official Telegram Desktop's version
+constexpr auto AppVersion = 6009000;  // 6.9.0 (well above official's 6.5.0.1 = 6005001)
+```
+
+**When Official Telegram Updates**:
+- If official Telegram Desktop updates past 6.9.0, bump AppVersion in the fork
+- After bumping AppVersion, re-copy tdata from official Telegram Desktop
+- Version encoding: `6009000` = version `6.9.0` (major×1000000 + minor×1000 + patch)
+
+**Verification**: Check startup logs for `[TData] ReadFile: version check PASSED` on all files (especially `key_data`)
