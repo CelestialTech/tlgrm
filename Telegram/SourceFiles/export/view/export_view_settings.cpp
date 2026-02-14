@@ -5,6 +5,43 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+
+/**
+ * @file export_view_settings.cpp
+ * @brief Export settings UI widget implementation for Telegram Desktop.
+ *
+ * This file implements the SettingsWidget class which provides the user interface
+ * for configuring data export options. It supports two modes:
+ *
+ * 1. **Full Export Mode** (Settings → Privacy → Export Data):
+ *    - Exports all Telegram data (chats, contacts, sessions, profile, etc.)
+ *    - Uses radio buttons for single-format selection
+ *    - Standard Telegram functionality
+ *
+ * 2. **Single Peer Export Mode** (Chat menu → Export chat):
+ *    - Exports only one specific conversation
+ *    - Custom enhancements in this fork:
+ *      - Multi-format selection via checkboxes (HTML, JSON, Markdown)
+ *      - "Unrestricted mode" option (pre-selected, bypasses rate limits)
+ *      - Date range selection for partial exports
+ *      - Panel height optimized to 620px (no scrollbar)
+ *
+ * Key Custom Functions:
+ * - ChooseFormatBox(): Multi-select format dialog with checkboxes
+ * - addSinglePeerFormatLabel(): Clickable format display with multi-format support
+ * - addSinglePeerPathLabel(): Clickable download path display
+ * - addUnrestrictedModeCheckbox(): Pre-selected gradual mode option
+ *
+ * Format Combinations Supported:
+ * - Single: Html, Json, Markdown
+ * - Pairs: HtmlAndJson, HtmlAndMarkdown, JsonAndMarkdown
+ * - All: Html + Json + Markdown
+ *
+ * @see export_view_settings.h for class declarations
+ * @see export.style for panel dimensions (exportSinglePeerPanelSize)
+ * @see export_view_panel_controller.cpp for panel lifecycle management
+ */
+
 #include "export/view/export_view_settings.h"
 
 #include "export/output/export_output_abstract.h"
@@ -36,8 +73,35 @@ namespace Export {
 namespace View {
 namespace {
 
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+// Size conversion constant: 1 megabyte = 1024 * 1024 bytes
+// Used for media file size limit calculations in the export settings slider
 constexpr auto kMegabyte = int64(1024) * 1024;
 
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+/**
+ * @brief Extracts a PeerId from an MTPInputPeer object.
+ *
+ * This function handles all possible MTPInputPeer types returned by Telegram's
+ * MTProto API and converts them to a unified PeerId format.
+ *
+ * @param session The current user's session (needed for resolving self peer)
+ * @param data The MTProto InputPeer object to parse
+ * @return The extracted PeerId, or 0 if the peer is empty
+ *
+ * Peer types handled:
+ * - inputPeerUser / inputPeerUserFromMessage: Regular users
+ * - inputPeerChat: Legacy group chats
+ * - inputPeerChannel / inputPeerChannelFromMessage: Supergroups and channels
+ * - inputPeerSelf: The current user's own peer ID
+ * - inputPeerEmpty: Returns 0 (no peer selected)
+ */
 [[nodiscard]] PeerId ReadPeerId(
 		not_null<Main::Session*> session,
 		const MTPInputPeer &data) {
@@ -58,13 +122,37 @@ constexpr auto kMegabyte = int64(1024) * 1024;
 	});
 }
 
+/**
+ * @brief Multi-select format chooser dialog box.
+ *
+ * This is a custom enhancement over the original Telegram export format selection.
+ * Instead of radio buttons (single selection), this dialog uses checkboxes to allow
+ * users to export in multiple formats simultaneously (e.g., HTML + JSON + Markdown).
+ *
+ * @param box The GenericBox container that hosts this dialog
+ * @param format The currently selected format(s) - used to initialize checkbox states
+ * @param done Callback function invoked with the selected Format when user clicks Save
+ *
+ * Features:
+ * - Three independent checkboxes: HTML, JSON, Markdown
+ * - Prevents unchecking all boxes (at least one must remain selected)
+ * - Combines selections into appropriate Format enum value (e.g., Format::All)
+ *
+ * Format enum values supported:
+ * - Single: Html, Json, Markdown
+ * - Pairs: HtmlAndJson, HtmlAndMarkdown, JsonAndMarkdown
+ * - All three: All
+ */
 void ChooseFormatBox(
 		not_null<Ui::GenericBox*> box,
 		Output::Format format,
 		Fn<void(Output::Format)> done) {
 	using Format = Output::Format;
 
-	// Helper to check if format includes a specific type
+	// -----------------------------------------------------------------
+	// Helper lambdas to decompose a Format enum into individual flags.
+	// These check whether a combined format includes a specific type.
+	// -----------------------------------------------------------------
 	const auto hasHtml = [](Format f) {
 		return f == Format::Html || f == Format::HtmlAndJson
 			|| f == Format::HtmlAndMarkdown || f == Format::All;
@@ -167,6 +255,26 @@ void ChooseFormatBox(
 
 } // namespace
 
+// =============================================================================
+// PUBLIC UTILITY FUNCTIONS
+// =============================================================================
+
+/**
+ * @brief Converts a slider index (0 to kSizeValueCount-1) to a file size limit in bytes.
+ *
+ * This function implements a non-linear scale for the media size slider:
+ * - Index 1-10:  1MB to 10MB (increments of 1MB)
+ * - Index 11-30: 12MB to 50MB (increments of 2MB)
+ * - Index 31-40: 55MB to 100MB (increments of 5MB)
+ * - Index 41-60: 110MB to 300MB (increments of 10MB)
+ * - Index 61-70: 320MB to 500MB (increments of 20MB)
+ * - Index 71-80: 550MB to 1000MB (increments of 50MB)
+ * - Index 81-90: 1100MB to 2000MB (increments of 100MB)
+ * - Index 91+:   2200MB+ (increments of 200MB)
+ *
+ * @param index Slider position (0 to kSizeValueCount-1)
+ * @return Size limit in bytes
+ */
 int64 SizeLimitByIndex(int index) {
 	Expects(index >= 0 && index < kSizeValueCount);
 
@@ -193,6 +301,28 @@ int64 SizeLimitByIndex(int index) {
 	return megabytes * kMegabyte;
 }
 
+// =============================================================================
+// SETTINGSWIDGET CLASS IMPLEMENTATION
+// =============================================================================
+
+/**
+ * @brief Constructor for the export settings widget.
+ *
+ * This widget provides the UI for configuring data export options. It supports
+ * two modes:
+ * 1. Full Export Mode: Export all Telegram data (chats, media, contacts, etc.)
+ * 2. Single Peer Mode: Export only one specific chat (activated when _singlePeerId != 0)
+ *
+ * Single peer mode offers a simplified interface with:
+ * - Multi-format selection (HTML, JSON, Markdown checkboxes)
+ * - Path selection
+ * - Date range limits
+ * - "Unrestricted mode" option (bypasses server rate limits)
+ *
+ * @param parent Parent widget
+ * @param session Current Telegram session (provides access to data/API)
+ * @param data Initial export settings to populate the UI
+ */
 SettingsWidget::SettingsWidget(
 	QWidget *parent,
 	not_null<Main::Session*> session,
@@ -373,10 +503,29 @@ void SettingsWidget::setupOtherOptions(
 		tr::lng_export_option_other_about(tr::now));
 }
 
+/**
+ * @brief Sets up the output format and path selection UI.
+ *
+ * This method handles both full export and single-peer export modes differently:
+ *
+ * **Single Peer Mode** (_singlePeerId != 0):
+ * - Adds a "Format" header section
+ * - Shows clickable format label (opens ChooseFormatBox for multi-select)
+ * - Shows clickable path label (opens folder picker)
+ * - Shows date range limits (from/till date pickers)
+ * - Shows "Unrestricted mode" checkbox (pre-selected, enables gradual export)
+ *
+ * **Full Export Mode** (_singlePeerId == 0):
+ * - Uses radio buttons for single-format selection (HTML, JSON, HTML+JSON, Markdown)
+ * - Shows separate "Gradual export mode" checkbox
+ *
+ * @param container The vertical layout container to add widgets to
+ */
 void SettingsWidget::setupPathAndFormat(
 		not_null<Ui::VerticalLayout*> container) {
 	if (_singlePeerId != 0) {
-		// Add vertical spacing before Format section
+		// === SINGLE PEER EXPORT MODE ===
+		// Simplified UI with multi-format support and unrestricted mode
 		addHeader(container, tr::lng_export_header_format(tr::now));
 		addSinglePeerFormatLabel(container);
 		addSinglePeerPathLabel(container);
@@ -386,6 +535,8 @@ void SettingsWidget::setupPathAndFormat(
 		addUnrestrictedModeCheckbox(container);
 		return;
 	}
+	// === FULL EXPORT MODE ===
+	// Traditional radio button interface for format selection
 	const auto formatGroup = std::make_shared<Ui::RadioenumGroup<Format>>(
 		readData().format);
 	formatGroup->setChangedCallback([=](Format format) {
@@ -457,8 +608,21 @@ void SettingsWidget::addLocationLabel(
 #endif // OS_MAC_STORE
 }
 
+/**
+ * @brief Opens the format chooser dialog.
+ *
+ * Displays the ChooseFormatBox dialog which allows multi-select format
+ * selection. When the user saves their selection, the format is updated
+ * and the dialog closes.
+ *
+ * This is invoked when the user clicks on the format link in the
+ * single-peer export settings panel.
+ */
 void SettingsWidget::chooseFormat() {
+	// Keep a weak reference to close the box after selection
 	const auto shared = std::make_shared<base::weak_qptr<Ui::GenericBox>>();
+
+	// Callback invoked when user saves format selection
 	const auto callback = [=](Format format) {
 		changeData([&](Settings &data) {
 			data.format = format;
@@ -467,6 +631,8 @@ void SettingsWidget::chooseFormat() {
 			strong->closeBox();
 		}
 	};
+
+	// Create and show the format chooser dialog
 	auto box = Box(
 		ChooseFormatBox,
 		readData().format,
@@ -525,12 +691,31 @@ void SettingsWidget::addFormatAndLocationLabel(
 #endif // OS_MAC_STORE
 }
 
+/**
+ * @brief Adds a clickable format label for single-peer export.
+ *
+ * Creates a label that displays the currently selected export format(s) as a
+ * clickable link. When clicked, opens the ChooseFormatBox dialog for multi-format
+ * selection.
+ *
+ * Display format examples:
+ * - Single format: "Format: HTML" or "Format: JSON" or "Format: Markdown"
+ * - Two formats: "Format: HTML, JSON" or "Format: HTML, Markdown"
+ * - All three: "Format: HTML, JSON, Markdown"
+ *
+ * The label automatically updates when the format selection changes via the
+ * rpl reactive stream from value().
+ *
+ * @param container The vertical layout container to add the label to
+ */
 void SettingsWidget::addSinglePeerFormatLabel(
 		not_null<Ui::VerticalLayout*> container) {
+	// Reactive stream that updates the label text whenever format changes
 	auto formatText = value() | rpl::map([](const Settings &data) {
 		return data.format;
 	}) | rpl::distinct_until_changed(
 	) | rpl::map([](Format format) {
+		// Build human-readable format string based on enum value
 		QString formatName;
 		switch (format) {
 		case Format::Html:
@@ -570,9 +755,28 @@ void SettingsWidget::addSinglePeerFormatLabel(
 	});
 }
 
+/**
+ * @brief Adds a clickable download path label for single-peer export.
+ *
+ * Creates a label that displays the current export destination folder as a
+ * clickable link. When clicked, opens a native folder picker dialog.
+ *
+ * Display format: "Download path: /path/to/folder"
+ *
+ * Special handling:
+ * - If using default Downloads folder, shows "Downloads/TelegramExport"
+ * - If temp path is being used (Mac App Store), shows localized temp message
+ * - For custom paths, shows the full native path
+ *
+ * Note: This is excluded from Mac App Store builds (#ifndef OS_MAC_STORE)
+ * because sandboxed apps have restricted file access.
+ *
+ * @param container The vertical layout container to add the label to
+ */
 void SettingsWidget::addSinglePeerPathLabel(
 		not_null<Ui::VerticalLayout*> container) {
 #ifndef OS_MAC_STORE
+	// Reactive stream that updates the path display whenever it changes
 	auto pathText = value() | rpl::map([](const Settings &data) {
 		return data.path;
 	}) | rpl::distinct_until_changed(
@@ -600,10 +804,31 @@ void SettingsWidget::addSinglePeerPathLabel(
 #endif // OS_MAC_STORE
 }
 
+/**
+ * @brief Adds the "Unrestricted mode" checkbox for single-peer export.
+ *
+ * This checkbox enables "gradual mode" export, which is a custom enhancement
+ * that bypasses Telegram's server-side rate limits and restrictions on data
+ * export. When enabled, the export process works more gradually and can access
+ * data that might otherwise be blocked.
+ *
+ * **Important**: This checkbox is PRE-SELECTED by default (initialChecked = true)
+ * to provide the best experience for users exporting single chats.
+ *
+ * The checkbox controls Settings::gradualMode, which affects how the export
+ * controller handles the data retrieval process.
+ *
+ * @param container The vertical layout container to add the checkbox to
+ *
+ * @see Settings::gradualMode
+ */
 void SettingsWidget::addUnrestrictedModeCheckbox(
 		not_null<Ui::VerticalLayout*> container) {
-	// Default to true (pre-selected)
+	// === UNRESTRICTED MODE (GRADUAL EXPORT) ===
+	// Pre-selected by default for better user experience
 	const auto initialChecked = true;
+
+	// Initialize gradualMode to true if not already set
 	if (!readData().gradualMode) {
 		changeData([](Settings &data) {
 			data.gradualMode = true;
@@ -622,6 +847,14 @@ void SettingsWidget::addUnrestrictedModeCheckbox(
 			data.gradualMode = checked;
 		});
 	}, checkbox->lifetime());
+
+	// Fine-print explanation below the checkbox
+	container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			QString::fromUtf8("Exports from local cache, bypassing server restrictions. Only includes messages already loaded in this client."),
+			st::exportAboutOptionLabel),
+		st::exportAboutOptionPadding);
 }
 
 void SettingsWidget::addLimitsLabel(

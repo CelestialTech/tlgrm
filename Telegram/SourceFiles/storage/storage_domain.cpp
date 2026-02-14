@@ -118,11 +118,15 @@ void Domain::encryptLocalKey(const QByteArray &passcode) {
 Domain::StartModernResult Domain::startModern(
 		const QByteArray &passcode) {
 	const auto name = ComputeKeyName(_dataName);
+	const auto basePath = BaseGlobalPath();
+	qWarning() << "[TData] startModern: dataName=" << _dataName << "keyName=" << name << "basePath=" << basePath;
 
 	FileReadDescriptor keyData;
-	if (!ReadFile(keyData, name, BaseGlobalPath())) {
+	if (!ReadFile(keyData, name, basePath)) {
+		qWarning() << "[TData] startModern: ReadFile FAILED for" << basePath << name;
 		return StartModernResult::Empty;
 	}
+	qWarning() << "[TData] startModern: ReadFile SUCCESS, reading accounts info...";
 	LOG(("App Info: reading accounts info..."));
 
 	QByteArray salt, keyEncrypted, infoEncrypted;

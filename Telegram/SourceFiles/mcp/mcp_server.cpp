@@ -548,15 +548,24 @@ bool Server::start(TransportType transport) {
 	case TransportType::HTTP:
 		startHttpTransport();
 		break;
+	case TransportType::IPC:
+		// IPC mode: Don't start stdin polling, just initialize
+		// The Bridge will handle IPC via Unix socket
+		break;
 	default:
 		qWarning() << "MCP: Unsupported transport type";
 		return false;
 	}
 
 	_initialized = true;
-	qInfo() << "MCP Server started (transport:"
-		<< (_transport == TransportType::Stdio ? "stdio" : "http")
-		<< ")";
+	const char* transportName = "unknown";
+	switch (_transport) {
+	case TransportType::Stdio: transportName = "stdio"; break;
+	case TransportType::HTTP: transportName = "http"; break;
+	case TransportType::IPC: transportName = "ipc"; break;
+	default: break;
+	}
+	qInfo() << "MCP Server started (transport:" << transportName << ")";
 
 	return true;
 }

@@ -43,12 +43,14 @@ class RBAC;
 class VoiceTranscription;
 class BotManager;
 class CacheManager;
+class GradualArchiver;
 
 // MCP Protocol types
 enum class TransportType {
 	Stdio,    // Standard input/output (default for Claude Desktop)
 	HTTP,     // HTTP with SSE for notifications
-	WebSocket // WebSocket (future)
+	WebSocket, // WebSocket (future)
+	IPC       // IPC only mode (no stdin polling) - for GUI mode
 };
 
 // MCP Tool definition
@@ -90,6 +92,9 @@ public:
 
 	// Set session for live data access
 	void setSession(Main::Session *session);
+
+	// Check if session is set
+	bool hasSession() const { return _session != nullptr; }
 
 	// Server info
 	struct ServerInfo {
@@ -556,6 +561,19 @@ private:
 	QJsonObject toolTestAway(const QJsonObject &args);
 
 	// ============================================================
+	// GRADUAL EXPORT TOOLS (7 tools)
+	// ============================================================
+	QJsonObject toolStartGradualExport(const QJsonObject &args);
+	QJsonObject toolGetGradualExportStatus(const QJsonObject &args);
+	QJsonObject toolPauseGradualExport(const QJsonObject &args);
+	QJsonObject toolResumeGradualExport(const QJsonObject &args);
+	QJsonObject toolCancelGradualExport(const QJsonObject &args);
+	QJsonObject toolGetGradualExportConfig(const QJsonObject &args);
+	QJsonObject toolSetGradualExportConfig(const QJsonObject &args);
+	QJsonObject toolQueueGradualExport(const QJsonObject &args);
+	QJsonObject toolGetGradualExportQueue(const QJsonObject &args);
+
+	// ============================================================
 	// LOCAL DATABASE MANAGEMENT
 	// ============================================================
 	void initializeLocalDatabase();
@@ -631,6 +649,7 @@ private:
 	std::unique_ptr<VoiceTranscription> _voiceTranscription;
 	std::unique_ptr<BotManager> _botManager;
 	std::unique_ptr<CacheManager> _cache;
+	std::unique_ptr<GradualArchiver> _gradualArchiver;
 
 	// State
 	bool _initialized = false;

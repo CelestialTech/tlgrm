@@ -301,7 +301,7 @@ QByteArray Account::serializeMtpAuthorization() const {
 
 			const auto currentUserId = sessionExists()
 				? session().userId()
-				: UserId();
+				: _sessionUserId;
 			stream
 				<< quint64(kWideIdsTag)
 				<< quint64(currentUserId.bare)
@@ -339,6 +339,25 @@ void Account::setSessionFromStorage(
 		int32 selfStreamVersion) {
 	Expects(!sessionExists());
 
+	fprintf(stderr, "[MCP] setSessionFromStorage called, selfSerialized.size()=%d\n", (int)selfSerialized.size());
+	fflush(stderr);
+
+	// Extract userId from selfSerialized before moving it
+	// The selfSerialized format starts with a quint64 peerIdSerialized
+	if (selfSerialized.size() >= int(sizeof(quint64))) {
+		QDataStream stream(selfSerialized);
+		stream.setVersion(QDataStream::Qt_5_1);
+		quint64 peerIdSerialized = 0;
+		stream >> peerIdSerialized;
+		const auto peerId = DeserializePeerId(peerIdSerialized);
+		if (peerIsUser(peerId)) {
+			_sessionUserId = peerToUser(peerId);
+			fprintf(stderr, "[MCP] setSessionFromStorage: Extracted userId=%llu from selfSerialized\n",
+				(unsigned long long)_sessionUserId.bare);
+			fflush(stderr);
+		}
+	}
+
 	DEBUG_LOG(("sessionUserSerialized set: %1"
 		).arg(selfSerialized.size()));
 
@@ -361,6 +380,9 @@ SessionSettings *Account::getSessionSettings() {
 void Account::setMtpAuthorization(const QByteArray &serialized) {
 	Expects(!_mtp);
 
+	fprintf(stderr, "[MCP] setMtpAuthorization called, data size: %d\n", (int)serialized.size());
+	fflush(stderr);
+
 	QDataStream stream(serialized);
 	stream.setVersion(QDataStream::Qt_5_1);
 
@@ -379,8 +401,13 @@ void Account::setMtpAuthorization(const QByteArray &serialized) {
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("MTP Error: "
 			"Could not read main fields from mtp authorization."));
+		fprintf(stderr, "[MCP] setMtpAuthorization FAILED: stream error\n");
+		fflush(stderr);
 		return;
 	}
+
+	fprintf(stderr, "[MCP] setMtpAuthorization: userId=%llu, mainDcId=%d\n", (unsigned long long)userId, mainDcId);
+	fflush(stderr);
 
 	setSessionUserId(userId);
 	_mtpFields.mainDcId = mainDcId;
@@ -476,7 +503,12 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 		destroyMtpKeys(base::take(_mtpKeysToDestroy));
 	}
 
+	fprintf(stderr, "[MCP] startMtp: _sessionUserId=%llu\n", (unsigned long long)_sessionUserId.bare);
+	fflush(stderr);
+
 	if (_sessionUserId) {
+		fprintf(stderr, "[MCP] startMtp: Creating session...\n");
+		fflush(stderr);
 		createSession(
 			_sessionUserId,
 			base::take(_sessionUserSerialized),
@@ -484,6 +516,11 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 			(_storedSessionSettings
 				? std::move(_storedSessionSettings)
 				: std::make_unique<SessionSettings>()));
+		fprintf(stderr, "[MCP] startMtp: Session created, _sessionValue.current()=%p\n", (void*)_sessionValue.current());
+		fflush(stderr);
+	} else {
+		fprintf(stderr, "[MCP] startMtp: No session to create (userId is 0)\n");
+		fflush(stderr);
 	}
 	_storedSessionSettings = nullptr;
 
