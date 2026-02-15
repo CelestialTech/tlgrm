@@ -193,7 +193,7 @@ class TestServerInfo:
             assert isinstance(version, str), "Version should be string"
         except Exception:
             # Connection may be lost - skip
-            pytest.skip("Connection lost")
+            pytest.fail("Connection lost")
 
     def test_server_features(self, ensure_telegram_running, mcp_client):
         """Test server reports available features"""
@@ -203,7 +203,7 @@ class TestServerInfo:
             assert isinstance(features, list), "Features should be list"
         except Exception:
             # Connection may be lost - skip
-            pytest.skip("Connection lost")
+            pytest.fail("Connection lost")
 
 
 class TestDataTypes:
@@ -217,7 +217,7 @@ class TestDataTypes:
             assert "result" in response1 or "error" in response1
         except Exception:
             # Connection may be lost - skip
-            pytest.skip("Connection lost")
+            pytest.fail("Connection lost")
 
     def test_large_numbers(self, ensure_telegram_running, mcp_client):
         """Test handling large chat IDs"""
@@ -228,7 +228,7 @@ class TestDataTypes:
             assert "result" in response or "error" in response
         except Exception:
             # Connection may be lost - skip
-            pytest.skip("Connection lost")
+            pytest.fail("Connection lost")
 
     def test_result_json_valid(self, ensure_telegram_running, mcp_client):
         """Test all results are valid JSON"""
@@ -241,4 +241,4 @@ class TestDataTypes:
             assert len(json_str) > 0
         except Exception:
             # Connection may be lost - skip
-            pytest.skip("Connection lost")
+            pytest.fail("Connection lost")

@@ -1,8 +1,12 @@
 """
 MCP Test Configuration and Fixtures
+
+This module automatically launches Tlgrm if not running and ensures MCP socket is available.
+Tests should NOT skip - if Tlgrm can't be launched, tests FAIL.
 """
 import json
 import os
+import signal
 import socket
 import subprocess
 import time
@@ -15,18 +19,32 @@ APP_PATH = os.path.join(
     "out/Release/Tlgrm.app/Contents/MacOS/Tlgrm"
 )
 IPC_SOCKET_PATH = "/tmp/tdesktop_mcp.sock"
-STARTUP_TIMEOUT = 15  # seconds
+STARTUP_TIMEOUT = 30  # seconds - increased for app startup
+SOCKET_WAIT_TIMEOUT = 20  # seconds to wait for socket
 
 
 class MCPClient:
     """Client for communicating with MCP server via IPC bridge"""
 
-    def __init__(self, socket_path: str = IPC_SOCKET_PATH, max_retries: int = 3):
+    def __init__(self, socket_path: str = IPC_SOCKET_PATH, max_retries: int = 5):
         self.socket_path = socket_path
         self._request_id = 0
         self._max_retries = max_retries
 
-    def send_request(self, method: str, params: Optional[Dict] = None, timeout: float = 5.0) -> Dict[str, Any]:
+    def is_socket_available(self) -> bool:
+        """Check if socket exists and is connectable"""
+        if not os.path.exists(self.socket_path):
+            return False
+        try:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(2.0)
+            sock.connect(self.socket_path)
+            sock.close()
+            return True
+        except (socket.error, OSError):
+            return False
+
+    def send_request(self, method: str, params: Optional[Dict] = None, timeout: float = 10.0) -> Dict[str, Any]:
         """Send JSON-RPC request and return response with retry logic"""
         self._request_id += 1
         request = {
@@ -45,27 +63,31 @@ class MCPClient:
                 sock.connect(self.socket_path)
                 sock.sendall(json.dumps(request).encode() + b'\n')
 
-                # Read response
+                # Read response - use larger buffer for responses with Cyrillic/Unicode
                 response_data = b''
-                while True:
-                    chunk = sock.recv(4096)
+                max_size = 2 * 1024 * 1024  # 2MB max response
+                while len(response_data) < max_size:
+                    chunk = sock.recv(16384)  # Larger buffer (16KB)
                     if not chunk:
                         break
                     response_data += chunk
-                    # Check if we have complete JSON
+                    # Check if we have complete JSON - use errors='replace' for partial UTF-8
                     try:
-                        return json.loads(response_data.decode())
+                        text = response_data.decode('utf-8', errors='replace')
+                        return json.loads(text)
                     except json.JSONDecodeError:
                         continue
 
                 if response_data:
-                    return json.loads(response_data.decode())
+                    # Final attempt - replace any invalid UTF-8 sequences
+                    text = response_data.decode('utf-8', errors='replace')
+                    return json.loads(text)
                 else:
                     raise ConnectionError("Empty response from server")
-            except (socket.error, ConnectionError, json.JSONDecodeError) as e:
+            except (socket.error, ConnectionError, json.JSONDecodeError, UnicodeDecodeError) as e:
                 last_error = e
                 if attempt < self._max_retries - 1:
-                    time.sleep(0.2 * (attempt + 1))  # Exponential backoff
+                    time.sleep(0.5 * (attempt + 1))  # Exponential backoff
             finally:
                 sock.close()
 
@@ -75,125 +97,168 @@ class MCPClient:
         """Ping the server"""
         return self.send_request("ping")
 
-    def get_dialogs(self) -> Dict[str, Any]:
-        """Get list of dialogs/chats"""
-        return self.send_request("get_dialogs")
-
-    def get_messages(self, chat_id: int, limit: int = 50) -> Dict[str, Any]:
-        """Get messages from a chat"""
-        return self.send_request("get_messages", {"chat_id": chat_id, "limit": limit})
-
-    def search_local(self, query: str, limit: int = 20) -> Dict[str, Any]:
-        """Search local messages"""
-        return self.send_request("search_local", {"query": query, "limit": limit})
+    def list_chats(self, limit: int = 50) -> Dict[str, Any]:
+        """Get list of chats via tools/call"""
+        return self.send_request("tools/call", {
+            "name": "list_chats",
+            "arguments": {"limit": limit}
+        }, timeout=15.0)
 
 
-class TelegramProcess:
-    """Manages Telegram process for testing"""
+class TlgrmAppManager:
+    """Manages Tlgrm application lifecycle for testing"""
 
     def __init__(self, app_path: str = APP_PATH):
         self.app_path = app_path
         self.process: Optional[subprocess.Popen] = None
+        self._we_started_it = False
 
-    def start(self, timeout: int = STARTUP_TIMEOUT) -> bool:
-        """Start Telegram with MCP flag"""
-        if self.process is not None:
-            return True
+    def is_app_running(self) -> bool:
+        """Check if Tlgrm is already running"""
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", "Tlgrm"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
 
-        # Start process
-        self.process = subprocess.Popen(
-            [self.app_path, "--mcp"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-
-        # Wait for IPC socket to be available
+    def wait_for_socket(self, timeout: int = SOCKET_WAIT_TIMEOUT) -> bool:
+        """Wait for MCP socket to become available"""
+        client = MCPClient()
         start_time = time.time()
+
         while time.time() - start_time < timeout:
-            if os.path.exists(IPC_SOCKET_PATH):
-                # Verify socket is responsive
+            if client.is_socket_available():
+                # Socket exists, try to connect and verify it responds
                 try:
-                    client = MCPClient()
-                    response = client.ping()
-                    if response.get("result", {}).get("status") == "pong":
+                    # Try a simple list_chats to verify session is ready
+                    response = client.list_chats(limit=1)
+                    if "result" in response:
                         return True
                 except Exception:
                     pass
-            time.sleep(0.5)
+            time.sleep(1)
 
         return False
 
-    def stop(self):
-        """Stop Telegram process"""
-        if self.process:
-            self.process.terminate()
+    def launch_app(self) -> bool:
+        """Launch Tlgrm application"""
+        if not os.path.exists(self.app_path):
+            raise FileNotFoundError(f"Tlgrm app not found at {self.app_path}")
+
+        # Kill any existing Tlgrm processes first
+        subprocess.run(["pkill", "-9", "-f", "Tlgrm"], capture_output=True)
+        time.sleep(2)
+
+        # Remove old socket
+        if os.path.exists(IPC_SOCKET_PATH):
+            os.remove(IPC_SOCKET_PATH)
+
+        # Launch the app
+        self.process = subprocess.Popen(
+            [self.app_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        self._we_started_it = True
+
+        # Wait for socket to be ready
+        return self.wait_for_socket()
+
+    def ensure_running(self) -> bool:
+        """Ensure Tlgrm is running and MCP socket is available"""
+        client = MCPClient()
+
+        # First check if app is already running with socket available
+        if self.is_app_running() and client.is_socket_available():
+            # Verify it's responding
             try:
+                response = client.list_chats(limit=1)
+                if "result" in response:
+                    print("Tlgrm already running with active session")
+                    return True
+            except Exception:
+                pass
+
+        # Need to launch the app
+        print(f"Launching Tlgrm from {self.app_path}...")
+        return self.launch_app()
+
+    def stop(self):
+        """Stop Tlgrm if we started it"""
+        if self._we_started_it and self.process:
+            try:
+                os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
                 self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                try:
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
             self.process = None
 
-    def is_running(self) -> bool:
-        """Check if process is running"""
-        if self.process is None:
-            return False
-        return self.process.poll() is None
+
+# Global app manager instance
+_app_manager: Optional[TlgrmAppManager] = None
 
 
-# Module-level fixtures
-_telegram_process: Optional[TelegramProcess] = None
+def get_app_manager() -> TlgrmAppManager:
+    """Get or create the app manager singleton"""
+    global _app_manager
+    if _app_manager is None:
+        _app_manager = TlgrmAppManager()
+    return _app_manager
 
 
-def get_telegram_process() -> TelegramProcess:
-    """Get or create Telegram process singleton"""
-    global _telegram_process
-    if _telegram_process is None:
-        _telegram_process = TelegramProcess()
-    return _telegram_process
+@pytest.fixture(scope="session", autouse=True)
+def ensure_tlgrm_running():
+    """
+    Session-scoped fixture that ensures Tlgrm is running.
+    This runs automatically before any tests.
 
+    IMPORTANT: Tests should NOT skip. If Tlgrm can't start, tests FAIL.
+    """
+    manager = get_app_manager()
 
-@pytest.fixture(scope="session")
-def telegram_process():
-    """Session-scoped fixture for Telegram process"""
-    process = get_telegram_process()
+    if not manager.ensure_running():
+        pytest.fail(
+            f"FAILED to start Tlgrm and get MCP socket ready.\n"
+            f"App path: {APP_PATH}\n"
+            f"Socket path: {IPC_SOCKET_PATH}\n"
+            f"Make sure:\n"
+            f"  1. Tlgrm.app is built at {APP_PATH}\n"
+            f"  2. You have a valid session (logged in at least once)\n"
+            f"  3. MCP bridge creates socket at {IPC_SOCKET_PATH}"
+        )
 
-    # Check if already running (external)
-    if os.path.exists(IPC_SOCKET_PATH):
-        try:
-            client = MCPClient()
-            response = client.ping()
-            if response.get("result", {}).get("status") == "pong":
-                yield process
-                return
-        except Exception:
-            pass
+    yield manager
 
-    # Start our own process
-    if not process.start():
-        pytest.skip("Failed to start Telegram with MCP")
-
-    yield process
-
-    # Cleanup
-    process.stop()
+    # Cleanup - stop app if we started it
+    manager.stop()
 
 
 @pytest.fixture
-def mcp_client(telegram_process) -> MCPClient:
-    """Fixture providing MCP client"""
-    return MCPClient()
+def mcp_client(ensure_tlgrm_running) -> MCPClient:
+    """Fixture providing MCP client - guaranteed to have working connection"""
+    client = MCPClient()
 
-
-@pytest.fixture
-def ensure_telegram_running():
-    """Fixture that ensures Telegram is running (doesn't manage lifecycle)"""
-    if not os.path.exists(IPC_SOCKET_PATH):
-        pytest.skip("Telegram not running with --mcp flag. Start it first.")
-
+    # Verify connection works
     try:
-        client = MCPClient()
-        response = client.ping()
-        if response.get("result", {}).get("status") != "pong":
-            pytest.skip("MCP server not responding")
+        response = client.list_chats(limit=1)
+        if "error" in response and "No active session" in str(response.get("error", {})):
+            pytest.fail("Tlgrm is running but has no active session. Please log in first.")
     except Exception as e:
-        pytest.skip(f"Cannot connect to MCP server: {e}")
+        pytest.fail(f"Failed to connect to MCP socket: {e}")
+
+    return client
+
+
+@pytest.fixture
+def app_manager(ensure_tlgrm_running) -> TlgrmAppManager:
+    """Fixture providing app manager"""
+    return get_app_manager()

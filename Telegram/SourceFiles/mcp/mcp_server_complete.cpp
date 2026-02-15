@@ -23,8 +23,12 @@
 #include <QtCore/QTimer>
 #include <QtCore/QDebug>
 #include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QTextStream>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
 #include <QtSql/QSqlError>
 
 #include "main/main_session.h"
@@ -48,6 +52,12 @@
 #include "api/api_self_destruct.h"
 #include "api/api_blocked_peers.h"
 #include "apiwrap.h"
+#include "export/export_settings.h"
+#include "export/export_controller.h"
+#include "export/view/export_view_panel_controller.h"
+#include "storage/storage_account.h"
+#include "core/file_utilities.h"
+#include "mtproto/mtp_instance.h"
 
 namespace MCP {
 
@@ -229,10 +239,10 @@ void Server::registerTools() {
 					}},
 					{"output_path", QJsonObject{
 						{"type", "string"},
-						{"description", "Output file path"}
+						{"description", "Output directory path (optional - uses UI export settings if not specified)"}
 					}}
 				}},
-				{"required", QJsonArray{"chat_id", "format", "output_path"}},
+				{"required", QJsonArray{"chat_id", "format"}},
 			}
 		},
 		Tool{
@@ -4009,6 +4019,32 @@ QJsonObject Server::toolListChats(const QJsonObject &args) {
 					chat["username"] = peer->username();
 					chat["source"] = "live";
 
+					// Determine chat type
+					if (peer->isUser()) {
+						chat["type"] = "user";
+						auto user = peer->asUser();
+						if (user && user->isBot()) {
+							chat["is_bot"] = true;
+						}
+					} else if (peer->isChat()) {
+						chat["type"] = "group";
+					} else if (peer->isChannel()) {
+						auto channel = peer->asChannel();
+						if (channel) {
+							if (channel->isBroadcast()) {
+								chat["type"] = "channel";
+							} else if (channel->isMegagroup()) {
+								chat["type"] = "supergroup";
+							} else {
+								chat["type"] = "channel";
+							}
+						} else {
+							chat["type"] = "channel";
+						}
+					} else {
+						chat["type"] = "unknown";
+					}
+
 					chats.append(chat);
 				}
 
@@ -4494,30 +4530,161 @@ QJsonObject Server::toolArchiveChat(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolExportChat(const QJsonObject &args) {
+	// This implementation uses the SAME Export::Controller pipeline as the UI.
+	// MCP is just another interface - same code, same settings, same output.
+
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
-	QString format = args["format"].toString();
 	QString outputPath = args["output_path"].toString();
 
-	ExportFormat exportFormat;
-	if (format == "json") {
-		exportFormat = ExportFormat::JSON;
-	} else if (format == "jsonl") {
-		exportFormat = ExportFormat::JSONL;
-	} else if (format == "csv") {
-		exportFormat = ExportFormat::CSV;
-	} else {
+	// Check session
+	if (!_session) {
 		QJsonObject error;
-		error["error"] = "Invalid format: " + format;
+		error["error"] = "No active session";
 		return error;
 	}
 
-	QString resultPath = _archiver->exportChat(chatId, exportFormat, outputPath);
+	// Get peer and history
+	PeerId peerId(chatId);
+	auto peer = _session->data().peerLoaded(peerId);
+	if (!peer) {
+		// Try to get history to access peer
+		auto history = _session->data().history(peerId);
+		if (history) {
+			peer = history->peer;
+		}
+	}
+	if (!peer) {
+		QJsonObject error;
+		error["error"] = "Chat not found: " + QString::number(chatId);
+		return error;
+	}
 
+	qWarning() << "MCP: toolExportChat starting export for peer:" << peer->name();
+
+	// Build MTPInputPeer from the peer
+	MTPInputPeer inputPeer = peer->input;
+
+	// Load saved export settings from UI (same settings as export dialog uses)
+	Export::Settings settings = _session->local().readExportSettings();
+
+	// Override output path if specified in MCP args
+	if (!outputPath.isEmpty()) {
+		settings.path = outputPath;
+	}
+
+	// Set single peer mode for this chat
+	settings.singlePeer = inputPeer;
+
+	// Enable all export types for single peer export (messages, media, etc.)
+	settings.types = Export::Settings::Type::AnyChatsMask;
+	settings.fullChats = Export::Settings::Type::AnyChatsMask;
+
+	// Enable media download based on saved settings (or enable all)
+	// The UI settings should already have this configured
+
+	// Gradual mode is always true in this fork
+	settings.gradualMode = true;
+
+	// Resolve settings (sets path, peer name, peer type)
+	Export::View::ResolveSettings(_session, settings);
+
+	// Prepare localized environment strings (same as UI export)
+	Export::Environment environment = Export::View::PrepareEnvironment(_session);
+
+	qWarning() << "MCP: Export settings resolved - path:" << settings.path
+	           << "peerName:" << settings.singlePeerName
+	           << "peerType:" << settings.singlePeerType;
+
+	// Create the export controller (same as Export::Manager::start() does for UI)
+	auto controller = std::make_unique<Export::Controller>(
+		&_session->mtp(),
+		inputPeer);
+
+	// Track export state
+	bool exportFinished = false;
+	bool exportSuccess = false;
+	QString finishedPath;
+	int filesCount = 0;
+	int64_t bytesCount = 0;
+	QString errorMessage;
+
+	// Subscribe to state changes
+	controller->state(
+	) | rpl::start_with_next([&](Export::State state) {
+		if (auto *processing = std::get_if<Export::ProcessingState>(&state)) {
+			// Export in progress - log progress
+			qWarning() << "MCP: Export processing step:" << static_cast<int>(processing->step);
+		} else if (auto *finished = std::get_if<Export::FinishedState>(&state)) {
+			// Export completed successfully
+			finishedPath = finished->path;
+			filesCount = finished->filesCount;
+			bytesCount = finished->bytesCount;
+			exportSuccess = true;
+			exportFinished = true;
+			qWarning() << "MCP: Export finished - path:" << finishedPath
+			           << "files:" << filesCount << "bytes:" << bytesCount;
+		} else if (auto *apiError = std::get_if<Export::ApiErrorState>(&state)) {
+			errorMessage = QString("API Error: %1 - %2")
+				.arg(apiError->data.type())
+				.arg(apiError->data.description());
+			exportFinished = true;
+			qWarning() << "MCP: Export API error:" << errorMessage;
+		} else if (auto *outputError = std::get_if<Export::OutputErrorState>(&state)) {
+			errorMessage = "Output error at path: " + outputError->path;
+			exportFinished = true;
+			qWarning() << "MCP: Export output error:" << errorMessage;
+		} else if (std::get_if<Export::CancelledState>(&state)) {
+			errorMessage = "Export was cancelled";
+			exportFinished = true;
+			qWarning() << "MCP: Export cancelled";
+		}
+	}, controller->lifetime());
+
+	// Start the export
+	controller->startExport(settings, environment);
+
+	// Wait for export to complete (with timeout)
+	// The controller runs on crl::object_on_queue, so we need to process events
+	QEventLoop loop;
+	QTimer timeoutTimer;
+	timeoutTimer.setSingleShot(true);
+
+	// 10 minute timeout for export (can be long for large chats with media)
+	timeoutTimer.start(600000);
+
+	QObject::connect(&timeoutTimer, &QTimer::timeout, [&]() {
+		if (!exportFinished) {
+			errorMessage = "Export timed out after 10 minutes";
+			exportFinished = true;
+		}
+		loop.quit();
+	});
+
+	// Poll for completion
+	QTimer pollTimer;
+	pollTimer.start(100);
+	QObject::connect(&pollTimer, &QTimer::timeout, [&]() {
+		if (exportFinished) {
+			loop.quit();
+		}
+	});
+
+	// Run event loop until export finishes or times out
+	loop.exec();
+
+	// Build result
 	QJsonObject result;
-	result["success"] = !resultPath.isEmpty();
+	result["success"] = exportSuccess;
 	result["chat_id"] = chatId;
-	result["format"] = format;
-	result["output_path"] = resultPath;
+	result["chat_name"] = settings.singlePeerName;
+	result["chat_type"] = settings.singlePeerType;
+	result["output_directory"] = finishedPath;
+	result["files_count"] = filesCount;
+	result["bytes_count"] = bytesCount;
+
+	if (!exportSuccess) {
+		result["error"] = errorMessage.isEmpty() ? "Export failed" : errorMessage;
+	}
 
 	return result;
 }

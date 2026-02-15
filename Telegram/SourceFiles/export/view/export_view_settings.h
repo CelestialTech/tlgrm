@@ -14,7 +14,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Ui {
 class VerticalLayout;
 class Checkbox;
-class ScrollArea;
 class BoxContent;
 } // namespace Ui
 
@@ -39,6 +38,8 @@ public:
 	rpl::producer<Settings> changes() const;
 	rpl::producer<> startClicks() const;
 	rpl::producer<> cancelClicks() const;
+	[[nodiscard]] rpl::producer<int> desiredHeight() const;
+	[[nodiscard]] rpl::producer<int> desiredWidth() const;
 
 	void setShowBoxCallback(Fn<void(object_ptr<Ui::BoxContent>)> callback) {
 		_showBoxCallback = std::move(callback);
@@ -52,9 +53,7 @@ private:
 	using Format = Output::Format;
 
 	void setupContent();
-	not_null<Ui::RpWidget*> setupButtons(
-		not_null<Ui::ScrollArea*> scroll,
-		not_null<Ui::RpWidget*> wrap);
+	not_null<Ui::RpWidget*> setupButtons();
 	void setupOptions(not_null<Ui::VerticalLayout*> container);
 	void setupFullExportOptions(not_null<Ui::VerticalLayout*> container);
 	void setupMediaOptions(not_null<Ui::VerticalLayout*> container);
@@ -128,6 +127,8 @@ private:
 	rpl::event_stream<Settings> _changes;
 	rpl::variable<Wrap> _startClicks;
 	rpl::variable<Wrap> _cancelClicks;
+	rpl::variable<int> _desiredHeight;
+	rpl::variable<int> _desiredWidth;
 
 };
 
