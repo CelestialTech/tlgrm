@@ -28,6 +28,7 @@ base::weak_qptr<Ui::BoxContent> SuggestStart(not_null<Main::Session*> session);
 void ClearSuggestStart(not_null<Main::Session*> session);
 bool IsDefaultPath(not_null<Main::Session*> session, const QString &path);
 void ResolveSettings(not_null<Main::Session*> session, Settings &settings);
+Environment PrepareEnvironment(not_null<Main::Session*> session);
 
 class Panel;
 

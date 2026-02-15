@@ -231,6 +231,7 @@ void PanelController::showSettings() {
 		_panel,
 		_session,
 		*_settings);
+	const auto settingsPtr = settings.get();
 	settings->setShowBoxCallback([=](object_ptr<Ui::BoxContent> box) {
 		_panel->showBox(
 			std::move(box),
@@ -253,6 +254,17 @@ void PanelController::showSettings() {
 	settings->changes(
 	) | rpl::start_with_next([=](Settings &&settings) {
 		*_settings = std::move(settings);
+	}, settings->lifetime());
+
+	// Subscribe to dynamic width changes for panel resizing
+	settingsPtr->desiredWidth(
+	) | rpl::start_with_next([=](int desiredWidth) {
+		const auto singlePeer = _settings->onlySinglePeer();
+		const auto defaultSize = singlePeer
+			? st::exportSinglePeerPanelSize
+			: st::exportPanelSize;
+		const auto newWidth = std::max(defaultSize.width(), desiredWidth);
+		_panel->setInnerSize(QSize(newWidth, defaultSize.height()));
 	}, settings->lifetime());
 
 	_panel->showInner(std::move(settings));
@@ -434,6 +446,9 @@ void PanelController::fillParams(const PasswordCheckState &state) {
 void PanelController::updateState(State &&state) {
 	if (const auto start = std::get_if<PasswordCheckState>(&state)) {
 		fillParams(*start);
+		// Re-resolve settings to update singlePeerName/singlePeerType
+		// from the now-correct singlePeer (fixes stale peer name bug)
+		ResolveSettings(_session, *_settings);
 	}
 	if (!_panel) {
 		createPanel();

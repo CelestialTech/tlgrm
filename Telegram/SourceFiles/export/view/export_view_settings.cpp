@@ -50,7 +50,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
-#include "ui/widgets/scroll_area.h"
 #include "ui/widgets/continuous_sliders.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/padding_wrap.h"
@@ -346,24 +345,17 @@ void SettingsWidget::changeData(Callback &&callback) {
 }
 
 void SettingsWidget::setupContent() {
-	const auto scroll = Ui::CreateChild<Ui::ScrollArea>(
-		this,
-		st::boxScroll);
-	const auto wrap = scroll->setOwnedWidget(
-		object_ptr<Ui::OverrideMargins>(
-			scroll,
-			object_ptr<Ui::VerticalLayout>(scroll)));
-	const auto content = static_cast<Ui::VerticalLayout*>(wrap->entity());
+	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+	const auto buttons = setupButtons();
 
-	const auto buttons = setupButtons(scroll, wrap);
 	setupOptions(content);
 	setupPathAndFormat(content);
 
 	sizeValue(
 	) | rpl::start_with_next([=](QSize size) {
-		scroll->resize(size.width(), size.height() - buttons->height());
-		wrap->resizeToWidth(size.width());
 		content->resizeToWidth(size.width());
+		buttons->resizeToWidth(size.width());
+		buttons->moveToLeft(0, size.height() - buttons->height());
 	}, lifetime());
 }
 
@@ -525,14 +517,20 @@ void SettingsWidget::setupPathAndFormat(
 		not_null<Ui::VerticalLayout*> container) {
 	if (_singlePeerId != 0) {
 		// === SINGLE PEER EXPORT MODE ===
-		// Simplified UI with multi-format support and unrestricted mode
-		addHeader(container, tr::lng_export_header_format(tr::now));
+		// Simplified UI - gradual export is always enabled
+		// Removed "Location and format" header and "Gradual export mode" header
+		// But kept the explanation message
 		addSinglePeerFormatLabel(container);
 		addSinglePeerPathLabel(container);
 		addLimitsLabel(container);
-		// Add extra vertical spacing before Unrestricted mode
-		container->add(object_ptr<Ui::FixedHeightWidget>(container, 8));
-		addUnrestrictedModeCheckbox(container);
+
+		// Explanation message (without "Gradual export mode" header)
+		container->add(
+			object_ptr<Ui::FlatLabel>(
+				container,
+				QString::fromUtf8("Exports messages slowly with random pauses to avoid rate limits. Works with restricted channels."),
+				st::exportAboutOptionLabel),
+			st::exportAboutOptionPadding);
 		return;
 	}
 	// === FULL EXPORT MODE ===
@@ -561,20 +559,8 @@ void SettingsWidget::setupPathAndFormat(
 	addFormatOption(tr::lng_export_option_html_and_json(tr::now), Format::HtmlAndJson);
 	addFormatOption(QString("Markdown"), Format::Markdown);
 
-	// Gradual mode checkbox
-	const auto gradualCheck = container->add(
-		object_ptr<Ui::Checkbox>(
-			container,
-			QString("Gradual export mode (bypasses restrictions)"),
-			false,
-			st::defaultBoxCheckbox),
-		st::exportSettingPadding);
-	gradualCheck->checkedChanges(
-	) | rpl::start_with_next([=](bool checked) {
-		changeData([&](Settings &data) {
-			data.gradualMode = checked;
-		});
-	}, gradualCheck->lifetime());
+	// Note: Gradual export mode is always enabled (unified export)
+	// No checkbox needed - direct API calls are used instead of takeout sessions
 }
 
 void SettingsWidget::addLocationLabel(
@@ -824,35 +810,19 @@ void SettingsWidget::addSinglePeerPathLabel(
  */
 void SettingsWidget::addUnrestrictedModeCheckbox(
 		not_null<Ui::VerticalLayout*> container) {
-	// === UNRESTRICTED MODE (GRADUAL EXPORT) ===
-	// Pre-selected by default for better user experience
-	const auto initialChecked = true;
-
-	// Initialize gradualMode to true if not already set
-	if (!readData().gradualMode) {
-		changeData([](Settings &data) {
-			data.gradualMode = true;
-		});
-	}
-	const auto checkbox = container->add(
-		object_ptr<Ui::Checkbox>(
-			container,
-			QString::fromUtf8("Unrestricted mode"),
-			initialChecked,
-			st::defaultBoxCheckbox),
-		st::exportSettingPadding);
-	checkbox->checkedChanges(
-	) | rpl::start_with_next([=](bool checked) {
-		changeData([&](Settings &data) {
-			data.gradualMode = checked;
-		});
-	}, checkbox->lifetime());
-
-	// Fine-print explanation below the checkbox
+	// Unrestricted mode (gradual export) is always enabled
+	// Just show an informational label instead of a checkbox
 	container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
-			QString::fromUtf8("Exports from local cache, bypassing server restrictions. Only includes messages already loaded in this client."),
+			QString::fromUtf8("Gradual export mode"),
+			st::exportHeaderLabel),
+		st::exportSettingPadding);
+
+	container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			QString::fromUtf8("Exports messages slowly with random pauses to avoid rate limits. Works with restricted channels."),
 			st::exportAboutOptionLabel),
 		st::exportAboutOptionPadding);
 }
@@ -930,22 +900,54 @@ void SettingsWidget::addLimitsLabel(
 		std::move(tillTimeLink)
 	) | rpl::map(concat);
 
-	auto datesText = tr::lng_export_limits(
-		lt_from,
+	auto text = rpl::single(
+		Ui::Text::Link(
+			tr::lng_export_limits(tr::now, lt_from, QString(), lt_till, QString()),
+			QString())
+	) | rpl::then(rpl::combine(
 		std::move(fromLink),
-		lt_till,
 		std::move(tillLink),
-		Ui::Text::WithEntities
-	) | rpl::after_next([=] {
+		tr::lng_export_limits(lt_from, rpl::single(QString(u"{from}"_q)), lt_till, rpl::single(QString(u"{till}"_q)))
+	) | rpl::map([](TextWithEntities from, TextWithEntities till, QString format) {
+		auto result = TextWithEntities();
+		const auto fromPlace = format.indexOf(u"{from}"_q);
+		const auto tillPlace = format.indexOf(u"{till}"_q);
+		if (fromPlace < 0 || tillPlace < 0) {
+			return result;
+		}
+		const auto fromFirst = (fromPlace < tillPlace);
+		const auto firstPlace = fromFirst ? fromPlace : tillPlace;
+		const auto secondPlace = fromFirst ? tillPlace : fromPlace;
+		auto &first = fromFirst ? from : till;
+		auto &second = fromFirst ? till : from;
+		result.text.append(base::StringViewMid(format, 0, firstPlace));
+		result.append(std::move(first));
+		result.text.append(base::StringViewMid(
+			format,
+			firstPlace + 6,
+			secondPlace - firstPlace - 6));
+		result.append(std::move(second));
+		result.text.append(base::StringViewMid(format, secondPlace + 6));
+		return result;
+	})) | rpl::after_next([=] {
 		container->resizeToWidth(container->width());
 	});
 
 	const auto label = container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
-			std::move(datesText),
+			std::move(text),
 			st::exportLocationLabel),
 		st::exportLocationPadding);
+
+	// Measure text width and update desired panel width
+	label->widthValue(
+	) | rpl::start_with_next([=](int) {
+		const auto textWidth = label->textMaxWidth();
+		const auto padding = st::exportLocationPadding.left()
+			+ st::exportLocationPadding.right();
+		_desiredWidth = std::max(_desiredWidth.current(), textWidth + padding);
+	}, label->lifetime());
 
 	const auto removeTime = [](TimeId dateTime) {
 		return base::unixtime::serialize(
@@ -1060,8 +1062,6 @@ void SettingsWidget::addLimitsLabel(
 				});
 			};
 			editTimeLimit(now, done);
-		} else {
-			Unexpected("Click handler URL in export limits edit.");
 		}
 	});
 }
@@ -1114,11 +1114,7 @@ void SettingsWidget::editDateLimit(
 	_showBoxCallback(std::move(box));
 }
 
-not_null<Ui::RpWidget*> SettingsWidget::setupButtons(
-		not_null<Ui::ScrollArea*> scroll,
-		not_null<Ui::RpWidget*> wrap) {
-	using namespace rpl::mappers;
-
+not_null<Ui::RpWidget*> SettingsWidget::setupButtons() {
 	const auto buttonsPadding = st::defaultBox.buttonPadding;
 	const auto buttonsHeight = buttonsPadding.top()
 		+ st::defaultBoxButton.height
@@ -1126,36 +1122,18 @@ not_null<Ui::RpWidget*> SettingsWidget::setupButtons(
 	const auto buttons = Ui::CreateChild<Ui::FixedHeightWidget>(
 		this,
 		buttonsHeight);
-	const auto topShadow = Ui::CreateChild<Ui::FadeShadow>(this);
-	const auto bottomShadow = Ui::CreateChild<Ui::FadeShadow>(this);
-	topShadow->toggleOn(scroll->scrollTopValue(
-	) | rpl::map(_1 > 0));
-	bottomShadow->toggleOn(rpl::combine(
-		scroll->heightValue(),
-		scroll->scrollTopValue(),
-		wrap->heightValue(),
-		_2
-	) | rpl::map([=](int top) {
-		return top < scroll->scrollTopMax();
-	}));
 
 	value() | rpl::map([](const Settings &data) {
 		return (data.types != Types(0)) || data.onlySinglePeer();
 	}) | rpl::distinct_until_changed(
 	) | rpl::start_with_next([=](bool canStart) {
 		refreshButtons(buttons, canStart);
-		topShadow->raise();
-		bottomShadow->raise();
 	}, buttons->lifetime());
 
 	sizeValue(
 	) | rpl::start_with_next([=](QSize size) {
 		buttons->resizeToWidth(size.width());
 		buttons->moveToLeft(0, size.height() - buttons->height());
-		topShadow->resizeToWidth(size.width());
-		topShadow->moveToLeft(0, 0);
-		bottomShadow->resizeToWidth(size.width());
-		bottomShadow->moveToLeft(0, buttons->y() - st::lineWidth);
 	}, buttons->lifetime());
 
 	return buttons;
@@ -1427,6 +1405,14 @@ rpl::producer<> SettingsWidget::cancelClicks() const {
 	) | rpl::map([](Wrap &&wrap) {
 		return std::move(wrap.value);
 	}) | rpl::flatten_latest();
+}
+
+rpl::producer<int> SettingsWidget::desiredHeight() const {
+	return _desiredHeight.value();
+}
+
+rpl::producer<int> SettingsWidget::desiredWidth() const {
+	return _desiredWidth.value();
 }
 
 } // namespace View

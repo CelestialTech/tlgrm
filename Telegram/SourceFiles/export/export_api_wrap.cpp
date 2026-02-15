@@ -360,24 +360,18 @@ ApiWrap::FileProcess::FileProcess(const QString &path, Output::Stats *stats)
 
 template <typename Request>
 auto ApiWrap::mainRequest(Request &&request) {
-	Expects(_takeoutId.has_value());
-
-	auto original = std::move(_mtp.request(MTPInvokeWithTakeout<Request>(
-		MTP_long(*_takeoutId),
-		std::forward<Request>(request)
-	)).toDC(MTP::ShiftDcId(0, MTP::kExportDcShift)));
-
-	return RequestBuilder<MTPInvokeWithTakeout<Request>>(
-		std::move(original),
-		[=](const MTP::Error &result) { error(result); });
+	// In gradual mode (always true), bypass takeout session entirely
+	// and use direct API calls instead. This avoids TAKEOUT_REQUIRED errors.
+	return directRequest(std::forward<Request>(request));
 }
 
 // Direct request that bypasses takeout session (for gradual mode)
+// Uses the regular DC, not the export DC (kExportDcShift requires takeout)
 template <typename Request>
 auto ApiWrap::directRequest(Request &&request) {
 	auto original = std::move(_mtp.request(
 		std::forward<Request>(request)
-	).toDC(MTP::ShiftDcId(0, MTP::kExportDcShift)));
+	));
 
 	return RequestBuilder<Request>(
 		std::move(original),
@@ -385,7 +379,9 @@ auto ApiWrap::directRequest(Request &&request) {
 }
 
 bool ApiWrap::isGradualMode() const {
-	return _settings && _settings->gradualMode;
+	// Always use gradual mode (direct API calls instead of takeout sessions)
+	// This is the unified export method for both GUI and MCP
+	return true;
 }
 
 void ApiWrap::scheduleGradualDelay(FnMut<void()> callback) {
