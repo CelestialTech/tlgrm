@@ -61,9 +61,6 @@ Makefile
 monitor_build.sh
 preflight_check.sh
 
-# Documentation (generated)
-docs/
-
 # Qt
 moc_*.cpp
 moc_*.h
