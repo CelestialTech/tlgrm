@@ -1130,6 +1130,8 @@ QJsonObject Server::toolTextToVideo(const QJsonObject &args) {
 	QJsonObject result;
 	QString text = args["text"].toString();
 	QString preset = args.value("preset").toString("default");
+	QString voice = args.value("voice").toString();
+	double speed = args.value("speed").toDouble(1.0);
 
 	if (text.isEmpty()) {
 		result["error"] = "Missing text parameter";
@@ -1137,11 +1139,61 @@ QJsonObject Server::toolTextToVideo(const QJsonObject &args) {
 		return result;
 	}
 
+	if (!_videoGenerator || !_videoGenerator->isRunning()) {
+		result["error"] = "VideoGenerator not available. FFmpeg is required.";
+		result["success"] = false;
+		return result;
+	}
+
+	// Look up avatar from preset
+	QString avatarPath;
+	QSqlQuery query(_db);
+	query.prepare("SELECT source_path FROM video_avatar WHERE name = ?");
+	query.addBindValue(preset);
+	if (query.exec() && query.next()) {
+		avatarPath = query.value(0).toString();
+	}
+
+	if (avatarPath.isEmpty() || !QFile::exists(avatarPath)) {
+		result["error"] = QString("No avatar found for preset '%1'. Use upload_avatar_source first.").arg(preset);
+		result["success"] = false;
+		return result;
+	}
+
+	// Look up voice persona if specified
+	QString voiceId = voice;
+	if (!voice.isEmpty()) {
+		QSqlQuery voiceQuery(_db);
+		voiceQuery.prepare("SELECT voice_id, speed FROM voice_persona WHERE name = ?");
+		voiceQuery.addBindValue(voice);
+		if (voiceQuery.exec() && voiceQuery.next()) {
+			voiceId = voiceQuery.value(0).toString();
+			if (speed == 1.0) {
+				speed = voiceQuery.value(1).toDouble();
+				if (speed <= 0) speed = 1.0;
+			}
+		}
+	}
+
+	// Generate video
+	auto videoResult = _videoGenerator->generate(text, avatarPath, voiceId, speed);
+
+	if (!videoResult.success) {
+		result["error"] = videoResult.error;
+		result["success"] = false;
+		return result;
+	}
+
 	result["success"] = true;
 	result["text"] = text;
 	result["preset"] = preset;
-	result["status"] = "video_generation_service_required";
-	result["note"] = "Video circle generation requires external API integration";
+	result["provider"] = videoResult.provider;
+	result["duration_seconds"] = videoResult.durationSeconds;
+	result["video_size_bytes"] = videoResult.videoData.size();
+	result["output_path"] = videoResult.outputPath;
+	result["resolution"] = QString("%1x%2").arg(videoResult.width).arg(videoResult.height);
+	result["format"] = "mp4";
+	result["status"] = "generated";
 
 	return result;
 }
@@ -1151,6 +1203,8 @@ QJsonObject Server::toolSendVideoReply(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QString text = args["text"].toString();
 	QString preset = args.value("preset").toString("default");
+	QString voice = args.value("voice").toString();
+	double speed = args.value("speed").toDouble(1.0);
 
 	if (chatId == 0 || text.isEmpty()) {
 		result["error"] = "Missing chat_id or text";
@@ -1158,21 +1212,87 @@ QJsonObject Server::toolSendVideoReply(const QJsonObject &args) {
 		return result;
 	}
 
-	// Check if avatar source exists
+	if (!_session) {
+		result["error"] = "No active session";
+		result["success"] = false;
+		return result;
+	}
+
+	if (!_videoGenerator || !_videoGenerator->isRunning()) {
+		result["error"] = "VideoGenerator not available. FFmpeg is required.";
+		result["success"] = false;
+		return result;
+	}
+
+	// Look up avatar from preset
+	QString avatarPath;
 	QSqlQuery query(_db);
 	query.prepare("SELECT source_path FROM video_avatar WHERE name = ?");
 	query.addBindValue(preset);
-
 	if (query.exec() && query.next()) {
-		result["avatar_source"] = query.value(0).toString();
+		avatarPath = query.value(0).toString();
 	}
+
+	if (avatarPath.isEmpty() || !QFile::exists(avatarPath)) {
+		result["error"] = QString("No avatar found for preset '%1'. Use upload_avatar_source first.").arg(preset);
+		result["success"] = false;
+		return result;
+	}
+
+	// Look up voice persona
+	QString voiceId = voice;
+	if (!voice.isEmpty()) {
+		QSqlQuery voiceQuery(_db);
+		voiceQuery.prepare("SELECT voice_id, speed FROM voice_persona WHERE name = ?");
+		voiceQuery.addBindValue(voice);
+		if (voiceQuery.exec() && voiceQuery.next()) {
+			voiceId = voiceQuery.value(0).toString();
+			if (speed == 1.0) {
+				speed = voiceQuery.value(1).toDouble();
+				if (speed <= 0) speed = 1.0;
+			}
+		}
+	}
+
+	// Generate video
+	auto videoResult = _videoGenerator->generate(text, avatarPath, voiceId, speed);
+
+	if (!videoResult.success) {
+		result["error"] = QString("Video generation failed: %1").arg(videoResult.error);
+		result["success"] = false;
+		return result;
+	}
+
+	// Send as round video via Telegram API
+	PeerId peerId(chatId);
+	auto history = _session->data().history(peerId);
+	if (!history) {
+		result["error"] = "Chat not found";
+		result["success"] = false;
+		return result;
+	}
+
+	// Generate synthetic waveform for the video
+	int durationMs = static_cast<int>(videoResult.durationSeconds * 1000);
+	int waveformSamples = qMax(1, durationMs / 20); // ~50 samples/sec
+	VoiceWaveform waveform(waveformSamples, 20); // flat waveform
+
+	Api::SendAction action(history);
+	_session->api().sendVoiceMessage(
+		videoResult.videoData,  // QByteArray of MP4
+		waveform,               // VoiceWaveform
+		crl::time(durationMs),  // duration in ms
+		true,                   // video = true (round video note!)
+		action);
 
 	result["success"] = true;
 	result["chat_id"] = chatId;
 	result["text"] = text;
 	result["preset"] = preset;
-	result["status"] = "pending_generation";
-	result["note"] = "Video circle generation requires external rendering service";
+	result["provider"] = videoResult.provider;
+	result["duration_seconds"] = videoResult.durationSeconds;
+	result["video_size_bytes"] = videoResult.videoData.size();
+	result["status"] = "sent";
 
 	return result;
 }

@@ -1268,6 +1268,10 @@ PRIVATE
     mcp/text_to_speech.h
     mcp/local_llm.cpp
     mcp/local_llm.h
+    mcp/video_generator.cpp
+    mcp/video_generator.h
+    mcp/ton_wallet.cpp
+    mcp/ton_wallet.h
     mcp/cache_manager.cpp
     mcp/cache_manager.h
     mcp/mcp_helpers.h
