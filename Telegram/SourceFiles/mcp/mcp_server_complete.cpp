@@ -389,6 +389,36 @@ void Server::setSession(Main::Session *session) {
 		fflush(stderr);
 	}
 
+	// VideoGenerator - uses TTS for audio, SadTalker/FFmpeg for video
+	_videoGenerator = std::make_unique<VideoGenerator>(this);
+	if (_textToSpeech) {
+		_videoGenerator->setTextToSpeech(_textToSpeech.get());
+	}
+	if (_videoGenerator->start(&_db)) {
+		fprintf(stderr, "[MCP] VideoGenerator initialized (provider: %s)\n",
+			(_videoGenerator->provider() == VideoProvider::SadTalker ? "SadTalker" : "FFmpegStill"));
+		fflush(stderr);
+	} else {
+		qWarning() << "MCP: Failed to start VideoGenerator";
+		fprintf(stderr, "[MCP] WARNING: VideoGenerator failed to start\n");
+		fflush(stderr);
+	}
+
+	// TonWallet - TON/Fragment crypto payment integration
+	_tonWallet = std::make_unique<TonWallet>(this);
+	if (_tonWallet->start(&_db)) {
+		fprintf(stderr, "[MCP] TonWallet initialized (provider: %s, network: %s)\n",
+			(_tonWallet->provider() == TonProvider::TonSdk ? "tonsdk"
+				: _tonWallet->provider() == TonProvider::TonUtils ? "tonutils"
+				: "ton-cli"),
+			_tonWallet->network().toUtf8().constData());
+		fflush(stderr);
+	} else {
+		qWarning() << "MCP: Failed to start TonWallet";
+		fprintf(stderr, "[MCP] WARNING: TonWallet failed to start (install: pip install tonsdk)\n");
+		fflush(stderr);
+	}
+
 	// BotManager - depends on all other components
 	if (_archiver && _analytics && _semanticSearch && _scheduler && _auditLogger && _rbac) {
 		_botManager.reset(new BotManager(this));

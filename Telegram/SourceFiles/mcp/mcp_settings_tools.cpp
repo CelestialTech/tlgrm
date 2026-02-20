@@ -1116,20 +1116,175 @@ QJsonObject Server::toolCreateCryptoPayment(const QJsonObject &args) {
 	double amount = args["amount"].toDouble();
 	QString currency = args.value("currency").toString("TON");
 	QString recipientAddress = args["recipient"].toString();
+	QString comment = args.value("comment").toString();
+	QString action = args.value("action").toString("send");
 
 	QJsonObject result;
-	if (amount <= 0 || recipientAddress.isEmpty()) {
-		result["error"] = "Missing amount or recipient";
+	if (recipientAddress.isEmpty() && action == "send") {
+		result["error"] = "Missing recipient address";
 		result["success"] = false;
 		return result;
 	}
 
-	result["success"] = true;
-	result["amount"] = amount;
-	result["currency"] = currency;
-	result["recipient"] = recipientAddress;
-	result["status"] = "pending_confirmation";
-	result["note"] = "Crypto payments require Fragment/TON wallet integration";
+	if (!_tonWallet) {
+		result["error"] = "TonWallet not initialized";
+		result["success"] = false;
+		return result;
+	}
+
+	if (!_tonWallet->isRunning()) {
+		result["error"] = "TonWallet not running (install: pip install tonsdk)";
+		result["success"] = false;
+		return result;
+	}
+
+	// Handle different actions
+	if (action == "create_wallet") {
+		auto walletResult = _tonWallet->createWallet();
+		result["success"] = walletResult.success;
+		if (walletResult.success) {
+			result["address"] = walletResult.address;
+			result["raw_address"] = walletResult.rawAddress;
+			QJsonArray mnArray;
+			for (const auto &word : walletResult.mnemonics) {
+				mnArray.append(word);
+			}
+			result["mnemonics"] = mnArray;
+			result["warning"] = "Save these 24 words securely. They cannot be recovered.";
+		} else {
+			result["error"] = walletResult.error;
+		}
+		return result;
+	}
+
+	if (action == "import_wallet") {
+		auto mnemonicsStr = args.value("mnemonics").toString();
+		if (mnemonicsStr.isEmpty()) {
+			result["error"] = "Missing mnemonics (24 space-separated words)";
+			result["success"] = false;
+			return result;
+		}
+		auto words = mnemonicsStr.split(' ', Qt::SkipEmptyParts);
+		auto walletResult = _tonWallet->importWallet(words);
+		result["success"] = walletResult.success;
+		if (walletResult.success) {
+			result["address"] = walletResult.address;
+			result["raw_address"] = walletResult.rawAddress;
+			result["status"] = "imported";
+		} else {
+			result["error"] = walletResult.error;
+		}
+		return result;
+	}
+
+	if (action == "get_balance") {
+		auto walletResult = _tonWallet->getBalance();
+		result["success"] = walletResult.success;
+		if (walletResult.success) {
+			result["address"] = walletResult.address;
+			result["balance_ton"] = walletResult.balanceTon;
+			result["balance_nano"] = QString::number(walletResult.balanceNano);
+			result["network"] = _tonWallet->network();
+		} else {
+			result["error"] = walletResult.error;
+		}
+		return result;
+	}
+
+	if (action == "get_address") {
+		auto walletResult = _tonWallet->getWalletAddress();
+		result["success"] = walletResult.success;
+		if (walletResult.success) {
+			result["address"] = walletResult.address;
+			result["raw_address"] = walletResult.rawAddress;
+			result["has_wallet"] = true;
+		} else {
+			result["error"] = walletResult.error;
+			result["has_wallet"] = false;
+		}
+		return result;
+	}
+
+	if (action == "get_history") {
+		int limit = args.value("limit").toInt(20);
+		auto txs = _tonWallet->getTransactionHistory(limit);
+		QJsonArray txArray;
+		for (const auto &tx : txs) {
+			QJsonObject txObj;
+			txObj["hash"] = tx.hash;
+			txObj["amount_ton"] = tx.amountTon;
+			txObj["from"] = tx.from;
+			txObj["to"] = tx.to;
+			txObj["comment"] = tx.comment;
+			txObj["timestamp"] = tx.timestamp.toString(Qt::ISODate);
+			txObj["is_incoming"] = tx.isIncoming;
+			txArray.append(txObj);
+		}
+		result["success"] = true;
+		result["transactions"] = txArray;
+		result["count"] = txArray.count();
+		return result;
+	}
+
+	if (action == "get_jettons") {
+		auto jettons = _tonWallet->getJettonBalances();
+		result["success"] = true;
+		result["jettons"] = jettons;
+		return result;
+	}
+
+	if (action == "stats") {
+		auto stats = _tonWallet->getStats();
+		result["success"] = true;
+		result["total_transactions"] = stats.totalTransactions;
+		result["successful_transactions"] = stats.successfulTransactions;
+		result["failed_transactions"] = stats.failedTransactions;
+		result["total_sent_ton"] = stats.totalSentTon;
+		result["total_received_ton"] = stats.totalReceivedTon;
+		if (stats.lastTransaction.isValid()) {
+			result["last_transaction"] = stats.lastTransaction.toString(Qt::ISODate);
+		}
+		result["network"] = _tonWallet->network();
+		return result;
+	}
+
+	// Default action: send payment
+	if (amount <= 0) {
+		result["error"] = "Amount must be positive";
+		result["success"] = false;
+		return result;
+	}
+
+	if (currency.toUpper() != "TON") {
+		result["error"] = "Only TON currency is supported";
+		result["success"] = false;
+		return result;
+	}
+
+	if (!_tonWallet->hasWallet()) {
+		result["error"] = "No wallet configured. Use action='create_wallet' or action='import_wallet' first.";
+		result["success"] = false;
+		return result;
+	}
+
+	auto paymentResult = _tonWallet->sendPayment(
+		recipientAddress, amount, comment);
+
+	result["success"] = paymentResult.success;
+	if (paymentResult.success) {
+		result["status"] = paymentResult.status;
+		result["tx_hash"] = paymentResult.txHash;
+		result["amount"] = amount;
+		result["currency"] = currency;
+		result["recipient"] = recipientAddress;
+		result["network"] = _tonWallet->network();
+		if (!comment.isEmpty()) {
+			result["comment"] = comment;
+		}
+	} else {
+		result["error"] = paymentResult.error;
+		result["status"] = paymentResult.status;
+	}
 	return result;
 }
 

@@ -15,29 +15,93 @@ QJsonObject Server::toolSemanticSearch(const QJsonObject &args) {
 	int limit = args.value("limit").toInt(10);
 	float minSimilarity = args.value("min_similarity").toDouble(0.7);
 
-	if (!_semanticSearch) {
+	if (_semanticSearch) {
+		auto results = _semanticSearch->searchSimilar(query, chatId, limit, minSimilarity);
+
+		QJsonArray matches;
+		for (const auto &result : results) {
+			QJsonObject match;
+			match["message_id"] = result.messageId;
+			match["chat_id"] = result.chatId;
+			match["content"] = result.content;
+			match["similarity"] = result.similarity;
+			matches.append(match);
+		}
+
 		QJsonObject result;
-		result["error"] = "Semantic search not available";
 		result["query"] = query;
+		result["results"] = matches;
+		result["count"] = matches.size();
 		return result;
 	}
 
-	auto results = _semanticSearch->searchSimilar(query, chatId, limit, minSimilarity);
-
-	QJsonArray matches;
-	for (const auto &result : results) {
-		QJsonObject match;
-		match["message_id"] = result.messageId;
-		match["chat_id"] = result.chatId;
-		match["content"] = result.content;
-		match["similarity"] = result.similarity;
-		matches.append(match);
-	}
-
+	// Fallback: FTS5 full-text search on indexed messages
 	QJsonObject result;
 	result["query"] = query;
+
+	QJsonArray matches;
+
+	// Try FTS5 index first
+	QSqlQuery ftsQuery(_db);
+	QString fts = "SELECT chat_id, message_id, text, sender_name, timestamp, "
+		"rank FROM message_fts WHERE message_fts MATCH ?";
+	if (chatId > 0) {
+		fts += " AND chat_id = '" + QString::number(chatId) + "'";
+	}
+	fts += " ORDER BY rank LIMIT " + QString::number(limit);
+
+	ftsQuery.prepare(fts);
+	// FTS5 match syntax: escape special chars, wrap in quotes for phrase search
+	QString ftsQuery_str = query;
+	ftsQuery_str.replace("\"", "");
+	ftsQuery.addBindValue("\"" + ftsQuery_str + "\"");
+
+	bool ftsWorked = false;
+	if (ftsQuery.exec()) {
+		while (ftsQuery.next()) {
+			QJsonObject match;
+			match["chat_id"] = ftsQuery.value(0).toString();
+			match["message_id"] = ftsQuery.value(1).toString();
+			match["content"] = ftsQuery.value(2).toString();
+			match["sender"] = ftsQuery.value(3).toString();
+			match["timestamp"] = ftsQuery.value(4).toString();
+			match["rank"] = ftsQuery.value(5).toDouble();
+			matches.append(match);
+			ftsWorked = true;
+		}
+	}
+
+	// If FTS didn't work or returned nothing, try LIKE search on messages table
+	if (!ftsWorked || matches.isEmpty()) {
+		QSqlQuery likeQuery(_db);
+		QString sql = "SELECT chat_id, message_id, content, username, timestamp "
+			"FROM messages WHERE content LIKE ?";
+		if (chatId > 0) sql += " AND chat_id = " + QString::number(chatId);
+		sql += " ORDER BY timestamp DESC LIMIT " + QString::number(limit);
+
+		likeQuery.prepare(sql);
+		likeQuery.addBindValue("%" + query + "%");
+
+		if (likeQuery.exec()) {
+			while (likeQuery.next()) {
+				QJsonObject match;
+				match["chat_id"] = likeQuery.value(0).toString();
+				match["message_id"] = likeQuery.value(1).toString();
+				match["content"] = likeQuery.value(2).toString();
+				match["sender"] = likeQuery.value(3).toString();
+				match["timestamp"] = likeQuery.value(4).toString();
+				matches.append(match);
+			}
+		}
+		result["method"] = "like_search";
+	} else {
+		result["method"] = "fts5";
+	}
+
 	result["results"] = matches;
 	result["count"] = matches.size();
+	result["success"] = true;
+	result["source"] = "local_db";
 
 	return result;
 }
@@ -196,9 +260,6 @@ QJsonObject Server::toolDetectTopics(const QJsonObject &args) {
 		"very", "just", "also", "now", "here", "there", "then", "about"
 	};
 
-	// Note: Full message iteration through history->blocks() requires complex API
-	// integration. Topic detection will use the FTS index when available.
-
 	// Check if FTS table exists and has data for this chat
 	QSqlQuery checkQuery(_db);
 	checkQuery.prepare("SELECT COUNT(*) FROM message_fts WHERE chat_id = ?");
@@ -224,61 +285,69 @@ QJsonObject Server::toolDetectTopics(const QJsonObject &args) {
 		}
 	}
 
-	// Fall back to keyword frequency analysis from FTS index
+	// Fall back to keyword frequency analysis
+	// Use FTS index if available, otherwise fall back to messages table directly
+	QSqlQuery wordQuery(_db);
+	bool usingFts = false;
 	if (indexedCount > 0) {
-		// Extract top words from indexed messages
-		QSqlQuery wordQuery(_db);
 		wordQuery.prepare("SELECT text FROM message_fts WHERE chat_id = ? LIMIT ?");
 		wordQuery.addBindValue(QString::number(chatId));
 		wordQuery.addBindValue(messageLimit);
+		usingFts = true;
+	} else {
+		// Directly read from messages table
+		QString sql = "SELECT content FROM messages WHERE content != '' AND content IS NOT NULL";
+		if (chatId > 0) sql += " AND chat_id = " + QString::number(chatId);
+		sql += " ORDER BY timestamp DESC LIMIT " + QString::number(messageLimit);
+		wordQuery.prepare(sql);
+	}
 
-		QHash<QString, int> wordFreq;
-		if (wordQuery.exec()) {
-			while (wordQuery.next()) {
-				QString text = wordQuery.value(0).toString().toLower();
-				QStringList words = text.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-				for (const QString &word : words) {
-					if (word.length() >= 4 && !stopWords.contains(word)) {
-						wordFreq[word]++;
-					}
+	QHash<QString, int> wordFreq;
+	int messagesAnalyzed = 0;
+	if (wordQuery.exec()) {
+		while (wordQuery.next()) {
+			messagesAnalyzed++;
+			QString text = wordQuery.value(0).toString().toLower();
+			QStringList words = text.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+			for (const QString &word : words) {
+				if (word.length() >= 4 && !stopWords.contains(word)) {
+					wordFreq[word]++;
 				}
 			}
 		}
-
-		// Sort by frequency and group into topics
-		QVector<QPair<QString, int>> sorted;
-		for (auto it = wordFreq.constBegin(); it != wordFreq.constEnd(); ++it) {
-			sorted.append({it.key(), it.value()});
-		}
-		std::sort(sorted.begin(), sorted.end(), [](const auto &a, const auto &b) {
-			return a.second > b.second;
-		});
-
-		// Take top N*3 words and group into N topics
-		int wordsPerTopic = 3;
-		for (int t = 0; t < numTopics && t * wordsPerTopic < sorted.size(); ++t) {
-			QJsonObject topic;
-			topic["topic_id"] = t;
-
-			QJsonArray keyTerms;
-			for (int w = 0; w < wordsPerTopic && (t * wordsPerTopic + w) < sorted.size(); ++w) {
-				int idx = t * wordsPerTopic + w;
-				keyTerms.append(sorted[idx].first);
-			}
-			topic["key_terms"] = keyTerms;
-			topic["label"] = sorted[t * wordsPerTopic].first;
-			topics.append(topic);
-		}
-
-		result["indexed_messages"] = indexedCount;
-	} else {
-		result["indexed_messages"] = 0;
-		result["note"] = "No indexed messages for this chat. Use index_messages first.";
 	}
 
+	// Sort by frequency and group into topics
+	QVector<QPair<QString, int>> sorted;
+	for (auto it = wordFreq.constBegin(); it != wordFreq.constEnd(); ++it) {
+		sorted.append({it.key(), it.value()});
+	}
+	std::sort(sorted.begin(), sorted.end(), [](const auto &a, const auto &b) {
+		return a.second > b.second;
+	});
+
+	// Take top N*3 words and group into N topics
+	int wordsPerTopic = 3;
+	for (int t = 0; t < numTopics && t * wordsPerTopic < sorted.size(); ++t) {
+		QJsonObject topic;
+		topic["topic_id"] = t;
+
+		QJsonArray keyTerms;
+		for (int w = 0; w < wordsPerTopic && (t * wordsPerTopic + w) < sorted.size(); ++w) {
+			int idx = t * wordsPerTopic + w;
+			keyTerms.append(sorted[idx].first);
+		}
+		topic["key_terms"] = keyTerms;
+		topic["label"] = sorted[t * wordsPerTopic].first;
+		topic["frequency"] = sorted[t * wordsPerTopic].second;
+		topics.append(topic);
+	}
+
+	result["indexed_messages"] = indexedCount;
+	result["messages_analyzed"] = messagesAnalyzed;
 	result["success"] = true;
 	result["topics"] = topics;
-	result["method"] = "keyword_frequency";
+	result["method"] = usingFts ? "keyword_frequency_fts" : "keyword_frequency_db";
 
 	return result;
 }
@@ -286,76 +355,320 @@ QJsonObject Server::toolDetectTopics(const QJsonObject &args) {
 QJsonObject Server::toolClassifyIntent(const QJsonObject &args) {
 	QString text = args["text"].toString();
 
-	if (!_semanticSearch) {
+	if (text.isEmpty()) {
 		QJsonObject result;
-		result["error"] = "Semantic search not available";
-		result["text"] = text;
+		result["error"] = "Missing text parameter";
+		result["success"] = false;
 		return result;
 	}
 
-	SearchIntent intent = _semanticSearch->classifyIntent(text);
+	// Try semantic search component first
+	if (_semanticSearch) {
+		SearchIntent intent = _semanticSearch->classifyIntent(text);
 
-	QString intentStr;
-	switch (intent) {
-		case SearchIntent::Question: intentStr = "question"; break;
-		case SearchIntent::Answer: intentStr = "answer"; break;
-		case SearchIntent::Statement: intentStr = "statement"; break;
-		case SearchIntent::Command: intentStr = "command"; break;
-		case SearchIntent::Greeting: intentStr = "greeting"; break;
-		case SearchIntent::Farewell: intentStr = "farewell"; break;
-		case SearchIntent::Agreement: intentStr = "agreement"; break;
-		case SearchIntent::Disagreement: intentStr = "disagreement"; break;
-		default: intentStr = "other"; break;
+		QString intentStr;
+		switch (intent) {
+			case SearchIntent::Question: intentStr = "question"; break;
+			case SearchIntent::Answer: intentStr = "answer"; break;
+			case SearchIntent::Statement: intentStr = "statement"; break;
+			case SearchIntent::Command: intentStr = "command"; break;
+			case SearchIntent::Greeting: intentStr = "greeting"; break;
+			case SearchIntent::Farewell: intentStr = "farewell"; break;
+			case SearchIntent::Agreement: intentStr = "agreement"; break;
+			case SearchIntent::Disagreement: intentStr = "disagreement"; break;
+			default: intentStr = "other"; break;
+		}
+
+		QJsonObject result;
+		result["text"] = text;
+		result["intent"] = intentStr;
+		result["success"] = true;
+		return result;
+	}
+
+	// Fallback: rule-based intent classification
+	QString lower = text.trimmed().toLower();
+
+	QString intentStr = "statement";
+	double confidence = 0.6;
+	QJsonArray signals;
+
+	// Question detection
+	if (lower.endsWith("?")
+		|| lower.startsWith("what ") || lower.startsWith("who ")
+		|| lower.startsWith("where ") || lower.startsWith("when ")
+		|| lower.startsWith("why ") || lower.startsWith("how ")
+		|| lower.startsWith("which ") || lower.startsWith("is ")
+		|| lower.startsWith("are ") || lower.startsWith("can ")
+		|| lower.startsWith("could ") || lower.startsWith("would ")
+		|| lower.startsWith("do ") || lower.startsWith("does ")
+		|| lower.startsWith("did ") || lower.startsWith("will ")) {
+		intentStr = "question";
+		confidence = 0.85;
+		signals.append("interrogative_pattern");
+	}
+	// Command detection
+	else if (lower.startsWith("please ") || lower.startsWith("send ")
+		|| lower.startsWith("show ") || lower.startsWith("get ")
+		|| lower.startsWith("find ") || lower.startsWith("search ")
+		|| lower.startsWith("list ") || lower.startsWith("create ")
+		|| lower.startsWith("delete ") || lower.startsWith("update ")
+		|| lower.startsWith("set ") || lower.startsWith("stop ")
+		|| lower.startsWith("start ") || lower.startsWith("run ")
+		|| lower.startsWith("open ") || lower.startsWith("close ")
+		|| lower.startsWith("help ") || lower.startsWith("/")) {
+		intentStr = "command";
+		confidence = 0.8;
+		signals.append("imperative_pattern");
+	}
+	// Greeting detection
+	else if (lower.startsWith("hi") || lower.startsWith("hello")
+		|| lower.startsWith("hey") || lower.startsWith("good morning")
+		|| lower.startsWith("good afternoon") || lower.startsWith("good evening")
+		|| lower == "yo" || lower == "sup" || lower.startsWith("greetings")) {
+		intentStr = "greeting";
+		confidence = 0.9;
+		signals.append("greeting_keyword");
+	}
+	// Farewell detection
+	else if (lower.startsWith("bye") || lower.startsWith("goodbye")
+		|| lower.startsWith("good night") || lower.startsWith("see you")
+		|| lower.startsWith("take care") || lower == "later"
+		|| lower.startsWith("cya") || lower.startsWith("gotta go")) {
+		intentStr = "farewell";
+		confidence = 0.9;
+		signals.append("farewell_keyword");
+	}
+	// Agreement detection
+	else if (lower == "yes" || lower == "yeah" || lower == "yep"
+		|| lower == "sure" || lower == "ok" || lower == "okay"
+		|| lower == "agreed" || lower == "exactly" || lower == "right"
+		|| lower.startsWith("i agree") || lower.startsWith("sounds good")
+		|| lower == "definitely" || lower == "absolutely") {
+		intentStr = "agreement";
+		confidence = 0.85;
+		signals.append("agreement_keyword");
+	}
+	// Disagreement detection
+	else if (lower == "no" || lower == "nope" || lower == "nah"
+		|| lower.startsWith("i disagree") || lower.startsWith("i don't think")
+		|| lower.startsWith("that's wrong") || lower.startsWith("not really")
+		|| lower.startsWith("actually,") || lower == "wrong") {
+		intentStr = "disagreement";
+		confidence = 0.85;
+		signals.append("disagreement_keyword");
+	}
+
+	// Check for exclamation (strong statement)
+	if (lower.endsWith("!") && intentStr == "statement") {
+		confidence = 0.7;
+		signals.append("exclamation");
 	}
 
 	QJsonObject result;
 	result["text"] = text;
 	result["intent"] = intentStr;
-
+	result["confidence"] = confidence;
+	result["signals"] = signals;
+	result["method"] = "rule_based";
+	result["success"] = true;
 	return result;
 }
 
 QJsonObject Server::toolExtractEntities(const QJsonObject &args) {
 	QString text = args["text"].toString();
 
-	if (!_semanticSearch) {
+	if (text.isEmpty()) {
 		QJsonObject result;
-		result["error"] = "Semantic search not available";
-		result["text"] = text;
+		result["error"] = "Missing text parameter";
+		result["success"] = false;
 		return result;
 	}
 
-	auto entities = _semanticSearch->extractEntities(text);
+	// Try semantic search component first
+	if (_semanticSearch) {
+		auto entities = _semanticSearch->extractEntities(text);
 
-	QJsonArray entitiesArray;
-	for (const auto &entity : entities) {
-		QJsonObject e;
+		QJsonArray entitiesArray;
+		for (const auto &entity : entities) {
+			QJsonObject e;
 
-		QString typeStr;
-		switch (entity.type) {
-			case EntityType::UserMention: typeStr = "user_mention"; break;
-			case EntityType::ChatMention: typeStr = "chat_mention"; break;
-			case EntityType::URL: typeStr = "url"; break;
-			case EntityType::Email: typeStr = "email"; break;
-			case EntityType::PhoneNumber: typeStr = "phone_number"; break;
-			case EntityType::Hashtag: typeStr = "hashtag"; break;
-			case EntityType::BotCommand: typeStr = "bot_command"; break;
-			case EntityType::CustomEmoji: typeStr = "custom_emoji"; break;
-			default: typeStr = "unknown"; break;
+			QString typeStr;
+			switch (entity.type) {
+				case EntityType::UserMention: typeStr = "user_mention"; break;
+				case EntityType::ChatMention: typeStr = "chat_mention"; break;
+				case EntityType::URL: typeStr = "url"; break;
+				case EntityType::Email: typeStr = "email"; break;
+				case EntityType::PhoneNumber: typeStr = "phone_number"; break;
+				case EntityType::Hashtag: typeStr = "hashtag"; break;
+				case EntityType::BotCommand: typeStr = "bot_command"; break;
+				case EntityType::CustomEmoji: typeStr = "custom_emoji"; break;
+				default: typeStr = "unknown"; break;
+			}
+
+			e["type"] = typeStr;
+			e["text"] = entity.text;
+			e["offset"] = entity.offset;
+			e["length"] = entity.length;
+			entitiesArray.append(e);
 		}
 
-		e["type"] = typeStr;
-		e["text"] = entity.text;
-		e["offset"] = entity.offset;
-		e["length"] = entity.length;
-		entitiesArray.append(e);
+		QJsonObject result;
+		result["text"] = text;
+		result["entities"] = entitiesArray;
+		result["count"] = entitiesArray.size();
+		result["success"] = true;
+		return result;
+	}
+
+	// Fallback: regex-based entity extraction
+	QJsonArray entitiesArray;
+
+	// @username mentions
+	{
+		QRegularExpression re("@([a-zA-Z][a-zA-Z0-9_]{4,31})");
+		auto it = re.globalMatch(text);
+		while (it.hasNext()) {
+			auto match = it.next();
+			QJsonObject e;
+			e["type"] = "user_mention";
+			e["text"] = match.captured(0);
+			e["value"] = match.captured(1);
+			e["offset"] = match.capturedStart(0);
+			e["length"] = match.capturedLength(0);
+			entitiesArray.append(e);
+		}
+	}
+
+	// URLs
+	{
+		QRegularExpression re("https?://[^\\s<>\"']+|www\\.[^\\s<>\"']+");
+		auto it = re.globalMatch(text);
+		while (it.hasNext()) {
+			auto match = it.next();
+			QJsonObject e;
+			e["type"] = "url";
+			e["text"] = match.captured(0);
+			e["offset"] = match.capturedStart(0);
+			e["length"] = match.capturedLength(0);
+			entitiesArray.append(e);
+		}
+	}
+
+	// Email addresses
+	{
+		QRegularExpression re("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}");
+		auto it = re.globalMatch(text);
+		while (it.hasNext()) {
+			auto match = it.next();
+			QJsonObject e;
+			e["type"] = "email";
+			e["text"] = match.captured(0);
+			e["offset"] = match.capturedStart(0);
+			e["length"] = match.capturedLength(0);
+			entitiesArray.append(e);
+		}
+	}
+
+	// Phone numbers (international format)
+	{
+		QRegularExpression re("\\+?[1-9]\\d{6,14}");
+		auto it = re.globalMatch(text);
+		while (it.hasNext()) {
+			auto match = it.next();
+			QJsonObject e;
+			e["type"] = "phone_number";
+			e["text"] = match.captured(0);
+			e["offset"] = match.capturedStart(0);
+			e["length"] = match.capturedLength(0);
+			entitiesArray.append(e);
+		}
+	}
+
+	// Hashtags
+	{
+		QRegularExpression re("#([a-zA-Z][a-zA-Z0-9_]+)");
+		auto it = re.globalMatch(text);
+		while (it.hasNext()) {
+			auto match = it.next();
+			QJsonObject e;
+			e["type"] = "hashtag";
+			e["text"] = match.captured(0);
+			e["value"] = match.captured(1);
+			e["offset"] = match.capturedStart(0);
+			e["length"] = match.capturedLength(0);
+			entitiesArray.append(e);
+		}
+	}
+
+	// Bot commands
+	{
+		QRegularExpression re("/([a-zA-Z][a-zA-Z0-9_]{0,63})");
+		auto it = re.globalMatch(text);
+		while (it.hasNext()) {
+			auto match = it.next();
+			QJsonObject e;
+			e["type"] = "bot_command";
+			e["text"] = match.captured(0);
+			e["value"] = match.captured(1);
+			e["offset"] = match.capturedStart(0);
+			e["length"] = match.capturedLength(0);
+			entitiesArray.append(e);
+		}
+	}
+
+	// TON/crypto addresses (EQ... or UQ...)
+	{
+		QRegularExpression re("(EQ|UQ)[A-Za-z0-9_-]{46}");
+		auto it = re.globalMatch(text);
+		while (it.hasNext()) {
+			auto match = it.next();
+			QJsonObject e;
+			e["type"] = "crypto_address";
+			e["text"] = match.captured(0);
+			e["offset"] = match.capturedStart(0);
+			e["length"] = match.capturedLength(0);
+			entitiesArray.append(e);
+		}
+	}
+
+	// Dates (YYYY-MM-DD, DD/MM/YYYY, etc.)
+	{
+		QRegularExpression re("\\d{4}-\\d{2}-\\d{2}|\\d{1,2}/\\d{1,2}/\\d{2,4}");
+		auto it = re.globalMatch(text);
+		while (it.hasNext()) {
+			auto match = it.next();
+			QJsonObject e;
+			e["type"] = "date";
+			e["text"] = match.captured(0);
+			e["offset"] = match.capturedStart(0);
+			e["length"] = match.capturedLength(0);
+			entitiesArray.append(e);
+		}
+	}
+
+	// Monetary amounts ($100, 50 USD, 1.5 TON, etc.)
+	{
+		QRegularExpression re("\\$[\\d,.]+|[\\d,.]+\\s*(USD|EUR|GBP|TON|BTC|ETH|RUB)\\b",
+			QRegularExpression::CaseInsensitiveOption);
+		auto it = re.globalMatch(text);
+		while (it.hasNext()) {
+			auto match = it.next();
+			QJsonObject e;
+			e["type"] = "monetary_amount";
+			e["text"] = match.captured(0);
+			e["offset"] = match.capturedStart(0);
+			e["length"] = match.capturedLength(0);
+			entitiesArray.append(e);
+		}
 	}
 
 	QJsonObject result;
 	result["text"] = text;
 	result["entities"] = entitiesArray;
 	result["count"] = entitiesArray.size();
-
+	result["method"] = "regex";
+	result["success"] = true;
 	return result;
 }
 

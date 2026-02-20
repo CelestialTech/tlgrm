@@ -48,6 +48,8 @@ class RBAC;
 class VoiceTranscription;
 class TextToSpeech;
 class LocalLLM;
+class VideoGenerator;
+class TonWallet;
 class BotManager;
 class CacheManager;
 class GradualArchiver;
@@ -656,6 +658,8 @@ private:
 	std::unique_ptr<VoiceTranscription> _voiceTranscription;
 	std::unique_ptr<TextToSpeech> _textToSpeech;
 	std::unique_ptr<LocalLLM> _localLLM;
+	std::unique_ptr<VideoGenerator> _videoGenerator;
+	std::unique_ptr<TonWallet> _tonWallet;
 	std::unique_ptr<BotManager> _botManager;
 	std::unique_ptr<CacheManager> _cache;
 	std::unique_ptr<GradualArchiver> _gradualArchiver;
