@@ -5,34 +5,34 @@
 -r requirements-minimal.txt
 
 # AI/ML Core
-transformers>=4.35.0
-sentence-transformers>=2.2.2
-torch>=2.1.0
-langchain>=0.1.0
-langchain-community>=0.0.10
+transformers==4.47.1
+sentence-transformers==3.3.1
+torch==2.5.1
+langchain==0.3.13
+langchain-community==0.3.13
 
 # Vector Database
-chromadb>=0.4.18
-faiss-cpu>=1.7.4  # Use faiss-gpu if CUDA available
+chromadb==0.5.23
+faiss-cpu==1.9.0.post1
 
 # NLP & Text Processing
-spacy>=3.7.0
-nltk>=3.8.1
-tiktoken>=0.5.1
+spacy==3.8.3
+nltk==3.9.1
+tiktoken==0.8.0
 
 # Data Processing
-numpy>=1.24.0
-pandas>=2.1.0
-scikit-learn>=1.3.0
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.6.0
 
 # Additional APIs (optional)
-openai>=1.3.0  # If using OpenAI models
+openai==1.58.1
 
 # Utilities
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
-loguru>=0.7.2
-typer>=0.9.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+loguru==0.7.3
+typer==0.15.1
 
 # Monitoring
-prometheus-client>=0.19.0
+prometheus-client==0.21.1

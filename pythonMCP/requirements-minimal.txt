@@ -3,28 +3,28 @@
 # Install: pip install -r requirements-minimal.txt
 
 # MCP SDK
-mcp>=1.0.0
+mcp==1.2.0
 
 # Telegram integration (MTProto - full client access)
-pyrogram>=2.0.0
-tgcrypto>=1.2.5  # Speeds up Pyrogram encryption
+pyrogram==2.0.106
+tgcrypto==1.2.5
 
 # Configuration
-python-dotenv>=1.0.0
-toml>=0.10.2
+python-dotenv==1.0.1
+toml==0.10.2
 
 # Logging
-structlog>=23.0.0
-rich>=13.0.0
+structlog==24.4.0
+rich==13.9.4
 
 # Async utilities
-aiofiles>=23.0.0
-aiohttp>=3.9.0
+aiofiles==24.1.0
+aiohttp==3.11.11
 
 # Optional: Debug dashboard
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
 
 # Development tools
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
+pytest==8.3.4
+pytest-asyncio==0.24.0
