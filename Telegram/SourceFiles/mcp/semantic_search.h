@@ -6,6 +6,9 @@
 #include <QtCore/QObject>
 #include <QtCore/QString>
 #include <QtCore/QVector>
+#include <QtCore/QHash>
+#include <QtCore/QSet>
+#include <QtCore/QDateTime>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonArray>
 #include <QtSql/QSqlDatabase>
@@ -168,18 +171,20 @@ private:
 	QVector<Entity> extractHashtags(const QString &text) const;
 	QVector<Entity> extractBotCommands(const QString &text) const;
 
+	// Vocabulary / IDF management
+	void buildVocabulary();
+
 	ChatArchiver *_archiver;
 	bool _isInitialized = false;
 
 	// Model configuration
 	QString _modelPath;
-	int _embeddingDimensions = 384;  // Default for all-MiniLM-L6-v2
+	int _embeddingDimensions = 384;
 
-	// NOTE: Actual embedding generation would require integration with:
-	// - Python subprocess calling sentence-transformers
-	// - ONNX Runtime for C++ inference
-	// - External HTTP API (OpenAI, Cohere, etc.)
-	// For now, this is a framework implementation
+	// TF-IDF vocabulary: term -> dimension index
+	QHash<QString, int> _vocabulary;
+	// IDF scores: term -> log(N/df)
+	QHash<QString, float> _idfScores;
 };
 
 } // namespace MCP

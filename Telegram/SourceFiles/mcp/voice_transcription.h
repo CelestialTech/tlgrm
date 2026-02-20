@@ -100,9 +100,6 @@ private:
 	QString getModelName(WhisperModelSize size) const;
 	float estimateConfidence(const QString &text) const;
 
-	// OpenAI API helpers
-	QJsonObject callOpenAIWhisperAPI(const QString &audioFilePath);
-
 	// Whisper.cpp helpers
 	QString executeWhisperCpp(const QString &audioPath, const QString &modelPath);
 

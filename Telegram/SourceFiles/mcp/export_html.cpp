@@ -381,9 +381,23 @@ MediaData HtmlExporter::downloadMedia(HistoryItem *item) {
 				file.close();
 			}
 		}
-	} else if (media->photo()) {
-		// Photo export requires async loading - skip for now
-		// Photos are typically embedded in archive data already
+	} else if (const auto photo = media->photo()) {
+		auto photoMedia = photo->createMediaView();
+		if (photoMedia && photoMedia->loaded()) {
+			QByteArray bytes = photoMedia->imageBytes(Data::PhotoSize::Large);
+			if (bytes.isEmpty()) {
+				bytes = photoMedia->imageBytes(Data::PhotoSize::Small);
+			}
+			if (!bytes.isEmpty()) {
+				result.data = bytes;
+				result.mimeType = "image/jpeg";
+				result.filename = QString("photo_%1.jpg").arg(photo->id);
+				result.size = bytes.size();
+				result.isDocument = false;
+				result.isVideo = false;
+				result.downloaded = true;
+			}
+		}
 	}
 
 	return result;

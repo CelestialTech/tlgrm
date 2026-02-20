@@ -8,6 +8,8 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonArray>
+#include <QtCore/QRegularExpression>
+#include <QtConcurrent/QtConcurrent>
 #include <QtNetwork/QNetworkRequest>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QHttpMultiPart>
@@ -99,11 +101,18 @@ TranscriptionResult VoiceTranscription::transcribe(const QString &audioFilePath)
 	return result;
 }
 
-// Async transcription (returns immediately)
+// Async transcription — runs synchronous version on a worker thread
 TranscriptionResult VoiceTranscription::transcribeAsync(const QString &audioFilePath) {
-	// TODO: Implement async transcription in separate thread
-	// For now, just call synchronous version
-	return transcribe(audioFilePath);
+	// Launch transcription on a background thread via QtConcurrent
+	QFuture<TranscriptionResult> future = QtConcurrent::run([this, audioFilePath]() {
+		return transcribe(audioFilePath);
+	});
+
+	// Return an in-progress result; callers should connect to transcriptionCompleted signal
+	TranscriptionResult pending;
+	pending.success = false;
+	pending.error = "Transcription in progress (async)";
+	return pending;
 }
 
 // OpenAI Whisper API implementation
@@ -375,8 +384,33 @@ QString VoiceTranscription::prepareAudioFile(const QString &inputPath) {
 		return QString();
 	}
 
-	// For now, assume file is in correct format
-	// TODO: Implement audio format conversion if needed (e.g., using FFmpeg)
+	// Whisper accepts wav, mp3, ogg, flac, m4a directly
+	static const QStringList directFormats = { "wav", "mp3", "ogg", "flac", "m4a", "webm" };
+	QString suffix = fileInfo.suffix().toLower();
+	if (directFormats.contains(suffix)) {
+		return inputPath;
+	}
+
+	// For other formats (e.g., Telegram's .oga opus files), convert to WAV via FFmpeg
+	QString outputPath = fileInfo.absolutePath() + "/" + fileInfo.completeBaseName() + "_converted.wav";
+
+	QProcess ffmpeg;
+	QStringList args;
+	args << "-i" << inputPath
+	     << "-ar" << "16000"   // 16kHz sample rate for Whisper
+	     << "-ac" << "1"       // mono
+	     << "-y"               // overwrite
+	     << outputPath;
+
+	ffmpeg.start("ffmpeg", args);
+	ffmpeg.waitForFinished(30000); // 30s timeout
+
+	if (ffmpeg.exitStatus() == QProcess::NormalExit && ffmpeg.exitCode() == 0) {
+		return outputPath;
+	}
+
+	// FFmpeg not available or failed — try with original file anyway
+	qWarning() << "[VoiceTranscription] FFmpeg conversion failed, using original:" << inputPath;
 	return inputPath;
 }
 
@@ -392,19 +426,36 @@ QString VoiceTranscription::getModelName(WhisperModelSize size) const {
 }
 
 float VoiceTranscription::estimateConfidence(const QString &text) const {
-	// Simple heuristic: longer, coherent text = higher confidence
-	// TODO: Implement proper confidence scoring
 	if (text.isEmpty()) return 0.0f;
-	if (text.length() < 10) return 0.5f;
-	if (text.length() < 50) return 0.7f;
-	return 0.9f;
-}
 
-// OpenAI API helper
-QJsonObject VoiceTranscription::callOpenAIWhisperAPI(const QString &audioFilePath) {
-	// Implemented in transcribeWithOpenAI
-	Q_UNUSED(audioFilePath);
-	return QJsonObject();
+	float confidence = 0.5f;
+
+	// Length factor: longer transcriptions are generally more reliable
+	int len = text.length();
+	if (len >= 50) confidence += 0.15f;
+	else if (len >= 20) confidence += 0.1f;
+
+	// Word count factor: multiple words suggest coherent speech
+	int wordCount = text.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts).size();
+	if (wordCount >= 5) confidence += 0.1f;
+	if (wordCount >= 15) confidence += 0.05f;
+
+	// Punctuation and capitalization suggest structured output
+	if (text.contains('.') || text.contains(',') || text.contains('!') || text.contains('?')) {
+		confidence += 0.05f;
+	}
+
+	// Penalize very short single-word results (likely noise)
+	if (wordCount <= 1 && len < 5) {
+		confidence -= 0.2f;
+	}
+
+	// Penalize if the text is all-uppercase (might be noise or [BLANK_AUDIO])
+	if (text == text.toUpper() && len > 3) {
+		confidence -= 0.15f;
+	}
+
+	return qBound(0.0f, confidence, 1.0f);
 }
 
 // Whisper.cpp helper

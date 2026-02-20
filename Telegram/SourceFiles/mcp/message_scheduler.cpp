@@ -497,20 +497,18 @@ void MessageScheduler::sendScheduledMessage(ScheduledMessage &message) {
 		return;
 	}
 
-	// Use apiwrap to send message
-	// Build the message
+	// Build and send the message using the same pattern as MCP::Server::toolSendMessage
 	Api::SendAction action(history);
-	action.replyTo = {}; // No reply
-	action.options = {};
 
-	// TODO: Implement message sending with correct tdesktop API
-	// MessageToSend requires: SendAction with textWithTags (not TextWithEntities)
-	// and webPage draft information
-	qWarning() << "TODO: Implement sendMessage with correct tdesktop API";
-	qWarning() << "MessageScheduler: Stub - message not actually sent";
+	Api::MessageToSend messageToSend(action);
+	messageToSend.textWithTags = TextWithTags{ message.text };
 
-	// For now, just mark as failed so we can compile
-	handleSendResult(message.scheduleId, false, "Not implemented: sendMessage API");
+	_session->api().sendMessage(std::move(messageToSend));
+
+	qInfo() << "MessageScheduler: Sent scheduled message" << message.scheduleId
+	        << "to chat" << message.chatId;
+
+	handleSendResult(message.scheduleId, true, QString());
 }
 
 void MessageScheduler::retryFailedMessage(ScheduledMessage &message) {
@@ -746,7 +744,14 @@ bool MessageScheduler::validateChatId(qint64 chatId, QString &error) const {
 		return false;
 	}
 
-	// TODO: Check if chat exists in session
+	if (_session) {
+		auto peer = _session->data().peer(PeerId(chatId));
+		if (!peer) {
+			error = "Chat not found";
+			return false;
+		}
+	}
+
 	return true;
 }
 

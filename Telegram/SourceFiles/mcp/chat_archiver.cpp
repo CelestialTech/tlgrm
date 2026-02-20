@@ -9,6 +9,7 @@
 #include "data/data_channel.h"
 #include "data/data_messages.h"
 #include "data/data_document.h"
+#include "data/data_chat_filters.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
@@ -390,17 +391,68 @@ bool ChatArchiver::archiveMessage(HistoryItem *message) {
 }
 
 bool ChatArchiver::archiveChat(qint64 chatId, int messageLimit) {
-	// This would fetch messages from Data::Session and archive them
-	// Implementation requires access to tdesktop's message history APIs
-	// Placeholder for now
-	Q_UNUSED(chatId);
-	Q_UNUSED(messageLimit);
-	return false;
+	if (!_isRunning || !_session) {
+		return false;
+	}
+
+	auto peer = _session->peer(PeerId(chatId));
+	if (!peer) {
+		qWarning() << "[ChatArchiver] Peer not found:" << chatId;
+		return false;
+	}
+
+	auto history = peer->owner().history(peer);
+	if (!history) {
+		return false;
+	}
+
+	int archived = 0;
+	int limit = (messageLimit <= 0) ? INT_MAX : messageLimit;
+
+	// Iterate through history blocks in reverse (newest first)
+	for (auto blockIt = history->blocks.rbegin();
+	     blockIt != history->blocks.rend() && archived < limit;
+	     ++blockIt) {
+		auto *block = blockIt->get();
+		for (auto itemIt = block->messages.rbegin();
+		     itemIt != block->messages.rend() && archived < limit;
+		     ++itemIt) {
+			auto *view = itemIt->get();
+			if (auto *item = view->data()) {
+				if (archiveMessage(item)) {
+					archived++;
+				}
+			}
+		}
+	}
+
+	if (archived > 0) {
+		Q_EMIT chatArchived(chatId, archived);
+	}
+
+	qInfo() << "[ChatArchiver] Archived" << archived << "messages from chat" << chatId;
+	return archived > 0;
 }
 
 bool ChatArchiver::archiveAllChats(int messagesPerChat) {
-	Q_UNUSED(messagesPerChat);
-	return false;
+	if (!_isRunning || !_session) {
+		return false;
+	}
+
+	int totalArchived = 0;
+	auto &chatsList = _session->chatsList()->indexed()->all();
+
+	for (const auto &row : chatsList) {
+		if (const auto history = row->history()) {
+			qint64 chatId = history->peer->id.value;
+			if (archiveChat(chatId, messagesPerChat)) {
+				totalArchived++;
+			}
+		}
+	}
+
+	qInfo() << "[ChatArchiver] Archived" << totalArchived << "chats";
+	return totalArchived > 0;
 }
 
 bool ChatArchiver::archiveEphemeralMessage(
@@ -478,9 +530,13 @@ bool ChatArchiver::isEphemeral(HistoryItem *message) const {
 		return true;
 	}
 
-	// Check for view-once media
-	// This would require accessing tdesktop's media flags
-	// Placeholder implementation
+	// Check for view-once media (photos/videos sent with "view once")
+	if (const auto media = item->media()) {
+		if (media->ttlSeconds() > 0) {
+			return true;
+		}
+	}
+
 	return false;
 }
 
@@ -827,10 +883,47 @@ QJsonObject ChatArchiver::messageToJson(const QSqlQuery &query) const {
 }
 
 QString ChatArchiver::downloadMedia(HistoryItem *message) {
-	// Placeholder: Implement actual media download
-	// This would use tdesktop's media download APIs
-	Q_UNUSED(message);
-	return QString();
+	if (!message || !message->media()) {
+		return QString();
+	}
+
+	const auto media = message->media();
+	const auto document = media->document();
+
+	if (!document) {
+		// Photo or other non-document media — extract path from local cache
+		// Photos are auto-cached by tdesktop; we reference the cache location
+		return QString();
+	}
+
+	// Check if document is already downloaded locally
+	const auto &location = document->location(true);
+	if (!location.isEmpty()) {
+		return location.name();
+	}
+
+	// Document exists but not downloaded — return the file reference info
+	// Actual download requires async API call which we can't block on here
+	QString extension;
+	if (!document->filename().isEmpty()) {
+		QFileInfo fi(document->filename());
+		extension = fi.suffix();
+	} else if (!document->mimeString().isEmpty()) {
+		// Derive extension from MIME type
+		static const QHash<QString, QString> mimeToExt = {
+			{"audio/ogg", "ogg"},
+			{"audio/mpeg", "mp3"},
+			{"video/mp4", "mp4"},
+			{"image/jpeg", "jpg"},
+			{"image/png", "png"},
+			{"application/pdf", "pdf"},
+		};
+		extension = mimeToExt.value(document->mimeString(), "bin");
+	}
+
+	qint64 chatId = message->history()->peer->id.value;
+	qint64 messageId = message->id.bare;
+	return getMediaPath(chatId, messageId, extension);
 }
 
 bool ChatArchiver::exportToJSONL(qint64 chatId, const QString &outputPath,
@@ -882,39 +975,177 @@ bool ChatArchiver::exportToJSONL(qint64 chatId, const QString &outputPath,
 
 bool ChatArchiver::exportToJSON(qint64 chatId, const QString &outputPath,
                                 const QDateTime &start, const QDateTime &end) {
-	Q_UNUSED(chatId);
-	Q_UNUSED(outputPath);
-	Q_UNUSED(start);
-	Q_UNUSED(end);
-	// Similar to JSONL but wrap in array
-	return false;
+	QFile file(outputPath);
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+		return false;
+	}
+
+	QTextStream out(&file);
+
+	QString sql = "SELECT * FROM messages WHERE chat_id = :chat_id";
+	QStringList conditions;
+	if (start.isValid()) {
+		conditions << "timestamp >= :start";
+	}
+	if (end.isValid()) {
+		conditions << "timestamp <= :end";
+	}
+	if (!conditions.isEmpty()) {
+		sql += " AND " + conditions.join(" AND ");
+	}
+	sql += " ORDER BY timestamp ASC";
+
+	QSqlQuery query(_db);
+	query.prepare(sql);
+	query.bindValue(":chat_id", chatId);
+	if (start.isValid()) {
+		query.bindValue(":start", start.toSecsSinceEpoch());
+	}
+	if (end.isValid()) {
+		query.bindValue(":end", end.toSecsSinceEpoch());
+	}
+
+	if (!query.exec()) {
+		return false;
+	}
+
+	QJsonArray messages;
+	while (query.next()) {
+		messages.append(messageToJson(query));
+	}
+
+	QJsonObject root;
+	root["chat_id"] = chatId;
+	root["message_count"] = messages.size();
+	root["exported_at"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+	root["messages"] = messages;
+
+	out << QJsonDocument(root).toJson(QJsonDocument::Indented);
+	file.close();
+	return true;
 }
 
 bool ChatArchiver::exportToCSV(qint64 chatId, const QString &outputPath,
                                const QDateTime &start, const QDateTime &end) {
-	Q_UNUSED(chatId);
-	Q_UNUSED(outputPath);
-	Q_UNUSED(start);
-	Q_UNUSED(end);
-	// CSV export implementation
-	return false;
+	QFile file(outputPath);
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+		return false;
+	}
+
+	QTextStream out(&file);
+
+	// CSV header
+	out << "message_id,chat_id,user_id,username,first_name,last_name,content,timestamp,date,type,has_media,is_forwarded,is_reply\n";
+
+	QString sql = "SELECT * FROM messages WHERE chat_id = :chat_id";
+	QStringList conditions;
+	if (start.isValid()) {
+		conditions << "timestamp >= :start";
+	}
+	if (end.isValid()) {
+		conditions << "timestamp <= :end";
+	}
+	if (!conditions.isEmpty()) {
+		sql += " AND " + conditions.join(" AND ");
+	}
+	sql += " ORDER BY timestamp ASC";
+
+	QSqlQuery query(_db);
+	query.prepare(sql);
+	query.bindValue(":chat_id", chatId);
+	if (start.isValid()) {
+		query.bindValue(":start", start.toSecsSinceEpoch());
+	}
+	if (end.isValid()) {
+		query.bindValue(":end", end.toSecsSinceEpoch());
+	}
+
+	if (!query.exec()) {
+		return false;
+	}
+
+	while (query.next()) {
+		auto escapeCsv = [](const QString &s) -> QString {
+			if (s.contains(',') || s.contains('"') || s.contains('\n')) {
+				QString escaped = s;
+				escaped.replace('"', "\"\"");
+				return '"' + escaped + '"';
+			}
+			return s;
+		};
+
+		out << query.value("message_id").toLongLong() << ","
+			<< query.value("chat_id").toLongLong() << ","
+			<< query.value("user_id").toLongLong() << ","
+			<< escapeCsv(query.value("username").toString()) << ","
+			<< escapeCsv(query.value("first_name").toString()) << ","
+			<< escapeCsv(query.value("last_name").toString()) << ","
+			<< escapeCsv(query.value("content").toString()) << ","
+			<< query.value("timestamp").toLongLong() << ","
+			<< escapeCsv(query.value("date").toString()) << ","
+			<< escapeCsv(query.value("message_type").toString()) << ","
+			<< (query.value("has_media").toBool() ? "true" : "false") << ","
+			<< (query.value("is_forwarded").toBool() ? "true" : "false") << ","
+			<< (query.value("is_reply").toBool() ? "true" : "false") << "\n";
+	}
+
+	file.close();
+	return true;
 }
 
 void ChatArchiver::updateDailyStats(qint64 chatId, const QDate &date) {
-	Q_UNUSED(chatId);
-	Q_UNUSED(date);
-	// Implementation for daily stats update
+	QString dateStr = date.toString("yyyy-MM-dd");
+
+	QSqlQuery query(_db);
+	query.prepare(
+		"INSERT OR REPLACE INTO message_stats_daily "
+		"(date, chat_id, message_count, unique_users, avg_message_length, total_words, media_count) "
+		"SELECT :date, :chat_id, "
+		"COUNT(*), COUNT(DISTINCT user_id), "
+		"AVG(LENGTH(content)), SUM(LENGTH(content) - LENGTH(REPLACE(content, ' ', '')) + 1), "
+		"SUM(CASE WHEN has_media = 1 THEN 1 ELSE 0 END) "
+		"FROM messages WHERE chat_id = :chat_id2 "
+		"AND date(timestamp, 'unixepoch') = :date2");
+	query.bindValue(":date", dateStr);
+	query.bindValue(":chat_id", chatId);
+	query.bindValue(":chat_id2", chatId);
+	query.bindValue(":date2", dateStr);
+	query.exec();
 }
 
 void ChatArchiver::updateUserActivity(qint64 userId, qint64 chatId) {
-	Q_UNUSED(userId);
-	Q_UNUSED(chatId);
-	// Implementation for user activity update
+	QSqlQuery query(_db);
+	query.prepare(
+		"INSERT OR REPLACE INTO user_activity_summary "
+		"(user_id, chat_id, message_count, word_count, avg_message_length, "
+		"first_message_date, last_message_date, days_active, updated_at) "
+		"SELECT :user_id, :chat_id, "
+		"COUNT(*), "
+		"SUM(LENGTH(content) - LENGTH(REPLACE(content, ' ', '')) + 1), "
+		"AVG(LENGTH(content)), "
+		"MIN(timestamp), MAX(timestamp), "
+		"COUNT(DISTINCT date(timestamp, 'unixepoch')), "
+		"strftime('%s', 'now') "
+		"FROM messages WHERE user_id = :user_id2 AND chat_id = :chat_id2");
+	query.bindValue(":user_id", userId);
+	query.bindValue(":chat_id", chatId);
+	query.bindValue(":user_id2", userId);
+	query.bindValue(":chat_id2", chatId);
+	query.exec();
 }
 
 void ChatArchiver::updateChatActivity(qint64 chatId) {
-	Q_UNUSED(chatId);
-	// Implementation for chat activity update
+	QSqlQuery query(_db);
+	query.prepare(
+		"INSERT OR REPLACE INTO chat_activity_summary "
+		"(chat_id, total_messages, unique_users, "
+		"first_message_date, last_message_date, updated_at) "
+		"SELECT :chat_id, COUNT(*), COUNT(DISTINCT user_id), "
+		"MIN(timestamp), MAX(timestamp), strftime('%s', 'now') "
+		"FROM messages WHERE chat_id = :chat_id2");
+	query.bindValue(":chat_id", chatId);
+	query.bindValue(":chat_id2", chatId);
+	query.exec();
 }
 
 // Slots
@@ -923,8 +1154,19 @@ void ChatArchiver::onNewMessage(HistoryItem *message) {
 }
 
 void ChatArchiver::onMessageEdited(HistoryItem *message) {
-	Q_UNUSED(message);
-	// Handle edited messages
+	if (!message || !_isRunning) return;
+
+	qint64 chatId = message->history()->peer->id.value;
+	qint64 messageId = message->id.bare;
+	QString newContent = message->originalText().text;
+
+	QSqlQuery query(_db);
+	query.prepare("UPDATE messages SET content = ?, date = ? WHERE chat_id = ? AND message_id = ?");
+	query.addBindValue(newContent);
+	query.addBindValue(QDateTime::fromSecsSinceEpoch(message->date()).toString(Qt::ISODate));
+	query.addBindValue(chatId);
+	query.addBindValue(messageId);
+	query.exec();
 }
 
 void ChatArchiver::checkForNewMessages() {
@@ -1030,8 +1272,14 @@ bool EphemeralArchiver::detectEphemeralType(
 		return _captureSelfDestruct;
 	}
 
-	// TODO: Detect view-once and vanishing message types
-	// This requires access to tdesktop's internal message flags
+	// Check for view-once media (photos/videos sent as "view once")
+	if (const auto media = item->media()) {
+		if (media->ttlSeconds() > 0) {
+			type = "view_once";
+			ttl = media->ttlSeconds();
+			return _captureViewOnce;
+		}
+	}
 
 	return false;
 }

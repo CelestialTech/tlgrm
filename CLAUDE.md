@@ -93,7 +93,7 @@ Added MCP source files to compilation target:
 ```cmake
 mcp/mcp_bridge.cpp
 mcp/mcp_bridge.h
-mcp/mcp_server.cpp
+mcp/mcp_server_complete.cpp
 mcp/mcp_server.h
 ```
 
@@ -117,15 +117,16 @@ mcp/mcp_server.h
 - `handleInitialize()`, `handleListTools()`, etc.: Protocol method handlers
 - **70+ tool methods**: Core messaging, profile, privacy, security, analytics, etc.
 
-#### `Telegram/SourceFiles/mcp/mcp_server.cpp` (~36KB)
-**Purpose**: Main MCP server implementation with real Telegram API integration
+#### `Telegram/SourceFiles/mcp/mcp_server_complete.cpp` (~348KB)
+**Purpose**: Complete MCP server implementation with 430+ tool handlers
 
 **Architecture**:
-1. **Initialization**: Sets up capabilities, registers 30 tools
+1. **Initialization**: Sets up capabilities, registers 220+ tool metadata entries, initializes ~430 handler dispatch table
 2. **Transport Layer**: Handles stdio (HTTP transport TODO)
-3. **Request Handling**: JSON-RPC 2.0 dispatcher
+3. **Request Handling**: JSON-RPC 2.0 dispatcher with O(1) QHash lookup
 4. **Protocol Methods**: Initialize, list tools, call tools, etc.
-5. **Tool Implementations**: Real Telegram API integration (not stubs)
+5. **Tool Implementations**: Real Telegram API integration for core tools, support library delegation for advanced features
+6. **Support Libraries**: Initializes ChatArchiver, Analytics, SemanticSearch, BatchOperations, MessageScheduler, BotManager, RBAC, GradualArchiver in setSession()
 
 **Telegram API Includes**:
 ```cpp

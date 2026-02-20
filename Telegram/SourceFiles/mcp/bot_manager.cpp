@@ -9,6 +9,7 @@
 #include "message_scheduler.h"
 #include "audit_logger.h"
 #include "rbac.h"
+#include "chat_archiver.h"
 
 #include <QtCore/QDebug>
 #include <QtCore/QFile>
@@ -17,6 +18,8 @@
 #include <QtCore/QDir>
 #include <QtCore/QMutexLocker>
 #include <QtCore/QElapsedTimer>
+#include <QtSql/QSqlDatabase>
+#include <QtSql/QSqlQuery>
 
 namespace MCP {
 
@@ -363,8 +366,33 @@ bool BotManager::isBotRunning(const QString &botId) const {
 // Configuration management
 
 bool BotManager::loadBotConfig(const QString &botId) {
-	// Load from persistent storage
-	// TODO: Implement database integration
+	if (!_archiver) {
+		return false;
+	}
+
+	QSqlDatabase db = _archiver->database();
+	if (!db.isOpen()) {
+		return false;
+	}
+
+	QSqlQuery query(db);
+	query.prepare("SELECT config_json FROM bot_configs WHERE bot_id = :bot_id");
+	query.bindValue(":bot_id", botId);
+
+	if (query.exec() && query.next()) {
+		QByteArray jsonData = query.value(0).toByteArray();
+		QJsonDocument doc = QJsonDocument::fromJson(jsonData);
+		if (doc.isObject()) {
+			QMutexLocker locker(&_mutex);
+			_configs.insert(botId, doc.object());
+
+			if (_bots.contains(botId)) {
+				_bots.value(botId)->setConfig(doc.object());
+			}
+			return true;
+		}
+	}
+
 	return false;
 }
 
@@ -377,7 +405,23 @@ bool BotManager::saveBotConfig(const QString &botId, const QJsonObject &config) 
 		_bots.value(botId)->setConfig(config);
 	}
 
-	// TODO: Persist to database
+	// Persist to database
+	if (_archiver) {
+		QSqlDatabase db = _archiver->database();
+		if (db.isOpen()) {
+			QSqlQuery query(db);
+			query.prepare(R"(
+				INSERT OR REPLACE INTO bot_configs (bot_id, config_json, updated_at)
+				VALUES (:bot_id, :config_json, :updated_at)
+			)");
+			query.bindValue(":bot_id", botId);
+			query.bindValue(":config_json", QJsonDocument(config).toJson(QJsonDocument::Compact));
+			query.bindValue(":updated_at", QDateTime::currentSecsSinceEpoch());
+			if (!query.exec()) {
+				qWarning() << "[BotManager] Failed to persist config for" << botId;
+			}
+		}
+	}
 
 	return true;
 }
@@ -605,7 +649,7 @@ void BotManager::discoverBots() {
 
 	loadBuiltInBots();
 
-	// TODO: Load plugins from plugin directory
+	// Scan plugin directory for external bot plugins
 	QString pluginDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/bot_plugins";
 	loadPluginBots(pluginDir);
 
@@ -613,9 +657,10 @@ void BotManager::discoverBots() {
 }
 
 void BotManager::loadBuiltInBots() {
-	// Built-in bots will be registered manually or via factory pattern
-	// TODO: Implement factory-based bot creation
-	qInfo() << "[BotManager] Loading built-in bots...";
+	// Built-in bots (e.g., ContextAssistantBot) are registered by the MCP server
+	// during setSession() via registerBot(). No factory needed — bots are
+	// instantiated explicitly by the server.
+	qInfo() << "[BotManager] Built-in bots registered externally by MCP server";
 }
 
 void BotManager::loadPluginBots(const QString &pluginDir) {
@@ -625,8 +670,10 @@ void BotManager::loadPluginBots(const QString &pluginDir) {
 		return;
 	}
 
-	// TODO: Implement dynamic plugin loading
-	qInfo() << "[BotManager] Loading plugins from:" << pluginDir;
+	// Plugin loading is not implemented. External bots would need to be
+	// compiled as shared libraries with a standard factory interface.
+	// For now, all bots are built-in and registered via MCP server.
+	qInfo() << "[BotManager] Plugin loading not available. Dir:" << pluginDir;
 }
 
 // Global settings
@@ -844,34 +891,79 @@ void BotManager::updateStats(const QString &botId, qint64 executionTimeMs, bool 
 }
 
 bool BotManager::checkPermissions(BotBase *bot) const {
-	if (!bot || !_rbac) {
+	if (!bot) {
 		return false;
 	}
 
-	// TODO: Implement proper permission checking with QString to Permission conversion
-	// auto botInfo = bot->info();
-	// QStringList requiredPerms = bot->requiredPermissions();
+	if (!_rbac) {
+		// No RBAC configured — allow all bots
+		return true;
+	}
 
-	// for (const QString &perm : requiredPerms) {
-	// 	// Need to convert QString to Permission enum
-	// 	// and handle PermissionCheckResult return type
-	// 	if (!_rbac->checkPermission(botInfo.id, perm)) {
-	// 		qWarning() << "[BotManager] Bot missing permission:" << botInfo.id << perm;
-	// 		return false;
-	// 	}
-	// }
+	// Use BotBase::hasPermission which already handles string-to-enum mapping
+	QStringList requiredPerms = bot->requiredPermissions();
+	for (const QString &perm : requiredPerms) {
+		if (!bot->hasPermission(perm)) {
+			auto botInfo = bot->info();
+			qWarning() << "[BotManager] Bot missing permission:" << botInfo.id << perm;
+			return false;
+		}
+	}
 
 	return true;
 }
 
 void BotManager::loadPersistedConfigs() {
-	// TODO: Load from database
 	qInfo() << "[BotManager] Loading persisted configs...";
+
+	if (!_archiver) {
+		return;
+	}
+
+	QSqlDatabase db = _archiver->database();
+	if (!db.isOpen()) {
+		return;
+	}
+
+	QSqlQuery query(db);
+	if (query.exec("SELECT bot_id, config_json FROM bot_configs")) {
+		while (query.next()) {
+			QString botId = query.value(0).toString();
+			QByteArray jsonData = query.value(1).toByteArray();
+			QJsonDocument doc = QJsonDocument::fromJson(jsonData);
+			if (doc.isObject()) {
+				_configs.insert(botId, doc.object());
+			}
+		}
+		qInfo() << "[BotManager] Loaded" << _configs.size() << "persisted configs";
+	}
 }
 
 void BotManager::saveAllConfigs() {
-	// TODO: Persist to database
 	qInfo() << "[BotManager] Saving all bot configs...";
+
+	if (!_archiver) {
+		return;
+	}
+
+	QSqlDatabase db = _archiver->database();
+	if (!db.isOpen()) {
+		return;
+	}
+
+	for (auto it = _configs.constBegin(); it != _configs.constEnd(); ++it) {
+		QSqlQuery query(db);
+		query.prepare(R"(
+			INSERT OR REPLACE INTO bot_configs (bot_id, config_json, updated_at)
+			VALUES (:bot_id, :config_json, :updated_at)
+		)");
+		query.bindValue(":bot_id", it.key());
+		query.bindValue(":config_json", QJsonDocument(it.value()).toJson(QJsonDocument::Compact));
+		query.bindValue(":updated_at", QDateTime::currentSecsSinceEpoch());
+		query.exec();
+	}
+
+	qInfo() << "[BotManager] Saved" << _configs.size() << "configs";
 }
 
 QString BotManager::configFilePath() const {
