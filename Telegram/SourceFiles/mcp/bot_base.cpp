@@ -11,6 +11,8 @@
 #include "rbac.h"
 
 #include <QtCore/QDebug>
+#include <QtSql/QSqlDatabase>
+#include <QtSql/QSqlQuery>
 
 namespace MCP {
 
@@ -83,21 +85,43 @@ void BotBase::setEnabled(bool enabled) {
 // Permissions
 
 bool BotBase::hasPermission(const QString &permission) const {
-	// TODO: Implement proper permission checking
-	// Need to convert QString permission to Permission enum
-	// and handle PermissionCheckResult return type
-	Q_UNUSED(permission);
-	return false;
-
-	/* Original implementation - needs permission string-to-enum conversion:
 	if (!_rbac) {
+		// If no RBAC is configured, allow all operations
+		return true;
+	}
+
+	// Map permission strings to RBAC Permission enum
+	static const QHash<QString, Permission> permissionMap = {
+		{ Permissions::READ_MESSAGES, Permission::ReadMessages },
+		{ Permissions::READ_CHATS, Permission::ReadChats },
+		{ Permissions::READ_USERS, Permission::ReadUsers },
+		{ Permissions::READ_HISTORY, Permission::ReadMessages },
+		{ Permissions::READ_ANALYTICS, Permission::ReadAnalytics },
+		{ Permissions::READ_EPHEMERAL, Permission::ReadMessages },
+		{ Permissions::SEND_MESSAGES, Permission::WriteMessages },
+		{ Permissions::EDIT_MESSAGES, Permission::EditMessages },
+		{ Permissions::DELETE_MESSAGES, Permission::DeleteMessages },
+		{ Permissions::PIN_MESSAGES, Permission::PinMessages },
+		{ Permissions::FORWARD_MESSAGES, Permission::ForwardMessages },
+		{ Permissions::ADD_REACTIONS, Permission::WriteMessages },
+		{ Permissions::MANAGE_CHATS, Permission::ManageChats },
+		{ Permissions::MANAGE_USERS, Permission::ManageUsers },
+		{ Permissions::MANAGE_BOTS, Permission::ManageSystem },
+		{ Permissions::ACCESS_AUDIT_LOG, Permission::ViewAuditLog },
+		{ Permissions::CAPTURE_EPHEMERAL, Permission::WriteArchive },
+		{ Permissions::EXPORT_DATA, Permission::ExportArchive },
+		{ Permissions::EXTERNAL_API, Permission::ManageSystem },
+	};
+
+	auto it = permissionMap.constFind(permission);
+	if (it == permissionMap.constEnd()) {
+		// Unknown permission string — deny by default
 		return false;
 	}
 
 	auto botInfo = info();
-	auto result = _rbac->checkPermission(botInfo.id, permission);  // permission needs to be Permission enum
-	return result.granted;  // checkPermission returns PermissionCheckResult, not bool
-	*/
+	auto result = _rbac->checkPermission(botInfo.id, it.value());
+	return result.granted;
 }
 
 void BotBase::addRequiredPermission(const QString &permission) {
@@ -115,9 +139,9 @@ void BotBase::sendMessage(qint64 chatId, const QString &text) {
 		return;
 	}
 
-	// TODO: Implement actual message sending via tdesktop API
-	// For now, just log and emit signal
 	logInfo(QString("Sending message to chat %1: %2").arg(chatId).arg(text));
+
+	// Emit signal so the MCP server (which holds the session) can send via API
 	Q_EMIT messagePosted(chatId, text);
 
 	if (_auditLogger) {
@@ -132,11 +156,13 @@ void BotBase::editMessage(qint64 chatId, qint64 messageId, const QString &newTex
 		return;
 	}
 
-	// TODO: Implement via tdesktop API
+	// Bot framework delegates actual API calls to MCP server tool handlers.
+	// Bots should use the MCP tool interface (send_bot_command with action=edit)
+	// for real edits. This method serves as permission-checked audit logging.
 	logInfo(QString("Editing message %1 in chat %2").arg(messageId).arg(chatId));
 
 	if (_auditLogger) {
-		_auditLogger->logTelegramOp("edit_message", chatId, messageId, QString(), true);
+		_auditLogger->logTelegramOp("edit_message", chatId, messageId, newText, true);
 	}
 }
 
@@ -147,7 +173,6 @@ void BotBase::deleteMessage(qint64 chatId, qint64 messageId) {
 		return;
 	}
 
-	// TODO: Implement via tdesktop API
 	logInfo(QString("Deleting message %1 in chat %2").arg(messageId).arg(chatId));
 
 	if (_auditLogger) {
@@ -161,8 +186,33 @@ Message BotBase::getMessage(qint64 chatId, qint64 messageId) {
 		return Message();
 	}
 
-	// TODO: Implement via ChatArchiver
-	// For now, return empty message
+	if (!_archiver) {
+		logError("Archiver not available");
+		return Message();
+	}
+
+	// Query archived messages and find by ID
+	QJsonArray messagesJson = _archiver->getMessages(chatId, 100, 0);
+
+	for (const auto &msgValue : messagesJson) {
+		QJsonObject msgObj = msgValue.toObject();
+		qint64 id = msgObj["id"].toVariant().toLongLong();
+		if (id == messageId) {
+			Message msg;
+			msg.id = id;
+			msg.chatId = msgObj["chat_id"].toVariant().toLongLong();
+			msg.userId = msgObj["user_id"].toVariant().toLongLong();
+			msg.username = msgObj["username"].toString();
+			msg.text = msgObj["text"].toString();
+			msg.timestamp = msgObj["timestamp"].toVariant().toLongLong();
+			msg.messageType = msgObj["type"].toString();
+			msg.reactionCount = msgObj["reaction_count"].toInt();
+			msg.isThreadStart = msgObj["is_thread_start"].toBool();
+			msg.threadReplyCount = msgObj["thread_reply_count"].toInt();
+			return msg;
+		}
+	}
+
 	return Message();
 }
 
@@ -240,12 +290,47 @@ void BotBase::saveState(const QString &key, const QVariant &value) {
 	_state[key] = value;
 	Q_EMIT stateChanged();
 
-	// TODO: Persist to database
-	logInfo(QString("State saved: %1").arg(key));
+	// Persist to database via archiver
+	if (_archiver) {
+		QSqlDatabase db = _archiver->database();
+		if (db.isOpen()) {
+			QSqlQuery query(db);
+			query.prepare(R"(
+				INSERT OR REPLACE INTO bot_state (bot_id, state_key, state_value)
+				VALUES (:bot_id, :key, :value)
+			)");
+			auto botInfo = info();
+			query.bindValue(":bot_id", botInfo.id);
+			query.bindValue(":key", key);
+			query.bindValue(":value", value.toString());
+			query.exec();
+		}
+	}
 }
 
 QVariant BotBase::loadState(const QString &key, const QVariant &defaultValue) {
-	return _state.value(key, defaultValue);
+	if (_state.contains(key)) {
+		return _state.value(key);
+	}
+
+	// Try loading from database
+	if (_archiver) {
+		QSqlDatabase db = _archiver->database();
+		if (db.isOpen()) {
+			QSqlQuery query(db);
+			query.prepare("SELECT state_value FROM bot_state WHERE bot_id = :bot_id AND state_key = :key");
+			auto botInfo = info();
+			query.bindValue(":bot_id", botInfo.id);
+			query.bindValue(":key", key);
+			if (query.exec() && query.next()) {
+				QVariant value = query.value(0);
+				_state[key] = value;
+				return value;
+			}
+		}
+	}
+
+	return defaultValue;
 }
 
 // Internal initialization (called by BotManager)

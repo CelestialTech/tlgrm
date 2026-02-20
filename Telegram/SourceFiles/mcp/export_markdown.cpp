@@ -405,9 +405,26 @@ bool MarkdownExporter::saveMedia(
 			}
 		}
 	} else if (const auto photo = media->photo()) {
-		// Photo export requires async loading - skip for now
-		// Photos are typically embedded in archive data already
-		Q_UNUSED(photo);
+		auto photoMedia = photo->createMediaView();
+		if (photoMedia && photoMedia->loaded()) {
+			QString filename = QString("photo_%1.jpg").arg(photo->id);
+			QString destPath = mediaFolder + "/" + filename;
+
+			int counter = 1;
+			while (QFile::exists(destPath)) {
+				destPath = QString("%1/photo_%2_%3.jpg")
+					.arg(mediaFolder)
+					.arg(photo->id)
+					.arg(counter++);
+			}
+
+			if (photoMedia->saveToFile(destPath)) {
+				QFileInfo mediaFolderInfo(mediaFolder);
+				relativePath = mediaFolderInfo.fileName() + "/" + QFileInfo(destPath).fileName();
+				mimeType = "image/jpeg";
+				return true;
+			}
+		}
 	}
 
 	return false;

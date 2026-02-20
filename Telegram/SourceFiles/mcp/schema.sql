@@ -787,6 +787,17 @@ CREATE TABLE IF NOT EXISTS gift_collections (
 );
 
 -- ===================================
+-- ===================================
+-- PAID MESSAGE CONFIG
+-- ===================================
+
+CREATE TABLE IF NOT EXISTS paid_message_config (
+    chat_id INTEGER PRIMARY KEY,
+    price INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- DATABASE VERSION
 -- ===================================
 
@@ -795,4 +806,4 @@ CREATE TABLE IF NOT EXISTS schema_version (
     applied_at INTEGER DEFAULT (strftime('%s', 'now'))
 );
 
-INSERT OR REPLACE INTO schema_version (version) VALUES (2);
+INSERT OR REPLACE INTO schema_version (version) VALUES (3);

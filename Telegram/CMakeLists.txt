@@ -1215,7 +1215,25 @@ PRIVATE
     mcp/mcp_bridge.cpp
     mcp/mcp_bridge.h
     mcp/mcp_server_complete.cpp
+    mcp/mcp_server_includes.h
     mcp/mcp_server.h
+    mcp/mcp_tool_registry.cpp
+    mcp/mcp_core_tools.cpp
+    mcp/mcp_archive_tools.cpp
+    mcp/mcp_analytics_tools.cpp
+    mcp/mcp_search_tools.cpp
+    mcp/mcp_message_ops.cpp
+    mcp/mcp_batch_tools.cpp
+    mcp/mcp_scheduler_tools.cpp
+    mcp/mcp_system_tools.cpp
+    mcp/mcp_resource_handlers.cpp
+    mcp/mcp_bot_tools.cpp
+    mcp/mcp_premium_tools.cpp
+    mcp/mcp_business_tools.cpp
+    mcp/mcp_wallet_tools.cpp
+    mcp/mcp_stars_tools.cpp
+    mcp/mcp_settings_tools.cpp
+    mcp/mcp_gradual_tools.cpp
     mcp/chat_archiver.cpp
     mcp/chat_archiver.h
     mcp/gradual_archiver.cpp
@@ -1246,6 +1264,10 @@ PRIVATE
     mcp/bot_command_handler.h
     mcp/voice_transcription.cpp
     mcp/voice_transcription.h
+    mcp/text_to_speech.cpp
+    mcp/text_to_speech.h
+    mcp/local_llm.cpp
+    mcp/local_llm.h
     mcp/cache_manager.cpp
     mcp/cache_manager.h
     mcp/mcp_helpers.h

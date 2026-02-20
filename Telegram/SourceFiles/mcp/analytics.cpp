@@ -14,6 +14,8 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QtMath>
+#include <QtSql/QSqlDatabase>
+#include <QtSql/QSqlQuery>
 #include <QtSql/QSqlError>
 #include <algorithm>
 
@@ -399,18 +401,98 @@ QJsonObject Analytics::compareUsers(
 }
 
 QJsonObject Analytics::getLiveActivity(qint64 chatId) {
-	// Stub implementation - would need real-time monitoring
 	QJsonObject result;
 	result["chatId"] = QString::number(chatId);
 	result["timestamp"] = QDateTime::currentDateTime().toString(Qt::ISODate);
-	result["activeUsers"] = 0;
-	result["messagesLastHour"] = 0;
+
+	if (!_archiver) {
+		result["activeUsers"] = 0;
+		result["messagesLastHour"] = 0;
+		return result;
+	}
+
+	QSqlDatabase db = _archiver->database();
+	if (!db.isOpen()) {
+		result["activeUsers"] = 0;
+		result["messagesLastHour"] = 0;
+		return result;
+	}
+
+	qint64 oneHourAgo = QDateTime::currentSecsSinceEpoch() - 3600;
+
+	// Count messages in last hour
+	QSqlQuery msgQuery(db);
+	if (chatId > 0) {
+		msgQuery.prepare("SELECT COUNT(*) FROM archived_messages WHERE chat_id = :chat_id AND timestamp >= :since");
+		msgQuery.bindValue(":chat_id", chatId);
+	} else {
+		msgQuery.prepare("SELECT COUNT(*) FROM archived_messages WHERE timestamp >= :since");
+	}
+	msgQuery.bindValue(":since", oneHourAgo);
+
+	int messagesLastHour = 0;
+	if (msgQuery.exec() && msgQuery.next()) {
+		messagesLastHour = msgQuery.value(0).toInt();
+	}
+
+	// Count distinct active users in last hour
+	QSqlQuery userQuery(db);
+	if (chatId > 0) {
+		userQuery.prepare("SELECT COUNT(DISTINCT user_id) FROM archived_messages WHERE chat_id = :chat_id AND timestamp >= :since");
+		userQuery.bindValue(":chat_id", chatId);
+	} else {
+		userQuery.prepare("SELECT COUNT(DISTINCT user_id) FROM archived_messages WHERE timestamp >= :since");
+	}
+	userQuery.bindValue(":since", oneHourAgo);
+
+	int activeUsers = 0;
+	if (userQuery.exec() && userQuery.next()) {
+		activeUsers = userQuery.value(0).toInt();
+	}
+
+	result["activeUsers"] = activeUsers;
+	result["messagesLastHour"] = messagesLastHour;
 	return result;
 }
 
 QJsonArray Analytics::getActiveChats(int limit) {
-	// Stub implementation - would query recent activity
-	return QJsonArray();
+	QJsonArray chatsArray;
+
+	if (!_archiver) {
+		return chatsArray;
+	}
+
+	QSqlDatabase db = _archiver->database();
+	if (!db.isOpen()) {
+		return chatsArray;
+	}
+
+	qint64 oneDayAgo = QDateTime::currentSecsSinceEpoch() - 86400;
+
+	QSqlQuery query(db);
+	query.prepare(R"(
+		SELECT chat_id, COUNT(*) as msg_count, MAX(timestamp) as last_active
+		FROM archived_messages
+		WHERE timestamp >= :since
+		GROUP BY chat_id
+		ORDER BY msg_count DESC
+		LIMIT :limit
+	)");
+	query.bindValue(":since", oneDayAgo);
+	query.bindValue(":limit", limit);
+
+	if (query.exec()) {
+		while (query.next()) {
+			QJsonObject chatObj;
+			chatObj["chat_id"] = query.value(0).toLongLong();
+			chatObj["message_count_24h"] = query.value(1).toInt();
+			chatObj["last_active"] = QDateTime::fromSecsSinceEpoch(
+				query.value(2).toLongLong()).toString(Qt::ISODate);
+			chatsArray.append(chatObj);
+		}
+	}
+
+	return chatsArray;
 }
 
 void Analytics::clearCache() {

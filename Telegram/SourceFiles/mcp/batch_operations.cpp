@@ -3,6 +3,8 @@
 
 #include "batch_operations.h"
 #include "data/data_session.h"
+#include "data/data_histories.h"
+#include "data/data_chat_filters.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "main/main_session.h"
@@ -150,11 +152,37 @@ qint64 BatchOperations::forwardAllMessages(
 	qint64 targetChatId,
 	int limit
 ) {
-	// This is a stub - would need to collect all message IDs from source chat
+	if (!_session) return 0;
+
+	// Collect message IDs from loaded history
+	QVector<qint64> messageIds;
+	auto &owner = _session->data();
+	const auto peerId = PeerId(sourceChatId);
+	const auto history = owner.historyLoaded(peerId);
+	if (history) {
+		int collected = 0;
+		for (auto blockIt = history->blocks.rbegin();
+		     blockIt != history->blocks.rend() && collected < limit;
+		     ++blockIt) {
+			const auto &block = *blockIt;
+			if (!block) continue;
+			for (auto msgIt = block->messages.rbegin();
+			     msgIt != block->messages.rend() && collected < limit;
+			     ++msgIt) {
+				const auto &element = *msgIt;
+				if (!element) continue;
+				auto item = element->data();
+				if (!item) continue;
+				messageIds.append(item->id.bare);
+				collected++;
+			}
+		}
+	}
+
 	BatchForwardParams params;
 	params.sourceChatId = sourceChatId;
 	params.targetChatId = targetChatId;
-	// params.messageIds would be populated with actual message IDs
+	params.messageIds = messageIds;
 
 	return batchForwardMessages(params);
 }
@@ -183,11 +211,39 @@ qint64 BatchOperations::exportChatMessages(
 	const QString &outputPath,
 	int limit
 ) {
-	// This is a stub - would need to collect message IDs
+	if (!_session) return 0;
+
+	// Collect message IDs from loaded history
+	QVector<qint64> messageIds;
+	auto &owner = _session->data();
+	const auto peerId = PeerId(chatId);
+	const auto history = owner.historyLoaded(peerId);
+	if (history) {
+		int collected = 0;
+		const int maxCollect = (limit < 0) ? INT_MAX : limit;
+		for (auto blockIt = history->blocks.rbegin();
+		     blockIt != history->blocks.rend() && collected < maxCollect;
+		     ++blockIt) {
+			const auto &block = *blockIt;
+			if (!block) continue;
+			for (auto msgIt = block->messages.rbegin();
+			     msgIt != block->messages.rend() && collected < maxCollect;
+			     ++msgIt) {
+				const auto &element = *msgIt;
+				if (!element) continue;
+				auto item = element->data();
+				if (!item) continue;
+				messageIds.append(item->id.bare);
+				collected++;
+			}
+		}
+	}
+
 	BatchExportParams params;
 	params.chatId = chatId;
 	params.format = format;
 	params.outputPath = outputPath;
+	params.messageIds = messageIds;
 
 	return batchExportMessages(params);
 }
@@ -211,9 +267,27 @@ qint64 BatchOperations::batchMarkAsRead(const BatchMarkReadParams &params) {
 }
 
 qint64 BatchOperations::markAllChatsRead() {
-	// This is a stub - would need to collect all chat IDs
+	if (!_session) return 0;
+
+	// Collect all chat IDs from the main chat list
+	QVector<qint64> chatIds;
+	auto chatsList = _session->data().chatsList();
+	if (chatsList) {
+		auto indexed = chatsList->indexed();
+		if (indexed) {
+			for (const auto &row : *indexed) {
+				if (!row) continue;
+				auto thread = row->thread();
+				if (!thread) continue;
+				auto peer = thread->peer();
+				if (!peer) continue;
+				chatIds.append(peer->id.value);
+			}
+		}
+	}
+
 	BatchMarkReadParams params;
-	// params.chatIds would be populated
+	params.chatIds = chatIds;
 
 	return batchMarkAsRead(params);
 }
@@ -237,13 +311,33 @@ bool BatchOperations::cancelOperation(qint64 operationId) {
 }
 
 bool BatchOperations::pauseOperation(qint64 operationId) {
-	// Stub - would need more complex state management
-	return false;
+	if (!_operations.contains(operationId)) {
+		return false;
+	}
+
+	auto &result = _operations[operationId];
+	if (result.status != BatchStatus::Running) {
+		return false;
+	}
+
+	result.status = BatchStatus::Pending;  // Revert to pending (paused)
+	_currentConcurrentOperations--;
+	return true;
 }
 
 bool BatchOperations::resumeOperation(qint64 operationId) {
-	// Stub - would need more complex state management
-	return false;
+	if (!_operations.contains(operationId)) {
+		return false;
+	}
+
+	auto &result = _operations[operationId];
+	if (result.status != BatchStatus::Pending) {
+		return false;
+	}
+
+	result.status = BatchStatus::Running;
+	_currentConcurrentOperations++;
+	return true;
 }
 
 QJsonObject BatchOperations::getOperationStatus(qint64 operationId) {
@@ -461,31 +555,26 @@ bool BatchOperations::deleteMessage(qint64 chatId, qint64 messageId, bool delete
 		return false;
 	}
 
-	auto peer = _session->data().peer(PeerId(chatId));
-	if (!peer) {
-		qWarning() << "BatchOperations: Invalid peer ID" << chatId;
-		return false;
-	}
-
-	auto history = _session->data().history(peer);
+	auto &owner = _session->data();
+	const auto peerId = PeerId(chatId);
+	const auto history = owner.historyLoaded(peerId);
 	if (!history) {
-		qWarning() << "BatchOperations: History not found";
+		qWarning() << "BatchOperations: Chat not found" << chatId;
 		return false;
 	}
 
-	// Find the message
-	auto item = history->owner().message(peer->id, MsgId(messageId));
+	auto item = owner.message(history->peer->id, MsgId(messageId));
 	if (!item) {
 		qWarning() << "BatchOperations: Message not found" << messageId;
 		return false;
 	}
 
-	// TODO: Implement deleteMessages with correct tdesktop API
-	// canDeleteForEveryone expects TimeId (int32), not QDateTime
-	// ApiWrap::deleteMessages doesn't exist with this signature
-	qWarning() << "TODO: Implement deleteMessages with correct tdesktop API";
-	qDebug() << "BatchOperations: Stub - message not actually deleted" << messageId << "from chat" << chatId;
-	return false;
+	// Use Data::Histories::deleteMessages with MessageIdsList
+	MessageIdsList ids = { item->fullId() };
+	_session->data().histories().deleteMessages(ids, deleteForAll);
+	_session->data().sendHistoryChangeNotifications();
+
+	return true;
 }
 
 bool BatchOperations::forwardMessage(
@@ -499,35 +588,48 @@ bool BatchOperations::forwardMessage(
 		return false;
 	}
 
-	auto sourcePeer = _session->data().peer(PeerId(sourceChatId));
-	auto targetPeer = _session->data().peer(PeerId(targetChatId));
+	auto &owner = _session->data();
 
-	if (!sourcePeer || !targetPeer) {
-		qWarning() << "BatchOperations: Invalid peer IDs";
+	// Get source message
+	const auto fromPeerId = PeerId(sourceChatId);
+	const auto fromHistory = owner.historyLoaded(fromPeerId);
+	if (!fromHistory) {
+		qWarning() << "BatchOperations: Source chat not found" << sourceChatId;
 		return false;
 	}
 
-	auto sourceHistory = _session->data().history(sourcePeer);
-	auto targetHistory = _session->data().history(targetPeer);
-
-	if (!sourceHistory || !targetHistory) {
-		qWarning() << "BatchOperations: History not found";
-		return false;
-	}
-
-	// Find the message
-	auto item = sourceHistory->owner().message(sourcePeer->id, MsgId(messageId));
+	auto item = owner.message(fromHistory->peer->id, MsgId(messageId));
 	if (!item) {
 		qWarning() << "BatchOperations: Message not found" << messageId;
 		return false;
 	}
 
-	// TODO: Implement forwardMessages with correct tdesktop API
-	// Api::SendOptions doesn't have dropAuthor or dropCaption members
-	// forwardMessages expects HistoryItemsList, not FullMsgId directly
-	qWarning() << "TODO: Implement forwardMessages with correct tdesktop API";
-	qDebug() << "BatchOperations: Stub - message not actually forwarded" << messageId << "from" << sourceChatId << "to" << targetChatId;
-	return false;
+	// Get destination
+	const auto toPeerId = PeerId(targetChatId);
+	auto toHistory = _session->data().history(toPeerId);
+	if (!toHistory) {
+		qWarning() << "BatchOperations: Destination chat not found" << targetChatId;
+		return false;
+	}
+
+	// Build forward draft
+	HistoryItemsList items;
+	items.push_back(item);
+
+	Data::ResolvedForwardDraft draft;
+	draft.items = items;
+	draft.options = params.dropAuthor
+		? Data::ForwardOptions::NoNamesAndCaptions
+		: Data::ForwardOptions::PreserveInfo;
+
+	// Create send action
+	auto thread = (Data::Thread*)toHistory;
+	Api::SendAction action(thread, Api::SendOptions());
+
+	// Forward via API
+	_session->api().forwardMessages(std::move(draft), action);
+
+	return true;
 }
 
 bool BatchOperations::exportMessage(qint64 chatId, qint64 messageId, const QString &format, QTextStream &stream) {
@@ -606,11 +708,10 @@ bool BatchOperations::markChatAsRead(qint64 chatId) {
 		return false;
 	}
 
-	// TODO: Implement readInbox with correct tdesktop API
-	// ApiWrap::readInbox doesn't exist with this signature
-	qWarning() << "TODO: Implement readInbox with correct tdesktop API";
-	qDebug() << "BatchOperations: Stub - chat not actually marked as read" << chatId;
-	return false;
+	// Use Data::Histories::readInbox to mark the entire chat as read
+	_session->data().histories().readInbox(history);
+
+	return true;
 }
 
 // Message filtering
@@ -620,18 +721,90 @@ QVector<qint64> BatchOperations::filterMessagesByDate(
 	const QDateTime &startDate,
 	const QDateTime &endDate
 ) {
-	// Stub - would need to query messages from data session
-	return QVector<qint64>();
+	QVector<qint64> result;
+	if (!_session) return result;
+
+	auto &owner = _session->data();
+	const auto peerId = PeerId(chatId);
+	const auto history = owner.historyLoaded(peerId);
+	if (!history) return result;
+
+	const auto startTs = static_cast<TimeId>(startDate.toSecsSinceEpoch());
+	const auto endTs = static_cast<TimeId>(endDate.toSecsSinceEpoch());
+
+	for (const auto &block : history->blocks) {
+		if (!block) continue;
+		for (const auto &element : block->messages) {
+			if (!element) continue;
+			auto item = element->data();
+			if (!item) continue;
+			const auto ts = item->date();
+			if (ts >= startTs && ts <= endTs) {
+				result.append(item->id.bare);
+			}
+		}
+	}
+
+	return result;
 }
 
 QVector<qint64> BatchOperations::filterMessagesByUser(qint64 chatId, qint64 userId) {
-	// Stub
-	return QVector<qint64>();
+	QVector<qint64> result;
+	if (!_session) return result;
+
+	auto &owner = _session->data();
+	const auto peerId = PeerId(chatId);
+	const auto history = owner.historyLoaded(peerId);
+	if (!history) return result;
+
+	for (const auto &block : history->blocks) {
+		if (!block) continue;
+		for (const auto &element : block->messages) {
+			if (!element) continue;
+			auto item = element->data();
+			if (!item) continue;
+			auto from = item->from();
+			if (from && from->id.value == static_cast<uint64>(userId)) {
+				result.append(item->id.bare);
+			}
+		}
+	}
+
+	return result;
 }
 
 QVector<qint64> BatchOperations::filterMessagesByType(qint64 chatId, const QString &messageType) {
-	// Stub
-	return QVector<qint64>();
+	QVector<qint64> result;
+	if (!_session) return result;
+
+	auto &owner = _session->data();
+	const auto peerId = PeerId(chatId);
+	const auto history = owner.historyLoaded(peerId);
+	if (!history) return result;
+
+	for (const auto &block : history->blocks) {
+		if (!block) continue;
+		for (const auto &element : block->messages) {
+			if (!element) continue;
+			auto item = element->data();
+			if (!item) continue;
+
+			bool match = false;
+			if (messageType == "text") {
+				match = !item->originalText().text.isEmpty() && !item->media();
+			} else if (messageType == "media" || messageType == "photo" || messageType == "video") {
+				match = (item->media() != nullptr);
+			} else if (messageType == "service") {
+				match = item->isService();
+			}
+
+			if (match) {
+				result.append(item->id.bare);
+			}
+		}
+	}
+
+	return result;
 }
 
 // Operation management

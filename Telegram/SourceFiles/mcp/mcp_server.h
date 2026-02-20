@@ -22,6 +22,11 @@
 #include <memory>
 
 #include "mcp/mcp_helpers.h"
+#include "base/basic_types.h"
+
+namespace rpl {
+class lifetime;
+} // namespace rpl
 
 namespace Main {
 class Session;
@@ -41,6 +46,8 @@ class MessageScheduler;
 class AuditLogger;
 class RBAC;
 class VoiceTranscription;
+class TextToSpeech;
+class LocalLLM;
 class BotManager;
 class CacheManager;
 class GradualArchiver;
@@ -647,6 +654,8 @@ private:
 	std::unique_ptr<AuditLogger> _auditLogger;
 	std::unique_ptr<RBAC> _rbac;
 	std::unique_ptr<VoiceTranscription> _voiceTranscription;
+	std::unique_ptr<TextToSpeech> _textToSpeech;
+	std::unique_ptr<LocalLLM> _localLLM;
 	std::unique_ptr<BotManager> _botManager;
 	std::unique_ptr<CacheManager> _cache;
 	std::unique_ptr<GradualArchiver> _gradualArchiver;
@@ -655,9 +664,13 @@ private:
 	bool _initialized = false;
 	QString _databasePath;
 	Main::Session *_session = nullptr;
+	QDateTime _startTime = QDateTime::currentDateTime();
 
 	// Tool dispatcher lookup table
 	QHash<QString, ToolHandler> _toolHandlers;
+
+	// RPL lifetime for session event subscriptions
+	std::unique_ptr<rpl::lifetime> _lifetime;
 };
 
 } // namespace MCP

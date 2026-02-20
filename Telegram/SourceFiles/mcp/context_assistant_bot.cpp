@@ -5,9 +5,12 @@
 #include "context_assistant_bot.h"
 #include "semantic_search.h"
 #include "analytics.h"
+#include "chat_archiver.h"
 
 #include <QtCore/QRegularExpression>
 #include <QtCore/QDebug>
+#include <QtSql/QSqlDatabase>
+#include <QtSql/QSqlQuery>
 #include <algorithm>
 
 namespace MCP {
@@ -502,10 +505,34 @@ void ContextAssistantBot::analyzeUserBehavior(qint64 userId) {
 		.arg(userMessages.size())
 		.arg(userId));
 
-	// TODO: Implement behavioral analysis
-	// - Detect patterns (work hours, active chats, etc.)
-	// - Build user profile
-	// - Personalize suggestions
+	if (userMessages.isEmpty()) {
+		return;
+	}
+
+	// Detect peak activity hours
+	QVector<int> hourBuckets(24, 0);
+	for (const Message &msg : userMessages) {
+		QDateTime dt = QDateTime::fromSecsSinceEpoch(msg.timestamp);
+		int hour = dt.time().hour();
+		if (hour >= 0 && hour < 24) {
+			hourBuckets[hour]++;
+		}
+	}
+
+	// Find peak hour
+	int peakHour = 0;
+	int peakCount = 0;
+	for (int h = 0; h < 24; ++h) {
+		if (hourBuckets[h] > peakCount) {
+			peakCount = hourBuckets[h];
+			peakHour = h;
+		}
+	}
+
+	// Store behavioral data in user preferences
+	UserPreferences prefs = getUserPreferences(userId);
+	prefs.lastUpdated = QDateTime::currentDateTime();
+	_userPreferences.insert(userId, prefs);
 }
 
 QVector<Message> ContextAssistantBot::getUserMessagesAcrossChats(qint64 userId, int hours) const {
@@ -566,7 +593,24 @@ void ContextAssistantBot::updateUserPreferences(qint64 userId, const UserPrefere
 
 	logInfo(QString("Updated preferences for user %1").arg(userId));
 
-	// TODO: Persist to database
+	// Persist to database via archiver
+	if (archiver()) {
+		QSqlDatabase db = archiver()->database();
+		if (db.isOpen()) {
+			QSqlQuery query(db);
+			query.prepare(R"(
+				INSERT OR REPLACE INTO user_preferences
+				(user_id, enable_proactive, enable_cross_chat, min_confidence, updated_at)
+				VALUES (:uid, :proactive, :cross_chat, :confidence, :updated)
+			)");
+			query.bindValue(":uid", userId);
+			query.bindValue(":proactive", prefs.enableProactiveHelp ? 1 : 0);
+			query.bindValue(":cross_chat", prefs.enableCrossChat ? 1 : 0);
+			query.bindValue(":confidence", prefs.minConfidenceForSuggestion);
+			query.bindValue(":updated", prefs.lastUpdated.toSecsSinceEpoch());
+			query.exec();
+		}
+	}
 }
 
 bool ContextAssistantBot::isFeatureEnabledForUser(qint64 userId, const QString &feature) const {

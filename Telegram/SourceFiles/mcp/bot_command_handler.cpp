@@ -22,8 +22,8 @@ const QStringList BotCommandHandler::kValidCommands = {
 
 BotCommandHandler::BotCommandHandler(not_null<Main::Session*> session)
 : _session(session) {
-	// TODO: Get BotManager from session or application
-	// _botManager = &_session->botManager();
+	// BotManager is owned by MCP::Server, not the session.
+	// The MCP server will set _botManager via setBotManager() after construction.
 }
 
 BotCommandHandler::~BotCommandHandler() = default;
