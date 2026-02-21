@@ -82,7 +82,8 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 	QString peerName = peer->name();
 
 	if (outputPath.isEmpty()) {
-		outputPath = QDir::homePath() + "/TelegramExport";
+		outputPath = File::DefaultDownloadPath(
+			gsl::make_not_null(_session));
 	}
 
 	QString resolvedPath = createExportDirectory(outputPath, peerType, peerName);
@@ -162,6 +163,23 @@ QJsonObject Server::toolGetExportStatus(const QJsonObject &args) {
 			result["media_downloaded"] = _activeExport->mediaDownloaded;
 			result["media_failed"] = _activeExport->mediaFailed;
 			result["media_current"] = _activeExport->currentMediaIndex;
+			result["media_total_bytes"] = _activeExport->totalMediaBytes;
+			result["media_downloaded_bytes"] = _activeExport->mediaDownloadedBytes;
+
+			// ETA calculation based on download speed
+			qint64 mediaElapsed = _activeExport->mediaPhaseStartTime.secsTo(
+				QDateTime::currentDateTime());
+			if (mediaElapsed > 0 && _activeExport->mediaDownloadedBytes > 0) {
+				double bytesPerSec = double(_activeExport->mediaDownloadedBytes) / mediaElapsed;
+				result["download_speed_bps"] = qint64(bytesPerSec);
+				int64_t remainingBytes = _activeExport->totalMediaBytes
+					- _activeExport->mediaDownloadedBytes;
+				if (remainingBytes > 0 && bytesPerSec > 0) {
+					result["estimated_seconds_remaining"] = qint64(remainingBytes / bytesPerSec);
+				} else {
+					result["estimated_seconds_remaining"] = 0;
+				}
+			}
 		} else {
 			result["phase"] = "fetching_messages";
 		}
@@ -687,6 +705,7 @@ void Server::startMediaDownloadPhase() {
 	_activeExport->mediaFailed = 0;
 	_activeExport->downloadingMedia = true;
 
+	int64_t totalBytes = 0;
 	for (int i = 0; i < _activeExport->messages.size(); ++i) {
 		QJsonObject msg = _activeExport->messages[i].toObject();
 		int msgId = msg["id"].toInt();
@@ -698,6 +717,7 @@ void Server::startMediaDownloadPhase() {
 			item.messageId = msgId;
 			item.messageIndex = i;
 			_activeExport->mediaItems.append(item);
+			totalBytes += msg["document_size"].toVariant().toLongLong();
 		} else if (msg.contains("photo_id")) {
 			ActiveExport::MediaItem item;
 			item.type = ActiveExport::MediaItem::Photo;
@@ -705,8 +725,13 @@ void Server::startMediaDownloadPhase() {
 			item.messageId = msgId;
 			item.messageIndex = i;
 			_activeExport->mediaItems.append(item);
+			totalBytes += 500 * 1024; // estimate ~500KB per photo
 		}
 	}
+
+	_activeExport->totalMediaBytes = totalBytes;
+	_activeExport->mediaDownloadedBytes = 0;
+	_activeExport->mediaPhaseStartTime = QDateTime::currentDateTime();
 
 	if (_activeExport->mediaItems.isEmpty()) {
 		qWarning() << "MCP: No media to download, writing export files";
@@ -793,6 +818,7 @@ void Server::downloadNextMediaItem() {
 			QFile::copy(existingPath, targetPath);
 			item.downloaded = true;
 			_activeExport->mediaDownloaded++;
+			_activeExport->mediaDownloadedBytes += QFileInfo(targetPath).size();
 
 			// Update message JSON with media_file reference
 			QJsonObject msg = _activeExport->messages[item.messageIndex].toObject();
@@ -865,6 +891,9 @@ void Server::downloadNextMediaItem() {
 			photoMedia->saveToFile(targetPath);
 			item.downloaded = true;
 			_activeExport->mediaDownloaded++;
+			auto photoSize = QFileInfo(targetPath).size();
+			_activeExport->bytesCount += photoSize;
+			_activeExport->mediaDownloadedBytes += photoSize;
 
 			QJsonObject msg = _activeExport->messages[item.messageIndex].toObject();
 			msg["media_file"] = "media/" + filename;
@@ -925,16 +954,18 @@ void Server::onMediaDownloadComplete(not_null<DocumentData*> document) {
 
 	// Check if file was written successfully
 	if (QFile::exists(targetPath) && QFileInfo(targetPath).size() > 0) {
+		auto fileSize = QFileInfo(targetPath).size();
 		item.downloaded = true;
 		_activeExport->mediaDownloaded++;
-		_activeExport->bytesCount += QFileInfo(targetPath).size();
+		_activeExport->bytesCount += fileSize;
+		_activeExport->mediaDownloadedBytes += fileSize;
 
 		QJsonObject msg = _activeExport->messages[item.messageIndex].toObject();
 		msg["media_file"] = "media/" + item.targetFilename;
 		_activeExport->messages[item.messageIndex] = msg;
 
 		qWarning() << "MCP: Document downloaded:" << item.targetFilename
-		           << "(" << QFileInfo(targetPath).size() << "bytes)";
+		           << "(" << fileSize << "bytes)";
 	} else {
 		// File wasn't saved to target path - check if bytes are available
 		auto media = document->activeMediaView();
@@ -943,9 +974,11 @@ void Server::onMediaDownloadComplete(not_null<DocumentData*> document) {
 			if (f.open(QIODevice::WriteOnly)) {
 				f.write(media->bytes());
 				f.close();
+				auto fileSize = f.size();
 				item.downloaded = true;
 				_activeExport->mediaDownloaded++;
-				_activeExport->bytesCount += f.size();
+				_activeExport->bytesCount += fileSize;
+				_activeExport->mediaDownloadedBytes += fileSize;
 
 				QJsonObject msg = _activeExport->messages[item.messageIndex].toObject();
 				msg["media_file"] = "media/" + item.targetFilename;
@@ -964,9 +997,11 @@ void Server::onMediaDownloadComplete(not_null<DocumentData*> document) {
 				QFile::copy(loc.name(), targetPath);
 				loc.accessDisable();
 				if (QFile::exists(targetPath)) {
+					auto fileSize = QFileInfo(targetPath).size();
 					item.downloaded = true;
 					_activeExport->mediaDownloaded++;
-					_activeExport->bytesCount += QFileInfo(targetPath).size();
+					_activeExport->bytesCount += fileSize;
+					_activeExport->mediaDownloadedBytes += fileSize;
 
 					QJsonObject msg = _activeExport->messages[item.messageIndex].toObject();
 					msg["media_file"] = "media/" + item.targetFilename;
@@ -1001,9 +1036,11 @@ void Server::onMediaDownloadComplete(not_null<PhotoData*> photo) {
 	QString targetPath = _activeExport->resolvedPath + "/media/" + item.targetFilename;
 
 	if (QFile::exists(targetPath) && QFileInfo(targetPath).size() > 0) {
+		auto fileSize = QFileInfo(targetPath).size();
 		item.downloaded = true;
 		_activeExport->mediaDownloaded++;
-		_activeExport->bytesCount += QFileInfo(targetPath).size();
+		_activeExport->bytesCount += fileSize;
+		_activeExport->mediaDownloadedBytes += fileSize;
 
 		QJsonObject msg = _activeExport->messages[item.messageIndex].toObject();
 		msg["media_file"] = "media/" + item.targetFilename;

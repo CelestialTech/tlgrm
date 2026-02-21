@@ -736,6 +736,10 @@ private:
 		int mediaFailed = 0;
 		bool downloadingMedia = false;
 		std::unique_ptr<rpl::lifetime> mediaLifetime;
+		// Time estimation
+		int64_t totalMediaBytes = 0;
+		int64_t mediaDownloadedBytes = 0;
+		QDateTime mediaPhaseStartTime;
 	};
 	std::unique_ptr<ActiveExport> _activeExport;
 };
