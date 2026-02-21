@@ -520,6 +520,7 @@ void SettingsWidget::setupPathAndFormat(
 		// Simplified UI - gradual export is always enabled
 		// Removed "Location and format" header and "Gradual export mode" header
 		// But kept the explanation message
+		container->add(object_ptr<Ui::FixedHeightWidget>(container, 18));
 		addSinglePeerFormatLabel(container);
 		addSinglePeerPathLabel(container);
 		addLimitsLabel(container);
