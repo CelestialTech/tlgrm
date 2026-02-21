@@ -155,6 +155,14 @@ void Server::registerTools() {
 			}
 		},
 		Tool{
+			"get_export_status",
+			"Get the status of an ongoing or completed chat export",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{}},
+			}
+		},
+		Tool{
 			"list_archived_chats",
 			"List all chats that have been archived",
 			QJsonObject{
