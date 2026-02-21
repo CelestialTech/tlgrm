@@ -25,6 +25,7 @@
 #include "cache_manager.h"
 
 #include <QtCore/QTimer>
+#include <QtCore/QRandomGenerator>
 #include <QtCore/QDebug>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -50,7 +51,11 @@
 #include "history/history.h"
 #include "history/history_item.h"
 #include "data/data_document.h"
+#include "data/data_document_media.h"
+#include "data/data_photo.h"
+#include "data/data_photo_media.h"
 #include "data/data_media_types.h"
+#include "data/data_file_origin.h"
 #include "history/view/history_view_element.h"
 #include "api/api_common.h"
 #include "api/api_editing.h"
@@ -59,9 +64,6 @@
 #include "api/api_self_destruct.h"
 #include "api/api_blocked_peers.h"
 #include "apiwrap.h"
-#include "export/export_settings.h"
-#include "export/export_controller.h"
-#include "export/view/export_view_panel_controller.h"
 #include "storage/storage_account.h"
 #include "core/file_utilities.h"
 #include "mtproto/mtp_instance.h"

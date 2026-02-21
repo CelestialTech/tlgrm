@@ -34,10 +34,6 @@ class Session;
 
 class HistoryItem;
 
-namespace Export {
-class Controller;
-} // namespace Export
-
 namespace MCP {
 
 // Forward declarations
@@ -630,6 +626,24 @@ private:
 	// Extract message data to JSON - reduces code duplication
 	QJsonObject extractMessageJson(HistoryItem *item);
 
+	// Direct export helpers (messages.getHistory based, no Takeout)
+	void startDirectExport();
+	void fetchNextMessageBatch();
+	void onMessageBatchReceived(const MTPmessages_Messages &result);
+	void writeExportFiles();
+	static QString sanitizeForFilename(const QString &name);
+	QString createExportDirectory(const QString &basePath, const QString &peerType, const QString &peerName);
+	QJsonObject mtpMessageToJson(const MTPMessage &message);
+
+	// Media download helpers (uses same code path as UI)
+	void startMediaDownloadPhase();
+	void downloadNextMediaItem();
+	void onMediaDownloadComplete(not_null<DocumentData*> document);
+	void onMediaDownloadComplete(not_null<PhotoData*> photo);
+	void onAllMediaDownloaded();
+	QString generateMediaFilename(DocumentData *document, int msgId);
+	QString generateMediaFilename(PhotoData *photo, int msgId);
+
 	// Tool dispatcher type alias
 	using ToolHandler = std::function<QJsonObject(const QJsonObject&)>;
 
@@ -681,7 +695,7 @@ private:
 	// RPL lifetime for session event subscriptions
 	std::unique_ptr<rpl::lifetime> _lifetime;
 
-	// Active export tracking (non-blocking export_chat)
+	// Active export tracking (non-blocking export_chat via messages.getHistory)
 	struct ActiveExport {
 		qint64 chatId = 0;
 		QString chatName;
@@ -695,8 +709,34 @@ private:
 		QString errorMessage;
 		int currentStep = -1;
 		QDateTime startTime;
+		// Direct export fields (messages.getHistory pagination)
+		QString resolvedPath;
+		int totalMessagesFetched = 0;
+		int batchesFetched = 0;
+		MsgId nextOffsetId = MsgId(0);
+		bool allMessagesFetched = false;
+		QJsonArray messages;
+		PeerId exportPeerId = PeerId(0);
+
+		// Media download tracking
+		struct MediaItem {
+			enum Type { Document, Photo };
+			Type type;
+			DocumentId documentId = 0;
+			PhotoId photoId = 0;
+			int messageId = 0;
+			int messageIndex = -1;  // index in messages QJsonArray
+			QString targetFilename;
+			bool downloaded = false;
+			bool failed = false;
+		};
+		QVector<MediaItem> mediaItems;
+		int currentMediaIndex = 0;
+		int mediaDownloaded = 0;
+		int mediaFailed = 0;
+		bool downloadingMedia = false;
+		std::unique_ptr<rpl::lifetime> mediaLifetime;
 	};
-	std::unique_ptr<Export::Controller> _exportController;
 	std::unique_ptr<ActiveExport> _activeExport;
 };
 
