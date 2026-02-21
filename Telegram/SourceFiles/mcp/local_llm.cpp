@@ -168,7 +168,8 @@ CompletionResult LocalLLM::sendRequest(const QJsonObject &requestBody) {
 	timer.start();
 
 	QString url = apiUrl("/chat/completions");
-	QNetworkRequest req(QUrl(url));
+	QUrl requestUrl{url};
+	QNetworkRequest req{requestUrl};
 	req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 	req.setTransferTimeout(120000); // 2 min timeout for LLM generation
 
@@ -372,7 +373,8 @@ bool LocalLLM::healthCheck() {
 		healthUrl = _baseUrl + "/health";
 	}
 
-	QNetworkRequest req(QUrl(healthUrl));
+	QUrl healthReqUrl{healthUrl};
+	QNetworkRequest req{healthReqUrl};
 	req.setTransferTimeout(5000);
 	QNetworkReply *reply = _networkManager.get(req);
 
@@ -395,7 +397,8 @@ QJsonArray LocalLLM::listModels() {
 		modelsUrl = _baseUrl + "/v1/models";
 	}
 
-	QNetworkRequest req(QUrl(modelsUrl));
+	QUrl modelsReqUrl{modelsUrl};
+	QNetworkRequest req{modelsReqUrl};
 	req.setTransferTimeout(5000);
 	QNetworkReply *reply = _networkManager.get(req);
 

@@ -155,6 +155,8 @@ bool Server::start(TransportType transport) {
 		q.exec("ALTER TABLE voice_persona ADD COLUMN provider TEXT DEFAULT 'piper'");
 		q.exec("ALTER TABLE voice_persona ADD COLUMN sample_path TEXT");
 		q.exec("CREATE TABLE IF NOT EXISTS video_avatar (name TEXT PRIMARY KEY, source_path TEXT, created_at TEXT)");
+		q.exec("CREATE TABLE IF NOT EXISTS bot_registry (bot_id TEXT PRIMARY KEY, bot_name TEXT, config TEXT, enabled INTEGER DEFAULT 1, created_at TEXT)");
+		q.exec("CREATE TABLE IF NOT EXISTS bot_configs (bot_id TEXT PRIMARY KEY, config_json TEXT, updated_at INTEGER)");
 		q.exec("CREATE TABLE IF NOT EXISTS wallet_budgets (id INTEGER PRIMARY KEY, balance REAL DEFAULT 0, daily_limit REAL, weekly_limit REAL, monthly_limit REAL, last_updated TEXT, updated_at TEXT)");
 		q.exec("CREATE TABLE IF NOT EXISTS wallet_spending (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, amount REAL, category TEXT, description TEXT, peer_id INTEGER)");
 		q.exec("CREATE TABLE IF NOT EXISTS miniapp_budgets (miniapp_id TEXT PRIMARY KEY, approved_amount REAL, spent_amount REAL DEFAULT 0, created_at TEXT)");

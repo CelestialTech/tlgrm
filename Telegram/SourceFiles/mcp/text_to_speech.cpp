@@ -8,6 +8,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QDir>
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QRandomGenerator>
 #include <QtSql/QSqlQuery>
 #include <QtSql/QSqlError>
 

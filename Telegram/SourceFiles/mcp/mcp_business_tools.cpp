@@ -888,8 +888,8 @@ QJsonObject Server::toolTextToSpeech(const QJsonObject &args) {
 	QJsonObject result;
 	QString text = args["text"].toString();
 	QString voice = args.value("voice").toString();
-	double speed = args.value("speed").toDouble(1.0);
-	double pitch = args.value("pitch").toDouble(1.0);
+	double speed = args.value("speed").toDouble();
+	double pitch = args.value("pitch").toDouble();
 
 	if (text.isEmpty()) {
 		result["error"] = "Missing text parameter";
@@ -920,10 +920,10 @@ QJsonObject Server::toolTextToSpeech(const QJsonObject &args) {
 				_textToSpeech->setProvider(TTSProvider::CoquiPython);
 			}
 			if (speed == 1.0) {
-				speed = query.value(2).toDouble(1.0);
+				speed = query.value(2).toDouble();
 			}
 			if (pitch == 1.0) {
-				pitch = query.value(3).toDouble(1.0);
+				pitch = query.value(3).toDouble();
 			}
 		}
 	}
@@ -955,8 +955,8 @@ QJsonObject Server::toolConfigureVoicePersona(const QJsonObject &args) {
 	QJsonObject result;
 	QString name = args["name"].toString();
 	QString voiceId = args["voice_id"].toString();
-	double pitch = args.value("pitch").toDouble(1.0);
-	double speed = args.value("speed").toDouble(1.0);
+	double pitch = args.value("pitch").toDouble();
+	double speed = args.value("speed").toDouble();
 
 	if (name.isEmpty()) {
 		result["error"] = "Missing name parameter";
@@ -1051,8 +1051,8 @@ QJsonObject Server::toolSendVoiceReply(const QJsonObject &args) {
 		if (query.exec() && query.next()) {
 			voiceId = query.value(0).toString();
 			QString providerStr = query.value(1).toString();
-			speed = query.value(2).toDouble(1.0);
-			pitch = query.value(3).toDouble(1.0);
+			speed = query.value(2).toDouble();
+			pitch = query.value(3).toDouble();
 			QString samplePath = query.value(4).toString();
 
 			if (providerStr == "piper") {
@@ -1131,7 +1131,7 @@ QJsonObject Server::toolTextToVideo(const QJsonObject &args) {
 	QString text = args["text"].toString();
 	QString preset = args.value("preset").toString("default");
 	QString voice = args.value("voice").toString();
-	double speed = args.value("speed").toDouble(1.0);
+	double speed = args.value("speed").toDouble();
 
 	if (text.isEmpty()) {
 		result["error"] = "Missing text parameter";
@@ -1204,7 +1204,7 @@ QJsonObject Server::toolSendVideoReply(const QJsonObject &args) {
 	QString text = args["text"].toString();
 	QString preset = args.value("preset").toString("default");
 	QString voice = args.value("voice").toString();
-	double speed = args.value("speed").toDouble(1.0);
+	double speed = args.value("speed").toDouble();
 
 	if (chatId == 0 || text.isEmpty()) {
 		result["error"] = "Missing chat_id or text";

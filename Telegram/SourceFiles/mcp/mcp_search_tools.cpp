@@ -154,8 +154,7 @@ QJsonObject Server::toolIndexMessages(const QJsonObject &args) {
 				for (const auto &block : history->blocks) {
 					for (const auto &view : block->messages) {
 						if (indexed >= limit) break;
-						auto *item = view->data();
-						if (!item) continue;
+						const auto item = view->data();
 
 						QString text = item->originalText().text;
 						if (text.isEmpty()) continue;
@@ -362,31 +361,7 @@ QJsonObject Server::toolClassifyIntent(const QJsonObject &args) {
 		return result;
 	}
 
-	// Try semantic search component first
-	if (_semanticSearch) {
-		SearchIntent intent = _semanticSearch->classifyIntent(text);
-
-		QString intentStr;
-		switch (intent) {
-			case SearchIntent::Question: intentStr = "question"; break;
-			case SearchIntent::Answer: intentStr = "answer"; break;
-			case SearchIntent::Statement: intentStr = "statement"; break;
-			case SearchIntent::Command: intentStr = "command"; break;
-			case SearchIntent::Greeting: intentStr = "greeting"; break;
-			case SearchIntent::Farewell: intentStr = "farewell"; break;
-			case SearchIntent::Agreement: intentStr = "agreement"; break;
-			case SearchIntent::Disagreement: intentStr = "disagreement"; break;
-			default: intentStr = "other"; break;
-		}
-
-		QJsonObject result;
-		result["text"] = text;
-		result["intent"] = intentStr;
-		result["success"] = true;
-		return result;
-	}
-
-	// Fallback: rule-based intent classification
+	// Rule-based intent classification (always runs as primary or verification)
 	QString lower = text.trimmed().toLower();
 
 	QString intentStr = "statement";
@@ -443,7 +418,9 @@ QJsonObject Server::toolClassifyIntent(const QJsonObject &args) {
 	else if (lower == "yes" || lower == "yeah" || lower == "yep"
 		|| lower == "sure" || lower == "ok" || lower == "okay"
 		|| lower == "agreed" || lower == "exactly" || lower == "right"
-		|| lower.startsWith("i agree") || lower.startsWith("sounds good")
+		|| lower.contains("i agree") || lower.startsWith("sounds good")
+		|| lower.startsWith("yes,") || lower.startsWith("yes ")
+		|| lower.startsWith("yeah,") || lower.startsWith("yeah ")
 		|| lower == "definitely" || lower == "absolutely") {
 		intentStr = "agreement";
 		confidence = 0.85;
@@ -485,43 +462,7 @@ QJsonObject Server::toolExtractEntities(const QJsonObject &args) {
 		return result;
 	}
 
-	// Try semantic search component first
-	if (_semanticSearch) {
-		auto entities = _semanticSearch->extractEntities(text);
-
-		QJsonArray entitiesArray;
-		for (const auto &entity : entities) {
-			QJsonObject e;
-
-			QString typeStr;
-			switch (entity.type) {
-				case EntityType::UserMention: typeStr = "user_mention"; break;
-				case EntityType::ChatMention: typeStr = "chat_mention"; break;
-				case EntityType::URL: typeStr = "url"; break;
-				case EntityType::Email: typeStr = "email"; break;
-				case EntityType::PhoneNumber: typeStr = "phone_number"; break;
-				case EntityType::Hashtag: typeStr = "hashtag"; break;
-				case EntityType::BotCommand: typeStr = "bot_command"; break;
-				case EntityType::CustomEmoji: typeStr = "custom_emoji"; break;
-				default: typeStr = "unknown"; break;
-			}
-
-			e["type"] = typeStr;
-			e["text"] = entity.text;
-			e["offset"] = entity.offset;
-			e["length"] = entity.length;
-			entitiesArray.append(e);
-		}
-
-		QJsonObject result;
-		result["text"] = text;
-		result["entities"] = entitiesArray;
-		result["count"] = entitiesArray.size();
-		result["success"] = true;
-		return result;
-	}
-
-	// Fallback: regex-based entity extraction
+	// Regex-based entity extraction (handles all types including email, date, monetary)
 	QJsonArray entitiesArray;
 
 	// @username mentions

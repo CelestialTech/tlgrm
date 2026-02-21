@@ -29,6 +29,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QTextStream>
+#include <QtCore/QProcess>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonArray>
@@ -48,6 +49,8 @@
 #include "dialogs/dialogs_row.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "data/data_document.h"
+#include "data/data_media_types.h"
 #include "history/view/history_view_element.h"
 #include "api/api_common.h"
 #include "api/api_editing.h"
