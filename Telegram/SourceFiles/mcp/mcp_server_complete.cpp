@@ -454,7 +454,7 @@ void Server::setSession(Main::Session *session) {
 	if (_botManager && _botManager->isEventDispatchEnabled()) {
 		_lifetime = std::make_unique<rpl::lifetime>();
 		_session->data().newItemAdded(
-		) | rpl::start_with_next([this](not_null<HistoryItem*> item) {
+		) | rpl::on_next([this](not_null<HistoryItem*> item) {
 			if (!_botManager || !_botManager->isEventDispatchEnabled()) {
 				return;
 			}

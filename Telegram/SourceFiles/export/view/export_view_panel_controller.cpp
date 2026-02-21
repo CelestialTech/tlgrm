@@ -261,7 +261,7 @@ void PanelController::showSettings() {
 
 	// Subscribe to dynamic width changes for panel resizing
 	settingsPtr->desiredWidth(
-	) | rpl::start_with_next([=](int desiredWidth) {
+	) | rpl::on_next([=](int desiredWidth) {
 		const auto singlePeer = _settings->onlySinglePeer();
 		const auto defaultSize = singlePeer
 			? st::exportSinglePeerPanelSize

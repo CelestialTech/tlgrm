@@ -1317,7 +1317,7 @@ void Server::downloadNextMediaItem() {
 		_session->data().documentLoadProgress(
 		) | rpl::filter([docPtr = document.get()](not_null<DocumentData*> d) {
 			return d == docPtr;
-		}) | rpl::start_with_next([this, document](not_null<DocumentData*>) {
+		}) | rpl::on_next([this, document](not_null<DocumentData*>) {
 			if (!_activeExport || _activeExport->finished) return;
 			if (document->loading()) return; // still in progress
 
@@ -1396,7 +1396,7 @@ void Server::downloadNextMediaItem() {
 			_session->downloaderTaskFinished()
 		) | rpl::filter([photoMedia] {
 			return photoMedia->loaded();
-		}) | rpl::take(1) | rpl::start_with_next([this, photoMedia, targetPath, photo](auto&&) {
+		}) | rpl::take(1) | rpl::on_next([this, photoMedia, targetPath, photo](auto&&) {
 			if (!_activeExport || _activeExport->finished) return;
 			photoMedia->saveToFile(targetPath);
 			onMediaDownloadComplete(photo);

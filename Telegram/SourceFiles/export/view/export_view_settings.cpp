@@ -191,7 +191,7 @@ void ChooseFormatBox(
 			st::defaultBoxCheckbox),
 		st::exportSettingPadding);
 	(*htmlBox)->checkedChanges(
-	) | rpl::start_with_next([=](bool checked) {
+	) | rpl::on_next([=](bool checked) {
 		if (!checked && countChecked() == 1) {
 			// Prevent unchecking last one
 			(*htmlBox)->setChecked(true);
@@ -209,7 +209,7 @@ void ChooseFormatBox(
 			st::defaultBoxCheckbox),
 		st::exportSettingPadding);
 	(*jsonBox)->checkedChanges(
-	) | rpl::start_with_next([=](bool checked) {
+	) | rpl::on_next([=](bool checked) {
 		if (!checked && countChecked() == 1) {
 			(*jsonBox)->setChecked(true);
 		} else {
@@ -226,7 +226,7 @@ void ChooseFormatBox(
 			st::defaultBoxCheckbox),
 		st::exportSettingPadding);
 	(*markdownBox)->checkedChanges(
-	) | rpl::start_with_next([=](bool checked) {
+	) | rpl::on_next([=](bool checked) {
 		if (!checked && countChecked() == 1) {
 			(*markdownBox)->setChecked(true);
 		} else {
@@ -916,7 +916,7 @@ void SettingsWidget::addLimitsLabel(
 
 	// Measure text width and update desired panel width
 	label->widthValue(
-	) | rpl::start_with_next([=](int) {
+	) | rpl::on_next([=](int) {
 		const auto textWidth = label->textMaxWidth();
 		const auto padding = st::exportLocationPadding.left()
 			+ st::exportLocationPadding.right();

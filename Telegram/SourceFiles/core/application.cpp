@@ -444,7 +444,7 @@ void Application::run() {
 
 		// Subscribe to domain's active session changes
 		domain().activeSessionValue(
-		) | rpl::start_with_next([=](Main::Session *session) {
+		) | rpl::on_next([=](Main::Session *session) {
 			if (session && _mcpServer) {
 				_mcpServer->setSession(session);
 				fprintf(stderr, "[MCP] Session integrated with MCP server (via activeSessionValue)\n");
@@ -458,7 +458,7 @@ void Application::run() {
 			) | rpl::to_empty | rpl::filter([=] {
 				return domain().started();
 			}) | rpl::take(1)
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			fprintf(stderr, "[MCP] Domain started! Subscribing to account sessions...\n");
 			fflush(stderr);
 
@@ -478,7 +478,7 @@ void Application::run() {
 
 				// Also subscribe for future session changes
 				account->sessionValue(
-				) | rpl::start_with_next([this, idx = index](Main::Session *session) {
+				) | rpl::on_next([this, idx = index](Main::Session *session) {
 					if (session && _mcpServer && !_mcpServer->hasSession()) {
 						_mcpServer->setSession(session);
 						fprintf(stderr, "[MCP] Session loaded for account %d, integrated with MCP server\n", idx);
