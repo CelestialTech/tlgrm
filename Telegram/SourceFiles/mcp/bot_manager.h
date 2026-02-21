@@ -159,7 +159,7 @@ private:
 	QMap<QString, QJsonObject> _configs;
 
 	// Thread safety
-	mutable QMutex _mutex;
+	mutable QRecursiveMutex _mutex;
 
 	// Settings
 	bool _eventDispatchEnabled = true;
