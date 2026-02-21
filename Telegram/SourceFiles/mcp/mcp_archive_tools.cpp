@@ -92,6 +92,10 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 	// Resolve settings (sets path, peer name, peer type)
 	Export::View::ResolveSettings(_session, settings);
 
+	// MCP exports always create a named subdirectory (Type-Name-DDMMYYYY-HHMMSS)
+	// even when exporting to an empty directory
+	settings.forceSubPath = true;
+
 	// Prepare localized environment strings (same as UI export)
 	Export::Environment environment = Export::View::PrepareEnvironment(_session);
 
