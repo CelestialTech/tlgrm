@@ -7,6 +7,7 @@
 #include "data/data_chat_filters.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/view/history_view_element.h"
 #include "main/main_session.h"
 #include "apiwrap.h"
 #include "data/data_peer.h"
@@ -171,8 +172,7 @@ qint64 BatchOperations::forwardAllMessages(
 			     ++msgIt) {
 				const auto &element = *msgIt;
 				if (!element) continue;
-				auto item = element->data();
-				if (!item) continue;
+				const auto item = element->data();
 				messageIds.append(item->id.bare);
 				collected++;
 			}
@@ -231,8 +231,7 @@ qint64 BatchOperations::exportChatMessages(
 			     ++msgIt) {
 				const auto &element = *msgIt;
 				if (!element) continue;
-				auto item = element->data();
-				if (!item) continue;
+				const auto item = element->data();
 				messageIds.append(item->id.bare);
 				collected++;
 			}
@@ -736,8 +735,7 @@ QVector<qint64> BatchOperations::filterMessagesByDate(
 		if (!block) continue;
 		for (const auto &element : block->messages) {
 			if (!element) continue;
-			auto item = element->data();
-			if (!item) continue;
+			const auto item = element->data();
 			const auto ts = item->date();
 			if (ts >= startTs && ts <= endTs) {
 				result.append(item->id.bare);
@@ -761,8 +759,7 @@ QVector<qint64> BatchOperations::filterMessagesByUser(qint64 chatId, qint64 user
 		if (!block) continue;
 		for (const auto &element : block->messages) {
 			if (!element) continue;
-			auto item = element->data();
-			if (!item) continue;
+			const auto item = element->data();
 			auto from = item->from();
 			if (from && from->id.value == static_cast<uint64>(userId)) {
 				result.append(item->id.bare);
@@ -786,8 +783,7 @@ QVector<qint64> BatchOperations::filterMessagesByType(qint64 chatId, const QStri
 		if (!block) continue;
 		for (const auto &element : block->messages) {
 			if (!element) continue;
-			auto item = element->data();
-			if (!item) continue;
+			const auto item = element->data();
 
 			bool match = false;
 			if (messageType == "text") {

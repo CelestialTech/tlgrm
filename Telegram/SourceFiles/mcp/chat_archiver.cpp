@@ -13,6 +13,7 @@
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
+#include "history/view/history_view_element.h"
 
 #include <QtCore/QFile>
 #include <QtCore/QDir>
@@ -418,7 +419,8 @@ bool ChatArchiver::archiveChat(qint64 chatId, int messageLimit) {
 		     itemIt != block->messages.rend() && archived < limit;
 		     ++itemIt) {
 			auto *view = itemIt->get();
-			if (auto *item = view->data()) {
+			{
+			const auto item = view->data();
 				if (archiveMessage(item)) {
 					archived++;
 				}
@@ -1325,6 +1327,13 @@ void EphemeralArchiver::onMessageDeleted(qint64 chatId, qint64 messageId) {
 	Q_UNUSED(chatId);
 	Q_UNUSED(messageId);
 	// Track deleted messages (may have been ephemeral)
+}
+
+QString ChatArchiver::getMediaPath(qint64 chatId, qint64 messageId, const QString &extension) {
+	QString mediaDir = QFileInfo(_databasePath).absolutePath() + "/media/" + QString::number(chatId);
+	QDir dir;
+	dir.mkpath(mediaDir);
+	return mediaDir + "/" + QString::number(messageId) + "." + extension;
 }
 
 } // namespace MCP

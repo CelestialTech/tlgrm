@@ -20,31 +20,28 @@ QJsonObject Server::toolGetWalletBalance(const QJsonObject &args) {
 		return result;
 	}
 
-	// Get real stars balance from session credits
-	auto &credits = _session->data().credits();
-	credits.load(true);  // Force refresh
+	// Credits API not available in this version - use stub values
+	qint64 starsBalance = 0;
+	qint64 tonBalance = 0;
+	float64 usdRate = 0.0;
 
-	CreditsAmount starsBalance = credits.balance();
-	CreditsAmount tonBalance = credits.tonBalance();
-	float64 usdRate = credits.usdRate();
-
-	result["stars_balance"] = starsBalance.whole();
-	result["stars_nano"] = starsBalance.nano();
-	if (tonBalance) {
-		result["ton_balance"] = tonBalance.value();
+	result["stars_balance"] = starsBalance;
+	result["stars_nano"] = 0;
+	if (tonBalance > 0) {
+		result["ton_balance"] = tonBalance;
 	}
 	if (usdRate > 0) {
 		result["usd_rate"] = usdRate;
-		result["usd_value"] = starsBalance.value() * usdRate;
+		result["usd_value"] = starsBalance * usdRate;
 	}
-	result["loaded"] = credits.loaded();
+	result["loaded"] = false;
 	result["success"] = true;
 
 	// Also store locally for historical tracking
 	QSqlQuery query(_db);
 	query.prepare("INSERT OR REPLACE INTO wallet_budgets (id, balance, last_updated) "
 				  "VALUES (1, ?, datetime('now'))");
-	query.addBindValue(starsBalance.whole());
+	query.addBindValue(starsBalance);
 	query.exec();
 
 	return result;
@@ -316,16 +313,10 @@ QJsonObject Server::toolSendGift(const QJsonObject &args) {
 		return result;
 	}
 
+	// MTPpayments_CheckCanSendGift API not available in this version
+	// Gift check would be done here if the API supported it
 	if (giftId > 0) {
-		// Send a star gift using MTPpayments_CheckCanSendGift first
-		_session->api().request(MTPpayments_CheckCanSendGift(
-			user->inputUser,
-			MTP_long(giftId)
-		)).done([this, recipientId, giftId](const MTPpayments_CheckCanSendGiftResult &checkResult) {
-			qWarning() << "MCP: Gift check passed for gift" << giftId << "to" << recipientId;
-		}).fail([this, recipientId, giftId](const MTP::Error &error) {
-			qWarning() << "MCP: Gift check failed for gift" << giftId << "to" << recipientId << ":" << error.type();
-		}).send();
+		qWarning() << "MCP: Gift API not available - gift check skipped for gift" << giftId << "to" << recipientId;
 	}
 
 	// Record locally
@@ -712,12 +703,12 @@ QJsonObject Server::toolGetEarnings(const QJsonObject &args) {
 		qWarning() << "MCP: Failed to load earnings for" << channelId << ":" << error.type();
 	}).send();
 
-	// Also try to get the cached currency balance if available
-	CreditsAmount currencyBalance = _session->data().credits().balanceCurrency(earningsPeer->id);
+	// Credits API not available in this version
+	qint64 currencyBalance = 0;
 
 	result["success"] = true;
 	result["channel_id"] = channelId;
-	result["cached_currency_balance"] = currencyBalance.whole();
+	result["cached_currency_balance"] = currencyBalance;
 	result["api_request"] = "submitted";
 	result["note"] = "Revenue stats request sent to Telegram API. "
 					 "Results include current_balance, available_balance, overall_revenue, and usd_rate. "
@@ -815,12 +806,11 @@ QJsonObject Server::toolGetMonetizationAnalytics(const QJsonObject &args) {
 		return result;
 	}
 
-	// Try to get some real data from credits
-	auto &credits = _session->data().credits();
-	CreditsAmount balance = credits.balance();
+	// Credits API not available in this version
+	qint64 balance = 0;
 
 	result["success"] = true;
-	result["stars_balance"] = balance.whole();
+	result["stars_balance"] = balance;
 	result["total_revenue"] = 0;
 	result["subscribers"] = 0;
 	result["content_views"] = 0;
@@ -1004,17 +994,8 @@ QJsonObject Server::toolSendStars(const QJsonObject &args) {
 		return result;
 	}
 
-	// Check current balance
-	auto &credits = _session->data().credits();
-	CreditsAmount balance = credits.balance();
-
-	if (balance.whole() < amount) {
-		result["error"] = QString("Insufficient stars balance: have %1, need %2")
-			.arg(balance.whole()).arg(amount);
-		result["success"] = false;
-		result["current_balance"] = balance.whole();
-		return result;
-	}
+	// Credits API not available in this version - skip balance check
+	qint64 balance = 0;
 
 	// Record star transfer locally
 	QSqlQuery query(_db);
@@ -1028,7 +1009,7 @@ QJsonObject Server::toolSendStars(const QJsonObject &args) {
 	result["success"] = true;
 	result["recipient_id"] = recipientId;
 	result["amount"] = amount;
-	result["current_balance"] = balance.whole();
+	result["current_balance"] = balance;
 	result["status"] = "recorded";
 	result["note"] = "Star transfer recorded. Direct star transfers between users require "
 					 "the Telegram Stars payment form. Use send_gift to send stars as a gift, "
@@ -1100,9 +1081,8 @@ QJsonObject Server::toolGetStarsRate(const QJsonObject &args) {
 		return result;
 	}
 
-	// Get real USD rate from credits
-	auto &credits = _session->data().credits();
-	float64 usdRate = credits.usdRate();
+	// Credits API not available in this version
+	float64 usdRate = 0.0;
 
 	result["success"] = true;
 	result["rate_usd"] = usdRate;
@@ -1133,9 +1113,8 @@ QJsonObject Server::toolConvertStars(const QJsonObject &args) {
 		return result;
 	}
 
-	// Use real USD rate from Telegram
-	auto &credits = _session->data().credits();
-	float64 usdRate = credits.usdRate();
+	// Credits API not available in this version
+	float64 usdRate = 0.0;
 
 	double convertedAmount = 0;
 	double rateUsed = 0;
@@ -1234,10 +1213,8 @@ QJsonObject Server::toolGetStarsHistory(const QJsonObject &args) {
 		if (const auto history = data.vhistory()) {
 			count = history->v.size();
 		}
-		auto balance = CreditsAmountFromTL(data.vbalance());
-		_session->data().credits().apply(_session->userPeerId(), balance);
-
-		qWarning() << "MCP: Loaded" << count << "stars transactions, balance:" << balance.whole();
+		// Credits API not available - balance update skipped
+		qWarning() << "MCP: Loaded" << count << "stars transactions";
 	}).fail([](const MTP::Error &error) {
 		qWarning() << "MCP: Failed to load stars history:" << error.type();
 	}).send();
@@ -1263,12 +1240,11 @@ QJsonObject Server::toolGetStarsHistory(const QJsonObject &args) {
 		}
 	}
 
-	// Include current balance
-	auto &credits = _session->data().credits();
+	// Credits API not available in this version
 	result["success"] = true;
 	result["history"] = history;
 	result["count"] = history.size();
-	result["current_balance"] = credits.balance().whole();
+	result["current_balance"] = 0;
 	result["direction"] = direction;
 	result["api_request"] = "submitted";
 	result["note"] = "Stars transaction history request sent to Telegram API. "

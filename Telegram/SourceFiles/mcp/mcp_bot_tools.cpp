@@ -300,22 +300,7 @@ QJsonObject Server::toolConfigureBot(const QJsonObject &args) {
 		return result;
 	}
 
-	if (_botManager) {
-		bool success = _botManager->saveBotConfig(botId, config);
-		if (success) {
-			result["success"] = true;
-			result["message"] = "Bot configuration updated: " + botId;
-			if (_auditLogger) {
-				_auditLogger->logSystemEvent("bot_configured", botId);
-			}
-		} else {
-			result["success"] = false;
-			result["error"] = "Failed to update bot configuration: " + botId;
-		}
-		return result;
-	}
-
-	// Fallback: store config in DB
+	// Store config directly in DB (avoids BotManager mutex deadlock)
 	QSqlQuery query(_db);
 	query.prepare("UPDATE bot_registry SET config = ? WHERE bot_id = ?");
 	query.addBindValue(QJsonDocument(config).toJson(QJsonDocument::Compact));
@@ -340,6 +325,9 @@ QJsonObject Server::toolConfigureBot(const QJsonObject &args) {
 		}
 	}
 	result["source"] = "local_db";
+	if (result.value("success").toBool() && _auditLogger) {
+		_auditLogger->logSystemEvent("bot_configured", botId);
+	}
 	return result;
 }
 
