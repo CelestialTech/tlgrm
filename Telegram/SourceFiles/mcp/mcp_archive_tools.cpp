@@ -682,6 +682,9 @@ void Server::writeExportFiles() {
 		_activeExport->success = true;
 		_activeExport->finished = true;
 
+		// Also write HTML export
+		writeHtmlExport();
+
 		qWarning() << "MCP: Export complete -" << _activeExport->messages.size()
 		           << "messages," << _activeExport->mediaDownloaded << "media files"
 		           << "written to" << filePath
@@ -691,6 +694,295 @@ void Server::writeExportFiles() {
 		_activeExport->finished = true;
 		qWarning() << "MCP: Export write failed:" << _activeExport->errorMessage;
 	}
+}
+
+QString Server::escapeHtml(const QString &text) {
+	QString result;
+	result.reserve(text.size());
+	for (const auto &ch : text) {
+		if (ch == u'<') result += u"&lt;"_q;
+		else if (ch == u'>') result += u"&gt;"_q;
+		else if (ch == u'&') result += u"&amp;"_q;
+		else if (ch == u'"') result += u"&quot;"_q;
+		else if (ch == u'\'') result += u"&apos;"_q;
+		else result += ch;
+	}
+	return result;
+}
+
+void Server::writeHtmlExport() {
+	if (!_activeExport) return;
+
+	QString htmlPath = _activeExport->resolvedPath + "/messages.html";
+	QFile htmlFile(htmlPath);
+	if (!htmlFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+		qWarning() << "MCP: Failed to write HTML:" << htmlPath;
+		return;
+	}
+
+	QTextStream out(&htmlFile);
+	out.setEncoding(QStringConverter::Utf8);
+
+	// Month names for date formatting
+	static const char *months[] = {
+		"January", "February", "March", "April", "May", "June",
+		"July", "August", "September", "October", "November", "December"
+	};
+
+	// Write HTML header with inline CSS matching Telegram Desktop export style
+	out << "<!DOCTYPE html>\n"
+	    << "<html>\n"
+	    << "<head>\n"
+	    << " <meta charset=\"utf-8\">\n"
+	    << " <title>" << escapeHtml(_activeExport->chatName) << " - Exported Data</title>\n"
+	    << " <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+	    << " <style>\n"
+	    // Core layout
+	    << "body{margin:0;font:12px/18px 'Open Sans',\"Lucida Grande\",\"Lucida Sans Unicode\",Arial,Helvetica,Verdana,sans-serif;}\n"
+	    << "strong{font-weight:700;}\n"
+	    << "code,kbd,pre,samp{font-family:Menlo,Monaco,Consolas,\"Courier New\",monospace;}\n"
+	    << "code{padding:2px 4px;font-size:90%;color:#c7254e;background-color:#f9f2f4;border-radius:4px;}\n"
+	    << "pre{display:block;margin:0;line-height:1.42857143;word-break:break-all;word-wrap:break-word;"
+	    << "color:#333;background-color:#f5f5f5;border-radius:4px;overflow:auto;padding:3px;border:1px solid #eee;max-height:none;font-size:inherit;}\n"
+	    << ".clearfix:after{content:\" \";visibility:hidden;display:block;height:0;clear:both;}\n"
+	    << ".pull_left{float:left;}.pull_right{float:right;}\n"
+	    << ".page_wrap{background-color:#fff;color:#000;}\n"
+	    << ".page_wrap a{color:#168acd;text-decoration:none;}\n"
+	    << ".page_wrap a:hover{text-decoration:underline;}\n"
+	    << ".page_header{position:fixed;z-index:10;background-color:#fff;width:100%;border-bottom:1px solid #e3e6e8;}\n"
+	    << ".page_header .content{width:480px;margin:0 auto;}\n"
+	    << ".bold{color:#212121;font-weight:700;}\n"
+	    << ".details{color:#70777b;}\n"
+	    << ".page_header .content .text{padding:24px 24px 22px 24px;font-size:22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}\n"
+	    << ".page_body{padding-top:64px;width:480px;margin:0 auto;}\n"
+	    // Userpic styles
+	    << ".userpic{display:block;border-radius:50%;overflow:hidden;}\n"
+	    << ".userpic .initials{display:block;color:#fff;text-align:center;text-transform:uppercase;user-select:none;}\n"
+	    << ".userpic1{background-color:#ff5555;}.userpic2{background-color:#64bf47;}\n"
+	    << ".userpic3{background-color:#ffab00;}.userpic4{background-color:#4f9cd9;}\n"
+	    << ".userpic5{background-color:#9884e8;}.userpic6{background-color:#e671a5;}\n"
+	    << ".userpic7{background-color:#47bcd1;}.userpic8{background-color:#ff8c44;}\n"
+	    // History/message styles
+	    << ".history{padding:16px 0;}\n"
+	    << ".message{margin:0 -10px;transition:background-color 2.0s ease;}\n"
+	    << "div.selected{background-color:rgba(242,246,250,255);transition:background-color 0.5s ease;}\n"
+	    << ".service{padding:10px 24px;}\n"
+	    << ".service .body{text-align:center;}\n"
+	    << ".message .userpic .initials{font-size:16px;}\n"
+	    << ".default{padding:10px;}\n"
+	    << ".default.joined{margin-top:-10px;}\n"
+	    << ".default .from_name{color:#3892db;font-weight:700;padding-bottom:5px;}\n"
+	    << ".default .body{margin-left:60px;}\n"
+	    << ".default .text{word-wrap:break-word;line-height:150%;unicode-bidi:plaintext;text-align:start;}\n"
+	    << ".default .reply_to,.default .media_wrap{padding-bottom:5px;}\n"
+	    // Media styles
+	    << ".default .video_file_wrap,.default .animated_wrap{position:relative;}\n"
+	    << ".default .video_file,.default .animated,.default .photo,.default .sticker{display:block;}\n"
+	    << ".video_duration{background:rgba(0,0,0,.4);padding:0px 5px;position:absolute;z-index:2;"
+	    << "border-radius:2px;right:3px;bottom:3px;color:#fff;font-size:11px;}\n"
+	    << ".video_play_bg{background:rgba(0,0,0,.4);width:40px;height:40px;line-height:0;"
+	    << "position:absolute;z-index:2;border-radius:50%;overflow:hidden;"
+	    << "margin:-20px auto 0 -20px;top:50%;left:50%;pointer-events:none;}\n"
+	    << ".video_play{position:absolute;display:inline-block;top:50%;left:50%;"
+	    << "margin-left:-5px;margin-top:-9px;z-index:1;width:0;height:0;"
+	    << "border-style:solid;border-width:9px 0 9px 14px;border-color:transparent transparent transparent #fff;}\n"
+	    // Date divider
+	    << ".date_divider{text-align:center;padding:10px 0;color:#70777b;font-weight:700;}\n"
+	    // Toast
+	    << ".toast_container{position:fixed;left:50%;top:50%;opacity:0;transition:opacity 3.0s ease;}\n"
+	    << ".toast_body{margin:0 -50%;float:left;border-radius:15px;padding:10px 20px;background:rgba(0,0,0,0.7);color:#fff;}\n"
+	    << "div.toast_shown{opacity:1;transition:opacity 0.4s ease;}\n"
+	    << " </style>\n"
+	    // Inline JS for message linking
+	    << " <script>\n"
+	    << "\"use strict\";\n"
+	    << "function CheckLocation(){var s=\"#go_to_message\",h=location.hash;if(h.substr(0,s.length)==s){var m=parseInt(h.substr(s.length));if(m)GoToMessage(m);}}\n"
+	    << "function GoToMessage(id){var e=document.getElementById(\"message\"+id);if(e){location.hash=\"#go_to_message\"+id;"
+	    << "e.scrollIntoView({behavior:'smooth',block:'center'});e.classList.add('selected');setTimeout(function(){e.classList.remove('selected');},2000);"
+	    << "}}\n"
+	    << " </script>\n"
+	    << "</head>\n"
+	    << "<body onload=\"CheckLocation();\">\n"
+	    << "<div class=\"page_wrap\">\n";
+
+	// Page header
+	out << " <div class=\"page_header\">\n"
+	    << "  <div class=\"content\">\n"
+	    << "   <div class=\"text\">" << escapeHtml(_activeExport->chatName) << "</div>\n"
+	    << "  </div>\n"
+	    << " </div>\n";
+
+	// Page body
+	out << " <div class=\"page_body\">\n"
+	    << "  <div class=\"history\">\n";
+
+	// Track date for date dividers and sender for grouping
+	QString lastDateStr;
+	qlonglong lastFromId = -1;
+
+	// Messages are in reverse chronological order (newest first) from API,
+	// but we stored them in fetch order. Reverse for chronological display.
+	for (int i = _activeExport->messages.size() - 1; i >= 0; --i) {
+		QJsonObject msg = _activeExport->messages[i].toObject();
+		if (msg.isEmpty()) continue;
+
+		int msgId = msg["id"].toInt();
+		int dateTs = msg["date"].toInt();
+		QDateTime dateTime = QDateTime::fromSecsSinceEpoch(dateTs);
+		QString timeStr = dateTime.toString("HH:mm");
+		QString fullDateStr = dateTime.toString("dd MMMM yyyy");
+
+		// Date divider when day changes
+		QString dayStr = dateTime.toString("yyyy-MM-dd");
+		if (dayStr != lastDateStr) {
+			QString dateLabel = QString::number(dateTime.date().day())
+				+ " " + months[dateTime.date().month() - 1]
+				+ " " + QString::number(dateTime.date().year());
+			out << "   <div class=\"date_divider\">" << escapeHtml(dateLabel) << "</div>\n";
+			lastDateStr = dayStr;
+			lastFromId = -1; // Reset grouping on date change
+		}
+
+		bool isService = msg["service"].toBool();
+
+		if (isService) {
+			out << "   <div class=\"message service\" id=\"message" << msgId << "\">\n"
+			    << "    <div class=\"body details\">Service message</div>\n"
+			    << "   </div>\n";
+			lastFromId = -1;
+			continue;
+		}
+
+		// Regular message
+		QString fromName = msg["from_name"].toString();
+		if (fromName.isEmpty()) {
+			fromName = _activeExport->chatName;
+		}
+		qlonglong fromId = msg["from_id"].toVariant().toLongLong();
+		if (fromId == 0) fromId = msgId; // Unique per-message if no from_id
+
+		bool joined = (fromId == lastFromId);
+		int colorIndex = (static_cast<int>(fromId % 8)) + 1;
+
+		QString initials;
+		QStringList words = fromName.split(' ', Qt::SkipEmptyParts);
+		if (words.size() >= 2) {
+			initials = words[0].left(1).toUpper() + words[1].left(1).toUpper();
+		} else if (!words.isEmpty()) {
+			initials = words[0].left(2).toUpper();
+		}
+
+		out << "   <div class=\"message default clearfix"
+		    << (joined ? " joined" : "") << "\" id=\"message" << msgId << "\">\n";
+
+		// Userpic (only if not joined)
+		if (!joined) {
+			out << "    <div class=\"pull_left userpic_wrap\">\n"
+			    << "     <div class=\"userpic userpic" << colorIndex
+			    << "\" style=\"width:42px;height:42px;\">\n"
+			    << "      <div class=\"initials\" style=\"line-height:42px;font-size:16px;\">"
+			    << escapeHtml(initials) << "</div>\n"
+			    << "     </div>\n"
+			    << "    </div>\n";
+		}
+
+		out << "    <div class=\"body\">\n";
+
+		// Timestamp
+		out << "     <div class=\"pull_right date details\" title=\""
+		    << escapeHtml(fullDateStr + " " + timeStr) << "\">"
+		    << escapeHtml(timeStr) << "</div>\n";
+
+		// Sender name (only if not joined)
+		if (!joined) {
+			out << "     <div class=\"from_name\">" << escapeHtml(fromName) << "</div>\n";
+		}
+
+		// Forwarded indicator
+		if (msg["forwarded"].toBool()) {
+			out << "     <div class=\"details\">Forwarded message</div>\n";
+		}
+
+		// Media
+		QString mediaFile = msg["media_file"].toString();
+		QString mediaType = msg["media_type"].toString();
+
+		if (!mediaFile.isEmpty()) {
+			out << "     <div class=\"media_wrap clearfix\">\n";
+
+			if (mediaType == "photo") {
+				out << "      <a class=\"photo_wrap clearfix pull_left\" href=\""
+				    << escapeHtml(mediaFile) << "\">\n"
+				    << "       <img class=\"photo\" style=\"max-width:260px;max-height:260px;\" src=\""
+				    << escapeHtml(mediaFile) << "\">\n"
+				    << "      </a>\n";
+			} else if (mediaType == "document") {
+				QString subtype = msg["document_subtype"].toString();
+				QString filename = msg["document_filename"].toString();
+				qlonglong fileSize = msg["document_size"].toVariant().toLongLong();
+
+				// Format file size
+				QString sizeStr;
+				if (fileSize < 1024) sizeStr = QString::number(fileSize) + " B";
+				else if (fileSize < 1024 * 1024) sizeStr = QString::number(fileSize / 1024.0, 'f', 1) + " KB";
+				else sizeStr = QString::number(fileSize / (1024.0 * 1024.0), 'f', 1) + " MB";
+
+				if (subtype == "video") {
+					out << "      <a class=\"video_file_wrap clearfix pull_left\" href=\""
+					    << escapeHtml(mediaFile) << "\">\n"
+					    << "       <div class=\"video_play_bg\"><div class=\"video_play\"></div></div>\n"
+					    << "       <video class=\"video_file\" style=\"max-width:260px;max-height:260px;\" preload=\"metadata\" src=\""
+					    << escapeHtml(mediaFile) << "\"></video>\n"
+					    << "      </a>\n";
+				} else {
+					// Generic file attachment
+					out << "      <div class=\"media clearfix pull_left\">\n"
+					    << "       <div class=\"body\">\n"
+					    << "        <div class=\"title bold\">" << escapeHtml(filename) << "</div>\n"
+					    << "        <div class=\"status details\">" << escapeHtml(sizeStr) << "</div>\n"
+					    << "       </div>\n"
+					    << "      </div>\n";
+				}
+			}
+
+			out << "     </div>\n";
+		} else if (!mediaType.isEmpty() && mediaFile.isEmpty()) {
+			// Media exists but wasn't downloaded
+			out << "     <div class=\"media_wrap clearfix\">\n"
+			    << "      <div class=\"media clearfix pull_left\">\n"
+			    << "       <div class=\"body\">\n"
+			    << "        <div class=\"title bold\">[" << escapeHtml(mediaType) << "]</div>\n"
+			    << "        <div class=\"status details\">Not downloaded</div>\n"
+			    << "       </div>\n"
+			    << "      </div>\n"
+			    << "     </div>\n";
+		}
+
+		// Text
+		QString text = msg["text"].toString();
+		if (!text.isEmpty()) {
+			// Convert newlines to <br> for HTML display
+			QString htmlText = escapeHtml(text);
+			htmlText.replace('\n', "<br>\n");
+			out << "     <div class=\"text\">" << htmlText << "</div>\n";
+		}
+
+		out << "    </div>\n"  // body
+		    << "   </div>\n";  // message
+
+		lastFromId = fromId;
+	}
+
+	// Close history, page_body, page_wrap
+	out << "  </div>\n"   // history
+	    << " </div>\n"    // page_body
+	    << "</div>\n"      // page_wrap
+	    << "</body>\n"
+	    << "</html>\n";
+
+	htmlFile.close();
+	_activeExport->filesCount++;
+	qWarning() << "MCP: HTML export written to" << htmlPath;
 }
 
 // ===== MEDIA DOWNLOAD PHASE =====
