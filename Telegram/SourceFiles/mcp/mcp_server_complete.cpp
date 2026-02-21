@@ -823,6 +823,7 @@ void Server::initializeToolHandlers() {
 	// ARCHIVE TOOLS
 	_toolHandlers["archive_chat"] = [this](const QJsonObject &args) { return toolArchiveChat(args); };
 	_toolHandlers["export_chat"] = [this](const QJsonObject &args) { return toolExportChat(args); };
+	_toolHandlers["get_export_status"] = [this](const QJsonObject &args) { return toolGetExportStatus(args); };
 	_toolHandlers["list_archived_chats"] = [this](const QJsonObject &args) { return toolListArchivedChats(args); };
 	_toolHandlers["get_archive_stats"] = [this](const QJsonObject &args) { return toolGetArchiveStats(args); };
 	_toolHandlers["configure_ephemeral_capture"] = [this](const QJsonObject &args) { return toolConfigureEphemeralCapture(args); };

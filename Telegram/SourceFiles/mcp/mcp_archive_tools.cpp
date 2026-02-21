@@ -34,8 +34,8 @@ QJsonObject Server::toolArchiveChat(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolExportChat(const QJsonObject &args) {
-	// This implementation uses the SAME Export::Controller pipeline as the UI.
-	// MCP is just another interface - same code, same settings, same output.
+	// Non-blocking export: starts export and returns immediately.
+	// Use get_export_status to poll for completion.
 
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QString outputPath = args["output_path"].toString();
@@ -47,11 +47,19 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 		return error;
 	}
 
+	// Check if another export is already running
+	if (_activeExport && !_activeExport->finished) {
+		QJsonObject error;
+		error["error"] = "Another export is already in progress";
+		error["chat_id"] = _activeExport->chatId;
+		error["chat_name"] = _activeExport->chatName;
+		return error;
+	}
+
 	// Get peer and history
 	PeerId peerId(chatId);
 	auto peer = _session->data().peerLoaded(peerId);
 	if (!peer) {
-		// Try to get history to access peer
 		auto history = _session->data().history(peerId);
 		if (history) {
 			peer = history->peer;
@@ -83,9 +91,6 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 	settings.types = Export::Settings::Type::AnyChatsMask;
 	settings.fullChats = Export::Settings::Type::AnyChatsMask;
 
-	// Enable media download based on saved settings (or enable all)
-	// The UI settings should already have this configured
-
 	// Gradual mode is always true in this fork
 	settings.gradualMode = true;
 
@@ -103,95 +108,112 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 	           << "peerName:" << settings.singlePeerName
 	           << "peerType:" << settings.singlePeerType;
 
-	// Create the export controller (same as Export::Manager::start() does for UI)
-	auto controller = std::make_unique<Export::Controller>(
+	// Set up tracking state
+	_activeExport = std::make_unique<ActiveExport>();
+	_activeExport->chatId = chatId;
+	_activeExport->chatName = settings.singlePeerName;
+	_activeExport->chatType = settings.singlePeerType;
+	_activeExport->outputPath = settings.path;
+	_activeExport->startTime = QDateTime::currentDateTime();
+
+	// Clean up any previous controller
+	_exportController.reset();
+
+	// Create the export controller
+	_exportController = std::make_unique<Export::Controller>(
 		&_session->mtp(),
 		inputPeer);
 
-	// Track export state
-	bool exportFinished = false;
-	bool exportSuccess = false;
-	QString finishedPath;
-	int filesCount = 0;
-	int64_t bytesCount = 0;
-	QString errorMessage;
+	// Subscribe to state changes (update _activeExport members)
+	_exportController->state(
+	) | rpl::start_with_next([this](Export::State state) {
+		if (!_activeExport) return;
 
-	// Subscribe to state changes
-	controller->state(
-	) | rpl::start_with_next([&](Export::State state) {
 		if (auto *processing = std::get_if<Export::ProcessingState>(&state)) {
-			// Export in progress - log progress
-			qWarning() << "MCP: Export processing step:" << static_cast<int>(processing->step);
+			_activeExport->currentStep = static_cast<int>(processing->step);
+			qWarning() << "MCP: Export processing step:" << _activeExport->currentStep;
 		} else if (auto *finished = std::get_if<Export::FinishedState>(&state)) {
-			// Export completed successfully
-			finishedPath = finished->path;
-			filesCount = finished->filesCount;
-			bytesCount = finished->bytesCount;
-			exportSuccess = true;
-			exportFinished = true;
-			qWarning() << "MCP: Export finished - path:" << finishedPath
-			           << "files:" << filesCount << "bytes:" << bytesCount;
+			_activeExport->finishedPath = finished->path;
+			_activeExport->filesCount = finished->filesCount;
+			_activeExport->bytesCount = finished->bytesCount;
+			_activeExport->success = true;
+			_activeExport->finished = true;
+			qWarning() << "MCP: Export finished - path:" << finished->path
+			           << "files:" << finished->filesCount << "bytes:" << finished->bytesCount;
 		} else if (auto *apiError = std::get_if<Export::ApiErrorState>(&state)) {
-			errorMessage = QString("API Error: %1 - %2")
+			_activeExport->errorMessage = QString("API Error: %1 - %2")
 				.arg(apiError->data.type())
 				.arg(apiError->data.description());
-			exportFinished = true;
-			qWarning() << "MCP: Export API error:" << errorMessage;
+			_activeExport->finished = true;
+			qWarning() << "MCP: Export API error:" << _activeExport->errorMessage;
 		} else if (auto *outputError = std::get_if<Export::OutputErrorState>(&state)) {
-			errorMessage = "Output error at path: " + outputError->path;
-			exportFinished = true;
-			qWarning() << "MCP: Export output error:" << errorMessage;
+			_activeExport->errorMessage = "Output error at path: " + outputError->path;
+			_activeExport->finished = true;
+			qWarning() << "MCP: Export output error:" << _activeExport->errorMessage;
 		} else if (std::get_if<Export::CancelledState>(&state)) {
-			errorMessage = "Export was cancelled";
-			exportFinished = true;
+			_activeExport->errorMessage = "Export was cancelled";
+			_activeExport->finished = true;
 			qWarning() << "MCP: Export cancelled";
 		}
-	}, controller->lifetime());
+	}, _exportController->lifetime());
 
-	// Start the export
-	controller->startExport(settings, environment);
+	// Start the export (non-blocking - runs on crl::object_on_queue)
+	_exportController->startExport(settings, environment);
 
-	// Wait for export to complete (with timeout)
-	// The controller runs on crl::object_on_queue, so we need to process events
-	QEventLoop loop;
-	QTimer timeoutTimer;
-	timeoutTimer.setSingleShot(true);
-
-	// 10 minute timeout for export (can be long for large chats with media)
-	timeoutTimer.start(600000);
-
-	QObject::connect(&timeoutTimer, &QTimer::timeout, [&]() {
-		if (!exportFinished) {
-			errorMessage = "Export timed out after 10 minutes";
-			exportFinished = true;
-		}
-		loop.quit();
-	});
-
-	// Poll for completion
-	QTimer pollTimer;
-	pollTimer.start(100);
-	QObject::connect(&pollTimer, &QTimer::timeout, [&]() {
-		if (exportFinished) {
-			loop.quit();
-		}
-	});
-
-	// Run event loop until export finishes or times out
-	loop.exec();
-
-	// Build result
+	// Return immediately with "started" status
 	QJsonObject result;
-	result["success"] = exportSuccess;
+	result["success"] = true;
+	result["status"] = "started";
 	result["chat_id"] = chatId;
 	result["chat_name"] = settings.singlePeerName;
 	result["chat_type"] = settings.singlePeerType;
-	result["output_directory"] = finishedPath;
-	result["files_count"] = filesCount;
-	result["bytes_count"] = bytesCount;
+	result["output_path"] = settings.path;
+	result["message"] = "Export started. Use get_export_status to poll for completion.";
 
-	if (!exportSuccess) {
-		result["error"] = errorMessage.isEmpty() ? "Export failed" : errorMessage;
+	return result;
+}
+
+QJsonObject Server::toolGetExportStatus(const QJsonObject &args) {
+	Q_UNUSED(args);
+
+	if (!_activeExport) {
+		QJsonObject result;
+		result["success"] = true;
+		result["state"] = "idle";
+		result["message"] = "No export in progress";
+		return result;
+	}
+
+	QJsonObject result;
+	result["success"] = true;
+	result["chat_id"] = _activeExport->chatId;
+	result["chat_name"] = _activeExport->chatName;
+	result["chat_type"] = _activeExport->chatType;
+	result["output_path"] = _activeExport->outputPath;
+
+	if (_activeExport->finished) {
+		result["state"] = _activeExport->success ? "completed" : "failed";
+		result["export_success"] = _activeExport->success;
+
+		if (_activeExport->success) {
+			result["output_directory"] = _activeExport->finishedPath;
+			result["files_count"] = _activeExport->filesCount;
+			result["bytes_count"] = _activeExport->bytesCount;
+		} else {
+			result["error"] = _activeExport->errorMessage.isEmpty()
+				? "Export failed" : _activeExport->errorMessage;
+		}
+
+		// Calculate duration
+		qint64 durationSecs = _activeExport->startTime.secsTo(QDateTime::currentDateTime());
+		result["duration_seconds"] = durationSecs;
+	} else {
+		result["state"] = "in_progress";
+		result["current_step"] = _activeExport->currentStep;
+
+		// Elapsed time
+		qint64 elapsedSecs = _activeExport->startTime.secsTo(QDateTime::currentDateTime());
+		result["elapsed_seconds"] = elapsedSecs;
 	}
 
 	return result;

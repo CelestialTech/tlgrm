@@ -34,6 +34,10 @@ class Session;
 
 class HistoryItem;
 
+namespace Export {
+class Controller;
+} // namespace Export
+
 namespace MCP {
 
 // Forward declarations
@@ -146,9 +150,10 @@ private:
 	QJsonObject toolSearchMessages(const QJsonObject &args);
 	QJsonObject toolGetUserInfo(const QJsonObject &args);
 
-	// Archive tools (9 tools - includes ephemeral capture)
+	// Archive tools (10 tools - includes ephemeral capture + export status)
 	QJsonObject toolArchiveChat(const QJsonObject &args);
 	QJsonObject toolExportChat(const QJsonObject &args);
+	QJsonObject toolGetExportStatus(const QJsonObject &args);
 	QJsonObject toolListArchivedChats(const QJsonObject &args);
 	QJsonObject toolGetArchiveStats(const QJsonObject &args);
 	QJsonObject toolConfigureEphemeralCapture(const QJsonObject &args);
@@ -675,6 +680,24 @@ private:
 
 	// RPL lifetime for session event subscriptions
 	std::unique_ptr<rpl::lifetime> _lifetime;
+
+	// Active export tracking (non-blocking export_chat)
+	struct ActiveExport {
+		qint64 chatId = 0;
+		QString chatName;
+		QString chatType;
+		QString outputPath;
+		bool finished = false;
+		bool success = false;
+		QString finishedPath;
+		int filesCount = 0;
+		int64_t bytesCount = 0;
+		QString errorMessage;
+		int currentStep = -1;
+		QDateTime startTime;
+	};
+	std::unique_ptr<Export::Controller> _exportController;
+	std::unique_ptr<ActiveExport> _activeExport;
 };
 
 } // namespace MCP
