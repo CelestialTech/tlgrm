@@ -794,6 +794,15 @@ void Server::downloadNextMediaItem() {
 		return;
 	}
 
+	// Start per-item timeout scaled to file size.
+	// Assumes minimum throughput of 100 KB/s; floor 60s, cap 30 min.
+	if (!_mediaItemTimeoutTimer) {
+		_mediaItemTimeoutTimer = new QTimer(this);
+		_mediaItemTimeoutTimer->setSingleShot(true);
+		connect(_mediaItemTimeoutTimer, &QTimer::timeout,
+			this, &Server::onMediaItemTimeout);
+	}
+
 	auto &item = _activeExport->mediaItems[_activeExport->currentMediaIndex];
 	QString mediaDir = _activeExport->resolvedPath + "/media/";
 
@@ -807,6 +816,21 @@ void Server::downloadNextMediaItem() {
 		}
 
 		auto document = _session->data().document(item.documentId);
+
+		// Start size-based timeout: assumes min throughput 100 KB/s.
+		// Floor 60s, cap 30 min. E.g. 100MB -> 1000s, 4GB -> 1800s (capped).
+		{
+			int64_t sizeBytes = document->size;
+			int timeoutSecs = 60; // default for unknown size
+			if (sizeBytes > 0) {
+				timeoutSecs = static_cast<int>(sizeBytes / (100 * 1024));
+				timeoutSecs = std::clamp(timeoutSecs, 60, 1800);
+			}
+			_mediaItemTimeoutTimer->start(timeoutSecs * 1000);
+			qWarning() << "MCP: Timeout for document:" << timeoutSecs << "s"
+			           << "(size:" << sizeBytes << "bytes)";
+		}
+
 		QString filename = generateMediaFilename(document, item.messageId);
 		item.targetFilename = filename;
 		QString targetPath = mediaDir + filename;
@@ -882,12 +906,22 @@ void Server::downloadNextMediaItem() {
 		           << "/" << _activeExport->mediaItems.size()
 		           << "downloading photo:" << filename;
 
-		// Load the large size photo
+		// CRITICAL: Create media view BEFORE calling load().
+		// If the photo is already cached, load()'s done callback fires
+		// synchronously and calls activeMediaView()->set(). Without an
+		// active media view, set() is never called, data is discarded,
+		// and downloaderTaskFinished never fires for this photo.
+		auto photoMedia = photo->createMediaView();
+
+		// Photos are small (typically <10MB), 120s timeout is generous
+		_mediaItemTimeoutTimer->start(120 * 1000);
+
+		// Start loading - may complete synchronously if cached
 		photo->load(Data::PhotoSize::Large, origin, LoadFromCloudOrLocal, false);
 
-		// Check if already loaded
-		auto photoMedia = photo->createMediaView();
+		// Check if already loaded (synchronous completion or was cached)
 		if (photoMedia->loaded()) {
+			_mediaItemTimeoutTimer->stop();
 			photoMedia->saveToFile(targetPath);
 			item.downloaded = true;
 			_activeExport->mediaDownloaded++;
@@ -899,7 +933,7 @@ void Server::downloadNextMediaItem() {
 			msg["media_file"] = "media/" + filename;
 			_activeExport->messages[item.messageIndex] = msg;
 
-			qWarning() << "MCP: Photo saved:" << filename;
+			qWarning() << "MCP: Photo saved (immediate):" << filename;
 
 			_activeExport->currentMediaIndex++;
 			int delay = 100 + (QRandomGenerator::global()->bounded(200));
@@ -907,36 +941,20 @@ void Server::downloadNextMediaItem() {
 			return;
 		}
 
-		// Need to wait for photo load - poll for completion
-		auto pollTimer = new QTimer(this);
-		auto photoPtr = photo.get();
-		auto photoMediaPtr = std::move(photoMedia);
-		int pollCount = 0;
-		connect(pollTimer, &QTimer::timeout, this, [this, photoPtr, targetPath, filename, pollTimer, pollCount]() mutable {
-			if (!_activeExport || _activeExport->finished) {
-				pollTimer->deleteLater();
-				return;
-			}
-			pollCount++;
-			auto media = photoPtr->createMediaView();
-			if (media->loaded()) {
-				pollTimer->stop();
-				pollTimer->deleteLater();
-				media->saveToFile(targetPath);
-				onMediaDownloadComplete(gsl::make_not_null(photoPtr));
-			} else if (pollCount > 300) { // 5 minute timeout (300 * 1s)
-				pollTimer->stop();
-				pollTimer->deleteLater();
-				// Timeout - mark as failed
-				auto &currentItem = _activeExport->mediaItems[_activeExport->currentMediaIndex];
-				currentItem.failed = true;
-				_activeExport->mediaFailed++;
-				qWarning() << "MCP: Photo download timeout:" << filename;
-				_activeExport->currentMediaIndex++;
-				downloadNextMediaItem();
-			}
-		});
-		pollTimer->start(1000); // Poll every second
+		// Not loaded yet - wait for downloaderTaskFinished signal.
+		// photoMedia is kept alive via shared_ptr capture in the lambda,
+		// ensuring activeMediaView() returns it when load() completes.
+		rpl::single(
+			rpl::empty_value()
+		) | rpl::then(
+			_session->downloaderTaskFinished()
+		) | rpl::filter([photoMedia] {
+			return photoMedia->loaded();
+		}) | rpl::take(1) | rpl::start_with_next([this, photoMedia, targetPath, photo](auto&&) {
+			if (!_activeExport || _activeExport->finished) return;
+			photoMedia->saveToFile(targetPath);
+			onMediaDownloadComplete(photo);
+		}, *_activeExport->mediaLifetime);
 	}
 }
 
@@ -946,6 +964,11 @@ void Server::onMediaDownloadComplete(not_null<DocumentData*> document) {
 
 	auto &item = _activeExport->mediaItems[_activeExport->currentMediaIndex];
 	if (item.type != ActiveExport::MediaItem::Document || item.documentId != document->id) return;
+
+	// Stop per-item timeout - download completed normally
+	if (_mediaItemTimeoutTimer) {
+		_mediaItemTimeoutTimer->stop();
+	}
 
 	// Reset the lifetime to unsubscribe from this document's signals
 	_activeExport->mediaLifetime = std::make_unique<rpl::lifetime>();
@@ -1033,6 +1056,14 @@ void Server::onMediaDownloadComplete(not_null<PhotoData*> photo) {
 	auto &item = _activeExport->mediaItems[_activeExport->currentMediaIndex];
 	if (item.type != ActiveExport::MediaItem::Photo) return;
 
+	// Stop per-item timeout - download completed normally
+	if (_mediaItemTimeoutTimer) {
+		_mediaItemTimeoutTimer->stop();
+	}
+
+	// Reset lifetime to unsubscribe from downloaderTaskFinished
+	_activeExport->mediaLifetime = std::make_unique<rpl::lifetime>();
+
 	QString targetPath = _activeExport->resolvedPath + "/media/" + item.targetFilename;
 
 	if (QFile::exists(targetPath) && QFileInfo(targetPath).size() > 0) {
@@ -1058,8 +1089,37 @@ void Server::onMediaDownloadComplete(not_null<PhotoData*> photo) {
 	QTimer::singleShot(delay, [this]() { downloadNextMediaItem(); });
 }
 
+void Server::onMediaItemTimeout() {
+	if (!_activeExport || _activeExport->finished) return;
+	if (_activeExport->currentMediaIndex >= _activeExport->mediaItems.size()) return;
+
+	auto &item = _activeExport->mediaItems[_activeExport->currentMediaIndex];
+	QString itemDesc = (item.type == ActiveExport::MediaItem::Document)
+		? ("document " + item.targetFilename)
+		: ("photo " + item.targetFilename);
+
+	qWarning() << "MCP: Media item timeout for" << itemDesc
+	           << "- skipping to next item";
+
+	// Unsubscribe from load signals (documents use documentLoadProgress,
+	// photos use downloaderTaskFinished - both via mediaLifetime)
+	_activeExport->mediaLifetime = std::make_unique<rpl::lifetime>();
+
+	item.failed = true;
+	_activeExport->mediaFailed++;
+	_activeExport->currentMediaIndex++;
+
+	// Small delay before next item
+	QTimer::singleShot(200, [this]() { downloadNextMediaItem(); });
+}
+
 void Server::onAllMediaDownloaded() {
 	if (!_activeExport || _activeExport->finished) return;
+
+	// Clean up timeout timer
+	if (_mediaItemTimeoutTimer) {
+		_mediaItemTimeoutTimer->stop();
+	}
 
 	_activeExport->downloadingMedia = false;
 	_activeExport->mediaLifetime.reset();

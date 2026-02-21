@@ -742,6 +742,9 @@ private:
 		QDateTime mediaPhaseStartTime;
 	};
 	std::unique_ptr<ActiveExport> _activeExport;
+	QTimer *_mediaItemTimeoutTimer = nullptr;
+
+	void onMediaItemTimeout();
 };
 
 } // namespace MCP
