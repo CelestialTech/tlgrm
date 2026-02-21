@@ -604,7 +604,14 @@ QJsonObject Server::mtpMessageToJson(const MTPMessage &message) {
 									msg["document_subtype"] = "voice";
 								} else {
 									msg["document_subtype"] = "audio";
+									if (const auto p = a.vperformer()) {
+										msg["audio_performer"] = qs(*p);
+									}
+									if (const auto t = a.vtitle()) {
+										msg["audio_title"] = qs(*t);
+									}
 								}
+								msg["audio_duration"] = a.vduration().v;
 							}, [&](const MTPDdocumentAttributeSticker &) {
 								msg["document_subtype"] = "sticker";
 							}, [&](const MTPDdocumentAttributeAnimated &) {
@@ -621,14 +628,46 @@ QJsonObject Server::mtpMessageToJson(const MTPMessage &message) {
 						// Empty document
 					});
 				}
-			}, [&](const MTPDmessageMediaGeo &) {
+			}, [&](const MTPDmessageMediaGeo &geoMedia) {
 				msg["media_type"] = "geo";
-			}, [&](const MTPDmessageMediaContact &) {
+				geoMedia.vgeo().match([&](const MTPDgeoPoint &g) {
+					msg["geo_lat"] = g.vlat().v;
+					msg["geo_long"] = g.vlong().v;
+				}, [&](const MTPDgeoPointEmpty &) {});
+			}, [&](const MTPDmessageMediaGeoLive &geoLive) {
+				msg["media_type"] = "geo_live";
+				geoLive.vgeo().match([&](const MTPDgeoPoint &g) {
+					msg["geo_lat"] = g.vlat().v;
+					msg["geo_long"] = g.vlong().v;
+				}, [&](const MTPDgeoPointEmpty &) {});
+			}, [&](const MTPDmessageMediaVenue &venueMedia) {
+				msg["media_type"] = "venue";
+				msg["venue_title"] = qs(venueMedia.vtitle());
+				msg["venue_address"] = qs(venueMedia.vaddress());
+				venueMedia.vgeo().match([&](const MTPDgeoPoint &g) {
+					msg["geo_lat"] = g.vlat().v;
+					msg["geo_long"] = g.vlong().v;
+				}, [&](const MTPDgeoPointEmpty &) {});
+			}, [&](const MTPDmessageMediaContact &contactMedia) {
 				msg["media_type"] = "contact";
+				msg["contact_first_name"] = qs(contactMedia.vfirst_name());
+				msg["contact_last_name"] = qs(contactMedia.vlast_name());
+				msg["contact_phone"] = qs(contactMedia.vphone_number());
 			}, [&](const MTPDmessageMediaWebPage &) {
 				msg["media_type"] = "webpage";
-			}, [&](const MTPDmessageMediaPoll &) {
+			}, [&](const MTPDmessageMediaPoll &pollMedia) {
 				msg["media_type"] = "poll";
+				pollMedia.vpoll().match([&](const MTPDpoll &p) {
+					msg["poll_question"] = qs(p.vquestion().data().vtext());
+					msg["poll_closed"] = p.is_closed();
+					QJsonArray answers;
+					for (const auto &a : p.vanswers().v) {
+						a.match([&](const MTPDpollAnswer &ans) {
+							answers.append(qs(ans.vtext().data().vtext()));
+						});
+					}
+					msg["poll_answers"] = answers;
+				});
 			}, [&](const MTPDmessageMediaEmpty &) {
 				// No media
 			}, [&](const auto &) {
@@ -792,6 +831,12 @@ void Server::writeHtmlExport() {
 	    << ".toast_container{position:fixed;left:50%;top:50%;opacity:0;transition:opacity 3.0s ease;}\n"
 	    << ".toast_body{margin:0 -50%;float:left;border-radius:15px;padding:10px 20px;background:rgba(0,0,0,0.7);color:#fff;}\n"
 	    << "div.toast_shown{opacity:1;transition:opacity 0.4s ease;}\n"
+	    // Media icon styles
+	    << ".media_icon{width:48px;height:48px;border-radius:50%;float:left;margin-right:10px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;}\n"
+	    << ".media_icon.audio{background:#4f9cd9;}.media_icon.voice{background:#4f9cd9;}\n"
+	    << ".media_icon.file{background:#ff5555;}.media_icon.contact{background:#ff8c44;}\n"
+	    << ".media_icon.location{background:#47bcd1;}.media_icon.poll{background:#9884e8;}\n"
+	    << "audio{width:100%;max-width:300px;margin:5px 0;}\n"
 	    << " </style>\n"
 	    // Inline JS for message linking
 	    << " <script>\n"
@@ -928,15 +973,50 @@ void Server::writeHtmlExport() {
 				else sizeStr = QString::number(fileSize / (1024.0 * 1024.0), 'f', 1) + " MB";
 
 				if (subtype == "video") {
-					out << "      <a class=\"video_file_wrap clearfix pull_left\" href=\""
-					    << escapeHtml(mediaFile) << "\">\n"
+					out << "      <a class=\"video_file_wrap clearfix pull_left\" href=\"\""
+					    << escapeHtml(mediaFile) << "\"\">\n"
 					    << "       <div class=\"video_play_bg\"><div class=\"video_play\"></div></div>\n"
-					    << "       <video class=\"video_file\" style=\"max-width:260px;max-height:260px;\" preload=\"metadata\" src=\""
+					    << "       <video class=\"video_file\" style=\"max-width:260px;max-height:260px;\" preload=\"metadata\" src=\"\""
 					    << escapeHtml(mediaFile) << "\"></video>\n"
 					    << "      </a>\n";
+				} else if (subtype == "audio") {
+					out << "      <div class=\"media clearfix pull_left\">\n"
+					    << "       <div class=\"media_icon audio\">♫</div>\n"
+					    << "       <div class=\"body\">\n";
+					if (msg.contains("audio_performer") || msg.contains("audio_title")) {
+						QString performer = msg["audio_performer"].toString();
+						QString title = msg["audio_title"].toString();
+						if (!performer.isEmpty() && !title.isEmpty()) {
+							out << "        <div class=\"title bold\">" << escapeHtml(performer + " - " + title) << "</div>\n";
+						} else if (!title.isEmpty()) {
+							out << "        <div class=\"title bold\">" << escapeHtml(title) << "</div>\n";
+						} else {
+							out << "        <div class=\"title bold\">" << escapeHtml(performer) << "</div>\n";
+						}
+					} else {
+						out << "        <div class=\"title bold\">" << escapeHtml(filename) << "</div>\n";
+					}
+					out << "        <audio controls src=\"" << escapeHtml(mediaFile) << "\"></audio>\n"
+					    << "       </div>\n"
+					    << "      </div>\n";
+				} else if (subtype == "voice") {
+					out << "      <div class=\"media clearfix pull_left\">\n"
+					    << "       <div class=\"media_icon voice\">🎙</div>\n"
+					    << "       <div class=\"body\">\n"
+					    << "        <div class=\"title bold\">Voice message</div>\n"
+					    << "        <audio controls src=\"" << escapeHtml(mediaFile) << "\"></audio>\n"
+					    << "       </div>\n"
+					    << "      </div>\n";
+				} else if (subtype == "sticker") {
+					out << "      <img class=\"sticker\" style=\"max-width:256px;max-height:256px;\" src=\"\""
+					    << escapeHtml(mediaFile) << "\">\n";
+				} else if (subtype == "animation") {
+					out << "      <video class=\"animated\" style=\"max-width:260px;max-height:260px;\" autoplay loop muted src=\"\""
+					    << escapeHtml(mediaFile) << "\"></video>\n";
 				} else {
 					// Generic file attachment
 					out << "      <div class=\"media clearfix pull_left\">\n"
+					    << "       <div class=\"media_icon file\">📄</div>\n"
 					    << "       <div class=\"body\">\n"
 					    << "        <div class=\"title bold\">" << escapeHtml(filename) << "</div>\n"
 					    << "        <div class=\"status details\">" << escapeHtml(sizeStr) << "</div>\n"
@@ -944,18 +1024,78 @@ void Server::writeHtmlExport() {
 					    << "      </div>\n";
 				}
 			}
-
 			out << "     </div>\n";
 		} else if (!mediaType.isEmpty() && mediaFile.isEmpty()) {
-			// Media exists but wasn't downloaded
-			out << "     <div class=\"media_wrap clearfix\">\n"
-			    << "      <div class=\"media clearfix pull_left\">\n"
-			    << "       <div class=\"body\">\n"
-			    << "        <div class=\"title bold\">[" << escapeHtml(mediaType) << "]</div>\n"
-			    << "        <div class=\"status details\">Not downloaded</div>\n"
-			    << "       </div>\n"
-			    << "      </div>\n"
-			    << "     </div>\n";
+			// Media exists but wasn't downloaded, OR non-file media types
+			if (mediaType == "geo" || mediaType == "geo_live") {
+				double lat = msg["geo_lat"].toDouble();
+				double lon = msg["geo_long"].toDouble();
+				out << "     <div class=\"media_wrap clearfix\">\n"
+				    << "      <div class=\"media clearfix pull_left\">\n"
+				    << "       <div class=\"media_icon location\">📍</div>\n"
+				    << "       <div class=\"body\">\n"
+				    << "        <div class=\"title bold\">" << (mediaType == "geo_live" ? "Live Location" : "Location") << "</div>\n"
+				    << "        <div class=\"status details\">Lat: " << lat << ", Long: " << lon << "</div>\n"
+				    << "        <div class=\"status details\"><a href=\"https://www.openstreetmap.org/?mlat=" << lat << "&mlon=" << lon << "\" target=\"_blank\">View on map</a></div>\n"
+				    << "       </div>\n"
+				    << "      </div>\n"
+				    << "     </div>\n";
+			} else if (mediaType == "venue") {
+				QString venueTitle = msg["venue_title"].toString();
+				QString venueAddress = msg["venue_address"].toString();
+				double lat = msg["geo_lat"].toDouble();
+				double lon = msg["geo_long"].toDouble();
+				out << "     <div class=\"media_wrap clearfix\">\n"
+				    << "      <div class=\"media clearfix pull_left\">\n"
+				    << "       <div class=\"media_icon location\">📍</div>\n"
+				    << "       <div class=\"body\">\n"
+				    << "        <div class=\"title bold\">" << escapeHtml(venueTitle) << "</div>\n"
+				    << "        <div class=\"status details\">" << escapeHtml(venueAddress) << "</div>\n"
+				    << "        <div class=\"status details\"><a href=\"https://www.openstreetmap.org/?mlat=" << lat << "&mlon=" << lon << "\" target=\"_blank\">View on map</a></div>\n"
+				    << "       </div>\n"
+				    << "      </div>\n"
+				    << "     </div>\n";
+			} else if (mediaType == "contact") {
+				QString firstName = msg["contact_first_name"].toString();
+				QString lastName = msg["contact_last_name"].toString();
+				QString phone = msg["contact_phone"].toString();
+				QString fullName = firstName;
+				if (!lastName.isEmpty()) fullName += " " + lastName;
+				out << "     <div class=\"media_wrap clearfix\">\n"
+				    << "      <div class=\"media clearfix pull_left\">\n"
+				    << "       <div class=\"media_icon contact\">👤</div>\n"
+				    << "       <div class=\"body\">\n"
+				    << "        <div class=\"title bold\">" << escapeHtml(fullName) << "</div>\n"
+				    << "        <div class=\"status details\">" << escapeHtml(phone) << "</div>\n"
+				    << "       </div>\n"
+				    << "      </div>\n"
+				    << "     </div>\n";
+			} else if (mediaType == "poll") {
+				QString question = msg["poll_question"].toString();
+				QJsonArray answers = msg["poll_answers"].toArray();
+				bool closed = msg["poll_closed"].toBool();
+				out << "     <div class=\"media_wrap clearfix\">\n"
+				    << "      <div class=\"media clearfix pull_left\">\n"
+				    << "       <div class=\"media_icon poll\">📊</div>\n"
+				    << "       <div class=\"body\">\n"
+				    << "        <div class=\"title bold\">" << escapeHtml(question) << (closed ? " (closed)" : "") << "</div>\n";
+				for (const auto &answer : answers) {
+					out << "        <div class=\"status details\">• " << escapeHtml(answer.toString()) << "</div>\n";
+				}
+				out << "       </div>\n"
+				    << "      </div>\n"
+				    << "     </div>\n";
+			} else {
+				// Generic "not downloaded" message for other media types
+				out << "     <div class=\"media_wrap clearfix\">\n"
+				    << "      <div class=\"media clearfix pull_left\">\n"
+				    << "       <div class=\"body\">\n"
+				    << "        <div class=\"title bold\">[" << escapeHtml(mediaType) << "]</div>\n"
+				    << "        <div class=\"status details\">Not downloaded</div>\n"
+				    << "       </div>\n"
+				    << "      </div>\n"
+				    << "     </div>\n";
+			}
 		}
 
 		// Text
