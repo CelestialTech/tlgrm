@@ -235,6 +235,11 @@ void Server::stop() {
 
 	_auditLogger->logSystemEvent("server_stop", "MCP Server stopping");
 
+	// Shutdown bot manager first (it holds raw pointers to other components)
+	if (_botManager) {
+		_botManager.reset();
+	}
+
 	// Cleanup components (using reset() for unique_ptr members)
 	if (_archiver) {
 		_archiver->stop();
