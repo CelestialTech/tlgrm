@@ -631,6 +631,8 @@ private:
 	void fetchNextMessageBatch();
 	void onMessageBatchReceived(const MTPmessages_Messages &result);
 	void writeExportFiles();
+	void writeHtmlExport();
+	static QString escapeHtml(const QString &text);
 	static QString sanitizeForFilename(const QString &name);
 	QString createExportDirectory(const QString &basePath, const QString &peerType, const QString &peerName);
 	QJsonObject mtpMessageToJson(const MTPMessage &message);
