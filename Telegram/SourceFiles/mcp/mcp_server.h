@@ -643,6 +643,7 @@ private:
 	void onMediaDownloadComplete(not_null<DocumentData*> document);
 	void onMediaDownloadComplete(not_null<PhotoData*> photo);
 	void onAllMediaDownloaded();
+	void generateVideoThumbnails();
 	QString generateMediaFilename(DocumentData *document, int msgId);
 	QString generateMediaFilename(PhotoData *photo, int msgId);
 

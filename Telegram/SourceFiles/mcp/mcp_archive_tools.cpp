@@ -597,8 +597,11 @@ QJsonObject Server::mtpMessageToJson(const MTPMessage &message) {
 						for (const auto &attr : d.vattributes().v) {
 							attr.match([&](const MTPDdocumentAttributeFilename &fn) {
 								msg["document_filename"] = qs(fn.vfile_name());
-							}, [&](const MTPDdocumentAttributeVideo &) {
+							}, [&](const MTPDdocumentAttributeVideo &v) {
 								msg["document_subtype"] = "video";
+								msg["video_width"] = v.vw().v;
+								msg["video_height"] = v.vh().v;
+								msg["video_duration"] = v.vduration().v;
 							}, [&](const MTPDdocumentAttributeAudio &a) {
 								if (a.is_voice()) {
 									msg["document_subtype"] = "voice";
@@ -837,6 +840,8 @@ void Server::writeHtmlExport() {
 	    << ".media_icon.file{background:#ff5555;}.media_icon.contact{background:#ff8c44;}\n"
 	    << ".media_icon.location{background:#47bcd1;}.media_icon.poll{background:#9884e8;}\n"
 	    << "audio{width:100%;max-width:300px;margin:5px 0;}\n"
+	    << ".video_preview_wrap{position:relative;cursor:pointer;display:inline-block;}\n"
+	    << ".video_preview_wrap img.video_preview{display:block;max-width:260px;max-height:260px;border-radius:4px;}\n"
 	    << " </style>\n"
 	    // Inline JS for message linking
 	    << " <script>\n"
@@ -845,6 +850,9 @@ void Server::writeHtmlExport() {
 	    << "function GoToMessage(id){var e=document.getElementById(\"message\"+id);if(e){location.hash=\"#go_to_message\"+id;"
 	    << "e.scrollIntoView({behavior:'smooth',block:'center'});e.classList.add('selected');setTimeout(function(){e.classList.remove('selected');},2000);"
 	    << "}}\n"
+	    << "function PlayVideo(el){var w=el.parentNode;var s=el.getAttribute('data-src');var v=document.createElement('video');"
+	    << "v.className='video_file';v.style.maxWidth='260px';v.style.maxHeight='260px';v.controls=true;v.autoplay=true;v.src=s;"
+	    << "w.innerHTML='';w.appendChild(v);}\n"
 	    << " </script>\n"
 	    << "</head>\n"
 	    << "<body onload=\"CheckLocation();\">\n"
@@ -973,12 +981,18 @@ void Server::writeHtmlExport() {
 				else sizeStr = QString::number(fileSize / (1024.0 * 1024.0), 'f', 1) + " MB";
 
 				if (subtype == "video") {
-					out << "      <a class=\"video_file_wrap clearfix pull_left\" href=\"\""
-					    << escapeHtml(mediaFile) << "\"\">\n"
-					    << "       <div class=\"video_play_bg\"><div class=\"video_play\"></div></div>\n"
-					    << "       <video class=\"video_file\" style=\"max-width:260px;max-height:260px;\" preload=\"metadata\" src=\"\""
-					    << escapeHtml(mediaFile) << "\"></video>\n"
-					    << "      </a>\n";
+					QString thumbFile = msg["media_thumb"].toString();
+					if (!thumbFile.isEmpty()) {
+						out << "      <div class=\"video_file_wrap clearfix pull_left video_preview_wrap\" onclick=\"PlayVideo(this.querySelector('img'))\">"
+						    << "\n       <div class=\"video_play_bg\"><div class=\"video_play\"></div></div>\n"
+						    << "       <img class=\"video_preview\" data-src=\"" << escapeHtml(mediaFile) << "\" src=\"" << escapeHtml(thumbFile) << "\">\n"
+						    << "      </div>\n";
+					} else {
+						out << "      <a class=\"video_file_wrap clearfix pull_left\" href=\"" << escapeHtml(mediaFile) << "\">\n"
+						    << "       <div class=\"video_play_bg\"><div class=\"video_play\"></div></div>\n"
+						    << "       <video class=\"video_file\" style=\"max-width:260px;max-height:260px;\" preload=\"metadata\" src=\"" << escapeHtml(mediaFile) << "\"></video>\n"
+						    << "      </a>\n";
+					}
 				} else if (subtype == "audio") {
 					out << "      <div class=\"media clearfix pull_left\">\n"
 					    << "       <div class=\"media_icon audio\">♫</div>\n"
@@ -1008,10 +1022,10 @@ void Server::writeHtmlExport() {
 					    << "       </div>\n"
 					    << "      </div>\n";
 				} else if (subtype == "sticker") {
-					out << "      <img class=\"sticker\" style=\"max-width:256px;max-height:256px;\" src=\"\""
+					out << "      <img class=\"sticker\" style=\"max-width:256px;max-height:256px;\" src=\""
 					    << escapeHtml(mediaFile) << "\">\n";
 				} else if (subtype == "animation") {
-					out << "      <video class=\"animated\" style=\"max-width:260px;max-height:260px;\" autoplay loop muted src=\"\""
+					out << "      <video class=\"animated\" style=\"max-width:260px;max-height:260px;\" autoplay loop muted src=\""
 					    << escapeHtml(mediaFile) << "\"></video>\n";
 				} else {
 					// Generic file attachment
@@ -1545,6 +1559,57 @@ void Server::onMediaItemTimeout() {
 	QTimer::singleShot(200, [this]() { downloadNextMediaItem(); });
 }
 
+void Server::generateVideoThumbnails() {
+	if (!_activeExport) return;
+
+	QString mediaDir = _activeExport->resolvedPath + "/media/";
+	int generated = 0;
+
+	for (int i = 0; i < _activeExport->messages.size(); ++i) {
+		QJsonObject msg = _activeExport->messages[i].toObject();
+		if (msg["document_subtype"].toString() != "video") continue;
+		QString mediaFile = msg["media_file"].toString();
+		if (mediaFile.isEmpty()) continue;
+
+		QString videoPath = _activeExport->resolvedPath + "/" + mediaFile;
+		if (!QFile::exists(videoPath)) continue;
+
+		// Generate animated GIF preview (up to 12 seconds)
+		QFileInfo fi(videoPath);
+		QString gifName = fi.baseName() + "_preview.gif";
+		QString gifPath = mediaDir + gifName;
+
+		// Get video duration to cap at 12s
+		double duration = msg["video_duration"].toDouble();
+		if (duration <= 0) duration = 12.0;
+		double gifDuration = qMin(duration, 12.0);
+
+		// Scale down and reduce framerate for reasonable GIF size
+		QProcess ffmpeg;
+		ffmpeg.start("ffmpeg", {
+			"-i", videoPath,
+			"-t", QString::number(gifDuration, 'f', 1),
+			"-vf", "fps=10,scale=260:-1:flags=lanczos",
+			"-loop", "0",
+			"-y",
+			gifPath
+		});
+		ffmpeg.waitForFinished(30000); // 30s timeout for GIF generation
+
+		if (QFile::exists(gifPath) && QFileInfo(gifPath).size() > 0) {
+			msg["media_thumb"] = "media/" + gifName;
+			_activeExport->messages[i] = msg;
+			generated++;
+			qWarning() << "MCP: Animated GIF preview generated:" << gifName
+			           << "(" << QFileInfo(gifPath).size() / 1024 << "KB)";
+		} else {
+			qWarning() << "MCP: Failed to generate GIF preview for" << mediaFile;
+		}
+	}
+
+	qWarning() << "MCP: Generated" << generated << "animated GIF previews";
+}
+
 void Server::onAllMediaDownloaded() {
 	if (!_activeExport || _activeExport->finished) return;
 
@@ -1555,6 +1620,8 @@ void Server::onAllMediaDownloaded() {
 
 	_activeExport->downloadingMedia = false;
 	_activeExport->mediaLifetime.reset();
+
+	generateVideoThumbnails();
 
 	qWarning() << "MCP: Media download phase complete -"
 	           << _activeExport->mediaDownloaded << "downloaded,"
