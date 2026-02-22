@@ -2549,7 +2549,7 @@ QJsonObject Server::toolTransferGift(const QJsonObject &args) {
 
 	_session->api().request(MTPpayments_TransferStarGift(
 		inputGift,
-		recipient->input
+		recipient->input()
 	)).done([giftId, recipientId](const MTPUpdates &updates) {
 		qWarning() << "MCP: Gift" << giftId << "transferred to" << recipientId << "successfully";
 	}).fail([giftId, recipientId](const MTP::Error &error) {

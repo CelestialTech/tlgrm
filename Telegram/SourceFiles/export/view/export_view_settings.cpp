@@ -905,7 +905,7 @@ void SettingsWidget::addLimitsLabel(
 		tr::marked
 	) | rpl::after_next([=] {
 		container->resizeToWidth(container->width());
-	});
+	}));
 
 	const auto label = container->add(
 		object_ptr<Ui::FlatLabel>(

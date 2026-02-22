@@ -21,9 +21,14 @@ BotBase::BotBase(QObject *parent)
 }
 
 BotBase::~BotBase() {
-	if (_isRunning) {
-		onShutdown();
-	}
+	// Do NOT call onShutdown() here — it is a pure virtual method.
+	// During destruction of a derived class (e.g. ContextAssistantBot),
+	// QObject::~QObject() destroys children in reverse order. By the time
+	// BotBase::~BotBase() runs, the derived vtable has already been
+	// replaced with BotBase's vtable, causing __cxa_pure_virtual.
+	// Shutdown must be performed explicitly before destruction begins
+	// (e.g. in BotManager::shutdown() via shutdownBot()).
+	_isRunning = false;
 }
 
 // Virtual method implementations (optional overrides)

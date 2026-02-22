@@ -1245,6 +1245,18 @@ void Server::initializeToolHandlers() {
 
 	// TESTING TOOLS
 	_toolHandlers["test_away"] = [this](const QJsonObject &args) { return toolTestAway(args); };
+
+	// V6.5.1 FEATURE TOOLS
+	_toolHandlers["request_message_summary"] = [this](const QJsonObject &args) { return toolRequestMessageSummary(args); };
+	_toolHandlers["list_folders"] = [this](const QJsonObject &args) { return toolListFolders(args); };
+	_toolHandlers["create_folder"] = [this](const QJsonObject &args) { return toolCreateFolder(args); };
+	_toolHandlers["update_folder"] = [this](const QJsonObject &args) { return toolUpdateFolder(args); };
+	_toolHandlers["delete_folder"] = [this](const QJsonObject &args) { return toolDeleteFolder(args); };
+	_toolHandlers["reorder_folders"] = [this](const QJsonObject &args) { return toolReorderFolders(args); };
+	_toolHandlers["transfer_group_ownership"] = [this](const QJsonObject &args) { return toolTransferGroupOwnership(args); };
+	_toolHandlers["craft_star_gift"] = [this](const QJsonObject &args) { return toolCraftStarGift(args); };
+	_toolHandlers["get_craft_options"] = [this](const QJsonObject &args) { return toolGetCraftOptions(args); };
+	_toolHandlers["export_topic"] = [this](const QJsonObject &args) { return toolExportTopic(args); };
 }
 
 

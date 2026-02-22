@@ -2,7 +2,7 @@
 // This file is part of Telegram Desktop MCP integration.
 // Licensed under GPLv3 with OpenSSL exception.
 
-#include "settings_bots.h"
+#include "settings/sections/settings_bots.h"
 
 #include "mcp/bot_manager.h"
 #include "mcp/bot_base.h"
@@ -26,7 +26,7 @@ namespace Settings {
 Bots::Bots(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
-: Section(parent)
+: Section(parent, controller)
 , _controller(controller) {
 	setupContent();
 }

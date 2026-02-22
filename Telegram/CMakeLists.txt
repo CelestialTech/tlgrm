@@ -1266,6 +1266,7 @@ PRIVATE
     mcp/mcp_wallet_tools.cpp
     mcp/mcp_stars_tools.cpp
     mcp/mcp_settings_tools.cpp
+    mcp/mcp_v651_tools.cpp
     mcp/mcp_gradual_tools.cpp
     mcp/chat_archiver.cpp
     mcp/chat_archiver.h
@@ -2060,9 +2061,9 @@ if (build_macstore)
     )
 else()
     if (CMAKE_GENERATOR STREQUAL Xcode)
-        set(bundle_identifier "com.tdesktop.Telegram$<$<CONFIG:Debug>:Debug>")
+        set(bundle_identifier "com.tlgrm.app$<$<CONFIG:Debug>:Debug>")
     else()
-        set(bundle_identifier "com.tdesktop.Telegram")
+        set(bundle_identifier "com.tlgrm.app")
     endif()
     set(bundle_entitlements "Telegram.entitlements")
     set(output_name "Tlgrm")

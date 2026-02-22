@@ -12,7 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_notifications_manager.h"
 #include "platform/platform_specific.h"
 #include "lang/lang_keys.h"
-#include "settings/settings_bots.h"
+#include "settings/sections/settings_bots.h"
 #include "window/window_controller.h"
 
 #include <QtWidgets/QApplication>

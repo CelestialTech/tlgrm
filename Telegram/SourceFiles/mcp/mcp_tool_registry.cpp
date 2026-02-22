@@ -2989,6 +2989,73 @@ void Server::registerTools() {
 			{"task_id", QJsonObject{{"type", "integer"}, {"description", "Task ID"}}},
 			{"status", QJsonObject{{"type", "string"}, {"description", "New status (pending/in_progress/completed)"}}}
 		}}, {"required", QJsonArray{"task_id"}}}},
+
+		// ===== V6.5.1 FEATURE TOOLS (10) =====
+
+		Tool{"request_message_summary", "Request an AI-generated summary of a message using Telegram's server-side AI", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID containing the message"}}},
+			{"message_id", QJsonObject{{"type", "integer"}, {"description", "Message ID to summarize"}}},
+			{"language", QJsonObject{{"type", "string"}, {"description", "Language code for the summary (e.g. 'en', 'ru', 'es')"}, {"default", "en"}}}
+		}}, {"required", QJsonArray{"chat_id", "message_id"}}}},
+
+		Tool{"list_folders", "List all chat folders/filters with their settings and included chat counts", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"create_folder", "Create a new chat folder with inclusion/exclusion rules", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"title", QJsonObject{{"type", "string"}, {"description", "Folder title"}}},
+			{"icon_emoji", QJsonObject{{"type", "string"}, {"description", "Folder icon emoji"}}},
+			{"include_contacts", QJsonObject{{"type", "boolean"}, {"description", "Include contact chats"}, {"default", false}}},
+			{"include_non_contacts", QJsonObject{{"type", "boolean"}, {"description", "Include non-contact chats"}, {"default", false}}},
+			{"include_groups", QJsonObject{{"type", "boolean"}, {"description", "Include group chats"}, {"default", false}}},
+			{"include_channels", QJsonObject{{"type", "boolean"}, {"description", "Include channels"}, {"default", false}}},
+			{"include_bots", QJsonObject{{"type", "boolean"}, {"description", "Include bot chats"}, {"default", false}}},
+			{"exclude_muted", QJsonObject{{"type", "boolean"}, {"description", "Exclude muted chats"}, {"default", false}}},
+			{"exclude_read", QJsonObject{{"type", "boolean"}, {"description", "Exclude read chats"}, {"default", false}}},
+			{"exclude_archived", QJsonObject{{"type", "boolean"}, {"description", "Exclude archived chats"}, {"default", false}}},
+			{"include_chat_ids", QJsonObject{{"type", "array"}, {"description", "Specific chat IDs to always include"}, {"items", QJsonObject{{"type", "integer"}}}}},
+			{"exclude_chat_ids", QJsonObject{{"type", "array"}, {"description", "Specific chat IDs to always exclude"}, {"items", QJsonObject{{"type", "integer"}}}}}
+		}}, {"required", QJsonArray{"title"}}}},
+
+		Tool{"update_folder", "Update an existing chat folder's settings", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"folder_id", QJsonObject{{"type", "integer"}, {"description", "Folder ID to update"}}},
+			{"title", QJsonObject{{"type", "string"}, {"description", "New folder title"}}},
+			{"icon_emoji", QJsonObject{{"type", "string"}, {"description", "New folder icon emoji"}}},
+			{"include_contacts", QJsonObject{{"type", "boolean"}, {"description", "Include contact chats"}}},
+			{"include_non_contacts", QJsonObject{{"type", "boolean"}, {"description", "Include non-contact chats"}}},
+			{"include_groups", QJsonObject{{"type", "boolean"}, {"description", "Include group chats"}}},
+			{"include_channels", QJsonObject{{"type", "boolean"}, {"description", "Include channels"}}},
+			{"include_bots", QJsonObject{{"type", "boolean"}, {"description", "Include bot chats"}}},
+			{"exclude_muted", QJsonObject{{"type", "boolean"}, {"description", "Exclude muted chats"}}},
+			{"exclude_read", QJsonObject{{"type", "boolean"}, {"description", "Exclude read chats"}}},
+			{"exclude_archived", QJsonObject{{"type", "boolean"}, {"description", "Exclude archived chats"}}},
+			{"include_chat_ids", QJsonObject{{"type", "array"}, {"description", "Specific chat IDs to always include"}, {"items", QJsonObject{{"type", "integer"}}}}},
+			{"exclude_chat_ids", QJsonObject{{"type", "array"}, {"description", "Specific chat IDs to always exclude"}, {"items", QJsonObject{{"type", "integer"}}}}}
+		}}, {"required", QJsonArray{"folder_id"}}}},
+
+		Tool{"delete_folder", "Delete a chat folder (does not delete the chats inside it)", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"folder_id", QJsonObject{{"type", "integer"}, {"description", "Folder ID to delete"}}}
+		}}, {"required", QJsonArray{"folder_id"}}}},
+
+		Tool{"reorder_folders", "Reorder chat folders by specifying the new order of folder IDs", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"folder_ids", QJsonObject{{"type", "array"}, {"description", "Array of folder IDs in desired display order"}, {"items", QJsonObject{{"type", "integer"}}}}}
+		}}, {"required", QJsonArray{"folder_ids"}}}},
+
+		Tool{"transfer_group_ownership", "Transfer ownership of a group or channel to another user (requires 2FA)", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Group or channel ID"}}},
+			{"new_owner_id", QJsonObject{{"type", "integer"}, {"description", "User ID of the new owner"}}}
+		}}, {"required", QJsonArray{"chat_id", "new_owner_id"}}}},
+
+		Tool{"craft_star_gift", "Craft a unique gift by combining multiple saved star gifts", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"gift_ids", QJsonObject{{"type", "array"}, {"description", "Array of saved gift identifiers to combine"}, {"items", QJsonObject{{"type", "string"}}}}}
+		}}, {"required", QJsonArray{"gift_ids"}}}},
+
+		Tool{"get_craft_options", "Get available crafting options and recipes for star gifts", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"export_topic", "Export messages from a forum topic to JSON or text format", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Forum supergroup chat ID"}}},
+			{"topic_id", QJsonObject{{"type", "integer"}, {"description", "Forum topic ID (message ID of the topic creation message)"}}},
+			{"limit", QJsonObject{{"type", "integer"}, {"description", "Maximum number of messages to export"}, {"default", 100}}},
+			{"format", QJsonObject{{"type", "string"}, {"description", "Export format: 'json' or 'text'"}, {"default", "json"}, {"enum", QJsonArray{"json", "text"}}}}
+		}}, {"required", QJsonArray{"chat_id", "topic_id"}}}},
 	};
 }
 

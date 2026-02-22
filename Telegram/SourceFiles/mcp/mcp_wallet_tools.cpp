@@ -454,7 +454,7 @@ QJsonObject Server::toolGetGiftSuggestions(const QJsonObject &args) {
 		// Request gift options for this specific user
 		_session->api().request(MTPpayments_GetStarsGiftOptions(
 			MTP_flags(MTPpayments_GetStarsGiftOptions::Flag::f_user_id),
-			user->inputUser
+			user->inputUser()
 		)).done([recipientId](const MTPVector<MTPStarsGiftOption> &options) {
 			qWarning() << "MCP: Loaded" << options.v.size() << "gift options for user" << recipientId;
 		}).fail([recipientId](const MTP::Error &error) {
@@ -682,8 +682,8 @@ QJsonObject Server::toolGetEarnings(const QJsonObject &args) {
 
 	// Fire async request for earnings stats
 	auto inputPeer = earningsPeer->isUser()
-		? earningsPeer->asUser()->input
-		: earningsPeer->asChannel()->input;
+		? earningsPeer->asUser()->input()
+		: earningsPeer->asChannel()->input();
 
 	_session->api().request(MTPpayments_GetStarsRevenueStats(
 		MTP_flags(0),
@@ -756,7 +756,7 @@ QJsonObject Server::toolWithdrawEarnings(const QJsonObject &args) {
 
 	_session->api().request(MTPpayments_GetStarsRevenueWithdrawalUrl(
 		MTP_flags(isTon ? F::f_ton : F::f_amount),
-		withdrawPeer->input,
+		withdrawPeer->input(),
 		MTP_long(isTon ? 0 : amount),
 		MTP_inputCheckPasswordEmpty()  // Empty password triggers 2FA prompt
 	)).fail([this, amount, method](const MTP::Error &error) {

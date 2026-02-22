@@ -419,7 +419,7 @@ void Server::fetchNextMessageBatch() {
 	           << "fetched so far:" << _activeExport->totalMessagesFetched;
 
 	_session->api().request(MTPmessages_GetHistory(
-		peer->input,
+		peer->input(),
 		MTP_int(offsetIdInt),  // offset_id
 		MTP_int(0),            // offset_date
 		MTP_int(0),            // add_offset

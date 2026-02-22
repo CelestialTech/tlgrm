@@ -49,7 +49,7 @@ QJsonObject Server::toolListGiftCollections(const QJsonObject &args) {
 		// Also request collections from Telegram API
 		auto self = _session->data().peer(_session->userPeerId());
 		_session->api().request(MTPpayments_GetStarGiftCollections(
-			self->input,
+			self->input(),
 			MTP_long(0)  // hash for caching
 		)).done([](const MTPpayments_StarGiftCollections &collections) {
 			collections.match([](const MTPDpayments_starGiftCollections &data) {

@@ -260,7 +260,7 @@ QJsonObject Server::toolPinMessage(const QJsonObject &args) {
 	// Using the peer's pinMessage method through API
 	api.request(MTPmessages_UpdatePinnedMessage(
 		MTP_flags(notify ? MTPmessages_UpdatePinnedMessage::Flag::f_unpin : MTPmessages_UpdatePinnedMessage::Flags(0)),
-		peer->input,
+		peer->input(),
 		MTP_int(messageId)
 	)).done([=](const MTPUpdates &result) {
 		_session->api().applyUpdates(result);
@@ -323,7 +323,7 @@ QJsonObject Server::toolUnpinMessage(const QJsonObject &args) {
 	// Request message unpin (using the same API as pin with unpin flag)
 	api.request(MTPmessages_UpdatePinnedMessage(
 		MTP_flags(MTPmessages_UpdatePinnedMessage::Flag::f_unpin),
-		peer->input,
+		peer->input(),
 		MTP_int(messageId)
 	)).done([=](const MTPUpdates &result) {
 		_session->api().applyUpdates(result);

@@ -107,7 +107,7 @@ public:
 
 	// Server info
 	struct ServerInfo {
-		QString name = "Telegram Desktop MCP";
+		QString name = "Tlgrm MCP";
 		QString version = "1.0.0";
 		QJsonObject capabilities;
 	};
@@ -450,6 +450,24 @@ private:
 	QJsonObject toolCreateAuctionAlert(const QJsonObject &args);
 	QJsonObject toolGetFragmentListings(const QJsonObject &args);
 	QJsonObject toolExportPortfolioReport(const QJsonObject &args);
+
+	// ============================================================
+	// V6.5.1 FEATURE TOOLS (10 tools)
+	// ============================================================
+	QJsonObject toolRequestMessageSummary(const QJsonObject &args);
+	QJsonObject toolListFolders(const QJsonObject &args);
+	QJsonObject toolCreateFolder(const QJsonObject &args);
+	QJsonObject toolUpdateFolder(const QJsonObject &args);
+	QJsonObject toolDeleteFolder(const QJsonObject &args);
+	QJsonObject toolReorderFolders(const QJsonObject &args);
+	QJsonObject toolTransferGroupOwnership(const QJsonObject &args);
+	QJsonObject toolCraftStarGift(const QJsonObject &args);
+	QJsonObject toolGetCraftOptions(const QJsonObject &args);
+	QJsonObject toolExportTopic(const QJsonObject &args);
+	void processTopicMessages(
+		const QVector<MTPMessage> &messages,
+		const QString &format,
+		QJsonObject &result);
 
 	// ============================================================
 	// ADDITIONAL TOOL IMPLEMENTATIONS (missing from original)
