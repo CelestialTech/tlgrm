@@ -102,6 +102,10 @@ public:
 	// Set session for live data access (defers heavy init to next event loop)
 	void setSession(Main::Session *session);
 
+	// Clear session on logout — tears down all session-dependent components
+	// and nulls the session pointer to prevent use-after-free.
+	void clearSession();
+
 	// Check if session is set
 	bool hasSession() const { return _session != nullptr; }
 

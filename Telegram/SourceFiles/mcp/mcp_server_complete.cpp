@@ -276,8 +276,55 @@ void Server::stop() {
 	_stdout.reset();
 	_httpServer.reset();
 
+	_lifetime = nullptr;
+	_session = nullptr;
+	_sessionComponentsInitialized = false;
 	_initialized = false;
 	qInfo() << "MCP Server stopped";
+}
+
+void Server::clearSession() {
+	fprintf(stderr, "[MCP] clearSession() called (current=%p, initialized=%d)\n",
+		(void*)_session, _sessionComponentsInitialized);
+	fflush(stderr);
+
+	// Kill rpl subscription to session's newItemAdded() first —
+	// must happen before session is destroyed.
+	_lifetime = nullptr;
+
+	// Tear down session-dependent components
+	_botManager.reset();
+	_gradualArchiver.reset();
+	_videoGenerator.reset();
+	_textToSpeech.reset();
+	_localLLM.reset();
+	_tonWallet.reset();
+
+	if (_scheduler) {
+		_scheduler->stop();
+		_scheduler.reset();
+	}
+	_batchOps.reset();
+	_semanticSearch.reset();
+	_analytics.reset();
+
+	if (_ephemeralArchiver) {
+		_ephemeralArchiver->stop();
+		_ephemeralArchiver.reset();
+	}
+
+	if (_archiver) {
+		_archiver->stop();
+		_archiver.reset();
+	}
+
+	_cache.reset();
+
+	_session = nullptr;
+	_sessionComponentsInitialized = false;
+
+	fprintf(stderr, "[MCP] Session cleared, ready for re-init\n");
+	fflush(stderr);
 }
 
 void Server::setSession(Main::Session *session) {
@@ -476,9 +523,10 @@ void Server::initializeSessionComponents() {
 		fflush(stderr);
 	}
 
-	// Wire BotManager to receive new message events from the session
+	// Wire BotManager to receive new message events from the session.
+	// Tied to session->lifetime() so the subscription auto-cancels
+	// when the session is destroyed (preventing use-after-free).
 	if (_botManager && _botManager->isEventDispatchEnabled()) {
-		_lifetime = std::make_unique<rpl::lifetime>();
 		_session->data().newItemAdded(
 		) | rpl::on_next([this](not_null<HistoryItem*> item) {
 			if (!_botManager || !_botManager->isEventDispatchEnabled()) {
@@ -499,7 +547,7 @@ void Server::initializeSessionComponents() {
 			msg.isThreadStart = false;
 			msg.threadReplyCount = 0;
 			_botManager->dispatchMessage(msg);
-		}, *_lifetime);
+		}, _session->lifetime());
 		fprintf(stderr, "[MCP] BotManager wired to session newItemAdded events\n");
 		fflush(stderr);
 	}

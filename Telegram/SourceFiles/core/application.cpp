@@ -204,6 +204,8 @@ Application::Application()
 		// Pass active session to MCP server for live data access
 		if (session && _mcpServer) {
 			_mcpServer->setSession(session);
+		} else if (!session && _mcpServer) {
+			_mcpServer->clearSession();
 		}
 	}, _lifetime);
 }
@@ -449,6 +451,8 @@ void Application::run() {
 				_mcpServer->setSession(session);
 				fprintf(stderr, "[MCP] Session integrated with MCP server (via activeSessionValue)\n");
 				fflush(stderr);
+			} else if (!session && _mcpServer) {
+				_mcpServer->clearSession();
 			}
 		}, _lifetime);
 
