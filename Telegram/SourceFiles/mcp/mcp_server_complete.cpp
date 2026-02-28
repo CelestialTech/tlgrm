@@ -281,16 +281,42 @@ void Server::stop() {
 }
 
 void Server::setSession(Main::Session *session) {
-	_session = session;
-
-	fprintf(stderr, "[MCP] setSession() called with session=%p\n", (void*)session);
+	fprintf(stderr, "[MCP] setSession() called with session=%p (current=%p, initialized=%d)\n",
+		(void*)session, (void*)_session, _sessionComponentsInitialized);
 	fflush(stderr);
 
-	if (!_session) {
+	if (!session) {
 		qWarning() << "MCP: setSession() called with null session";
 		return;
 	}
 
+	// Only initialize session components once. When the user adds a second
+	// account, activeSessionChanges fires with the new session pointer,
+	// but we keep MCP bound to the first session to avoid tearing down
+	// and rebuilding all components (DB, archivers, bots, etc.) which
+	// causes crashes from use-after-free and duplicate DB connections.
+	if (_sessionComponentsInitialized) {
+		fprintf(stderr, "[MCP] setSession() skipped - components already initialized\n");
+		fflush(stderr);
+		return;
+	}
+
+	_session = session;
+
+	// Defer heavy initialization to avoid blocking the session creation chain.
+	// setSession() is called synchronously during account->createSession(),
+	// and doing heavy work here (QProcess::waitForFinished, DB init, etc.)
+	// can cause crashes or UI freezes.
+	QTimer::singleShot(0, this, [this] {
+		if (!_session || _sessionComponentsInitialized) {
+			return;
+		}
+		_sessionComponentsInitialized = true;
+		initializeSessionComponents();
+	});
+}
+
+void Server::initializeSessionComponents() {
 	// Initialize session-dependent components
 	fprintf(stderr, "[MCP] Initializing session-dependent components...\n");
 	fflush(stderr);

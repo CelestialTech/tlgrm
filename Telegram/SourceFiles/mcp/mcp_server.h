@@ -99,7 +99,7 @@ public:
 	// Stop MCP server
 	void stop();
 
-	// Set session for live data access
+	// Set session for live data access (defers heavy init to next event loop)
 	void setSession(Main::Session *session);
 
 	// Check if session is set
@@ -118,6 +118,9 @@ public:
 	QJsonObject callTool(const QString &toolName, const QJsonObject &args);
 
 private:
+	// Heavy initialization called from event loop, not during session creation
+	void initializeSessionComponents();
+
 	// Initialize server capabilities
 	void initializeCapabilities();
 
@@ -706,6 +709,7 @@ private:
 
 	// State
 	bool _initialized = false;
+	bool _sessionComponentsInitialized = false;
 	QString _databasePath;
 	Main::Session *_session = nullptr;
 	QDateTime _startTime = QDateTime::currentDateTime();

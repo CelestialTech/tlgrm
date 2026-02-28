@@ -202,7 +202,7 @@ Application::Application()
 			UpdateChecker().setMtproto(session);
 		}
 		// Pass active session to MCP server for live data access
-		if (_mcpServer) {
+		if (session && _mcpServer) {
 			_mcpServer->setSession(session);
 		}
 	}, _lifetime);
