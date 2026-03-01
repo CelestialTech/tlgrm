@@ -722,7 +722,6 @@ private:
 	QHash<QString, ToolHandler> _toolHandlers;
 
 	// RPL lifetime for session event subscriptions
-	std::unique_ptr<rpl::lifetime> _lifetime;
 
 	// Active export tracking (non-blocking export_chat via messages.getHistory)
 	struct ActiveExport {

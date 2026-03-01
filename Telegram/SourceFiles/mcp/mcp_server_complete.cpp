@@ -23,22 +23,32 @@ Server::Server(QObject *parent)
 }
 
 Server::~Server() {
-	_lifetime = nullptr;  // Unsubscribe from session events
 	stop();
 }
 
 QJsonObject Server::callTool(const QString &toolName, const QJsonObject &args) {
 	// Look up tool in handlers
 	auto it = _toolHandlers.find(toolName);
-	if (it != _toolHandlers.end()) {
-		return it.value()(args);
+	if (it == _toolHandlers.end()) {
+		QJsonObject error;
+		error["error"] = "tool_not_found";
+		error["message"] = QString("Tool '%1' not found in handler table").arg(toolName);
+		return error;
 	}
 
-	// Tool not found
-	QJsonObject error;
-	error["error"] = "tool_not_found";
-	error["message"] = QString("Tool '%1' not found in handler table").arg(toolName);
-	return error;
+	// Session-free tools that work without an active Telegram session.
+	static const QSet<QString> sessionFreeTools = {
+		"health_check",
+		"get_server_info",
+		"get_audit_log",
+		"get_cache_stats",
+	};
+
+	if (!_session && !sessionFreeTools.contains(toolName)) {
+		return toolError("No active session — please log in first");
+	}
+
+	return it.value()(args);
 }
 
 void Server::initializeCapabilities() {
@@ -233,14 +243,31 @@ void Server::stop() {
 		return;
 	}
 
-	_auditLogger->logSystemEvent("server_stop", "MCP Server stopping");
-
-	// Shutdown bot manager first (it holds raw pointers to other components)
-	if (_botManager) {
-		_botManager.reset();
+	if (_auditLogger) {
+		_auditLogger->logSystemEvent("server_stop", "MCP Server stopping");
 	}
 
-	// Cleanup components (using reset() for unique_ptr members)
+	// Cancel active export (holds rpl lifetime + timers referencing session)
+	if (_mediaItemTimeoutTimer) {
+		_mediaItemTimeoutTimer->stop();
+		delete _mediaItemTimeoutTimer;
+		_mediaItemTimeoutTimer = nullptr;
+	}
+	_activeExport.reset();
+
+	// Shutdown bot manager first (it holds raw pointers to other components)
+	_botManager.reset();
+
+	// Reset all session-dependent components BEFORE closing the DB,
+	// since their destructors may access _db.
+	_gradualArchiver.reset();
+	_videoGenerator.reset();
+	_textToSpeech.reset();
+	_localLLM.reset();
+	_tonWallet.reset();
+	_voiceTranscription.reset();
+	_cache.reset();
+
 	if (_archiver) {
 		_archiver->stop();
 		_archiver.reset();
@@ -276,7 +303,6 @@ void Server::stop() {
 	_stdout.reset();
 	_httpServer.reset();
 
-	_lifetime = nullptr;
 	_session = nullptr;
 	_sessionComponentsInitialized = false;
 	_initialized = false;
@@ -288,9 +314,15 @@ void Server::clearSession() {
 		(void*)_session, _sessionComponentsInitialized);
 	fflush(stderr);
 
-	// Kill rpl subscription to session's newItemAdded() first —
-	// must happen before session is destroyed.
-	_lifetime = nullptr;
+	// Cancel active export first — its rpl lifetime and timers
+	// hold references to session data that must be killed before
+	// the session is destroyed.
+	if (_mediaItemTimeoutTimer) {
+		_mediaItemTimeoutTimer->stop();
+		delete _mediaItemTimeoutTimer;
+		_mediaItemTimeoutTimer = nullptr;
+	}
+	_activeExport.reset();
 
 	// Tear down session-dependent components
 	_botManager.reset();
@@ -299,6 +331,7 @@ void Server::clearSession() {
 	_textToSpeech.reset();
 	_localLLM.reset();
 	_tonWallet.reset();
+	_voiceTranscription.reset();
 
 	if (_scheduler) {
 		_scheduler->stop();

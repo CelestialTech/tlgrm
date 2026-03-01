@@ -10,6 +10,10 @@ namespace MCP {
 // ===== SCHEDULER TOOL IMPLEMENTATIONS =====
 
 QJsonObject Server::toolScheduleMessage(const QJsonObject &args) {
+	if (!_scheduler) {
+		return toolError("No active session");
+	}
+
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QString text = args["text"].toString();
 	QString scheduleType = args["schedule_type"].toString();
@@ -40,6 +44,10 @@ QJsonObject Server::toolScheduleMessage(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolCancelScheduled(const QJsonObject &args) {
+	if (!_scheduler) {
+		return toolError("No active session");
+	}
+
 	qint64 scheduleId = args["schedule_id"].toVariant().toLongLong();
 
 	bool success = _scheduler->cancelScheduledMessage(scheduleId);
@@ -52,6 +60,10 @@ QJsonObject Server::toolCancelScheduled(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolListScheduled(const QJsonObject &args) {
+	if (!_scheduler) {
+		return toolError("No active session");
+	}
+
 	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
 
 	auto schedules = _scheduler->listScheduledMessages(chatId);
@@ -68,6 +80,10 @@ QJsonObject Server::toolListScheduled(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolUpdateScheduled(const QJsonObject &args) {
+	if (!_scheduler) {
+		return toolError("No active session");
+	}
+
 	qint64 scheduleId = args["schedule_id"].toVariant().toLongLong();
 
 	// Build updates object from args
