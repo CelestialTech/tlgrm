@@ -66,7 +66,7 @@ QJsonObject Server::toolGetServerInfo(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolGetAuditLog(const QJsonObject &args) {
-	int limit = args.value("limit").toInt(50);
+	int limit = clampLimit(args.value("limit").toInt(50));
 	QString eventType = args.value("event_type").toString();
 
 	auto events = _auditLogger->getRecentEvents(limit);
@@ -124,6 +124,14 @@ QJsonObject Server::toolHealthCheck(const QJsonObject &args) {
 QJsonObject Server::toolTranscribeVoice(const QJsonObject &args) {
 	qint64 messageId = args.value("message_id").toVariant().toLongLong();
 	QString audioPath = args["audio_path"].toString();
+
+	// Sanitize audio path if provided
+	if (!audioPath.isEmpty()) {
+		audioPath = sanitizePath(audioPath);
+		if (audioPath.isEmpty()) {
+			return toolError("Invalid audio_path: path traversal not allowed");
+		}
+	}
 
 	// Initialize voice transcription if not already done
 	if (!_voiceTranscription) {

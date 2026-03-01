@@ -101,18 +101,13 @@ TranscriptionResult VoiceTranscription::transcribe(const QString &audioFilePath)
 	return result;
 }
 
-// Async transcription — runs synchronous version on a worker thread
+// Async transcription — disabled due to thread safety issues.
+// QNetworkAccessManager and QSqlDatabase are not thread-safe, so
+// running transcribe() on a worker thread via QtConcurrent is unsafe.
+// Use the synchronous transcribe() method instead.
 TranscriptionResult VoiceTranscription::transcribeAsync(const QString &audioFilePath) {
-	// Launch transcription on a background thread via QtConcurrent
-	QFuture<TranscriptionResult> future = QtConcurrent::run([this, audioFilePath]() {
-		return transcribe(audioFilePath);
-	});
-
-	// Return an in-progress result; callers should connect to transcriptionCompleted signal
-	TranscriptionResult pending;
-	pending.success = false;
-	pending.error = "Transcription in progress (async)";
-	return pending;
+	// Just delegate to synchronous version on the main thread.
+	return transcribe(audioFilePath);
 }
 
 // OpenAI Whisper API implementation
@@ -169,10 +164,23 @@ TranscriptionResult VoiceTranscription::transcribeWithOpenAI(const QString &audi
 	QNetworkReply *reply = _networkManager->post(request, multiPart);
 	multiPart->setParent(reply);
 
-	// Wait for response (blocking)
+	// Wait for response with 60s safety timeout to prevent indefinite hang
 	QEventLoop loop;
+	QTimer timeout;
+	timeout.setSingleShot(true);
 	connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+	connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+	timeout.start(60000);
 	loop.exec();
+
+	if (!timeout.isActive()) {
+		// Timeout fired — abort the request
+		reply->abort();
+		result.error = "OpenAI API request timed out (60s)";
+		reply->deleteLater();
+		return result;
+	}
+	timeout.stop();
 
 	if (reply->error() != QNetworkReply::NoError) {
 		result.error = "API request failed: " + reply->errorString();
@@ -487,14 +495,34 @@ QString VoiceTranscription::executePythonWhisper(const QString &audioPath) {
 
 	QString modelName = getModelName(_modelSize);
 
+	// Write parameters to a JSON config file to avoid code injection.
+	// The Python script reads from the config file instead of
+	// interpolated strings.
+	QString configPath = QDir::tempPath() + "/mcp_whisper_" +
+		QString::number(QDateTime::currentMSecsSinceEpoch()) + ".json";
+	{
+		QJsonObject config;
+		config["model"] = modelName;
+		config["audio"] = audioPath;
+		config["language"] = _language;
+		QFile f(configPath);
+		if (!f.open(QIODevice::WriteOnly)) {
+			return QString();
+		}
+		f.write(QJsonDocument(config).toJson(QJsonDocument::Compact));
+		f.close();
+	}
+
 	QStringList args;
 	args << "-c";
 	args << QString(R"(
-import json
+import json, os
+cfg = json.load(open("%1"))
 from faster_whisper import WhisperModel
 
-model = WhisperModel("%1", device="cpu")
-segments, info = model.transcribe("%2", language="%3" if "%3" else None)
+model = WhisperModel(cfg["model"], device="cpu")
+lang = cfg["language"] if cfg["language"] else None
+segments, info = model.transcribe(cfg["audio"], language=lang)
 
 text = " ".join([segment.text for segment in segments])
 
@@ -507,7 +535,8 @@ result = {
 }
 
 print(json.dumps(result))
-	)").arg(modelName, audioPath, _language);
+os.remove("%1")
+	)").arg(configPath);
 
 	process.start("python3", args);
 	process.waitForFinished(60000);  // 60 second timeout

@@ -1308,6 +1308,14 @@ QJsonObject Server::toolUploadAvatarSource(const QJsonObject &args) {
 		return result;
 	}
 
+	// Sanitize file path
+	filePath = sanitizePath(filePath);
+	if (filePath.isEmpty()) {
+		result["error"] = "Invalid file_path: path traversal not allowed";
+		result["success"] = false;
+		return result;
+	}
+
 	QSqlQuery query(_db);
 	query.prepare("INSERT OR REPLACE INTO video_avatar (name, source_path, created_at) "
 				  "VALUES (?, ?, datetime('now'))");

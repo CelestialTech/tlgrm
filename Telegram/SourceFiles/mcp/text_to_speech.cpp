@@ -7,6 +7,8 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QDir>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QRandomGenerator>
 #include <QtSql/QSqlQuery>
@@ -303,31 +305,40 @@ SynthesisResult TextToSpeech::synthesizeWithCoqui(
 	textFile.write(text.toUtf8());
 	textFile.close();
 
-	QString pythonScript;
-	if (isCloneMode) {
-		pythonScript = QString(
-			"from TTS.api import TTS; "
-			"tts = TTS('%1'); "
-			"text = open('%2').read(); "
-			"tts.tts_to_file(text=text, speaker_wav='%3', language='%4', "
-			"file_path='%5', speed=%6)"
-		).arg(modelName,
-			  textFilePath,
-			  voiceId,
-			  _language.isEmpty() ? "en" : _language,
-			  wavPath,
-			  QString::number(speed, 'f', 2));
-	} else {
-		pythonScript = QString(
-			"from TTS.api import TTS; "
-			"tts = TTS('%1'); "
-			"text = open('%2').read(); "
-			"tts.tts_to_file(text=text, file_path='%3', speed=%4)"
-		).arg(modelName,
-			  textFilePath,
-			  wavPath,
-			  QString::number(speed, 'f', 2));
+	// Write parameters to a JSON config file to avoid shell/code injection.
+	// The Python script reads all parameters from the config file instead
+	// of string interpolation.
+	QString configFilePath = tempFilePath(".json");
+	{
+		QJsonObject config;
+		config["model"] = modelName;
+		config["text_file"] = textFilePath;
+		config["output"] = wavPath;
+		config["speed"] = speed;
+		config["clone_mode"] = isCloneMode;
+		if (isCloneMode) {
+			config["speaker_wav"] = voiceId;
+			config["language"] = _language.isEmpty() ? "en" : _language;
+		}
+		QFile configFile(configFilePath);
+		if (!configFile.open(QIODevice::WriteOnly)) {
+			result.error = "Failed to create config file";
+			return result;
+		}
+		configFile.write(QJsonDocument(config).toJson(QJsonDocument::Compact));
+		configFile.close();
 	}
+
+	QString pythonScript = QString(
+		"import json; "
+		"cfg = json.load(open('%1')); "
+		"from TTS.api import TTS; "
+		"tts = TTS(cfg['model']); "
+		"text = open(cfg['text_file']).read(); "
+		"kw = {'text': text, 'file_path': cfg['output'], 'speed': cfg['speed']}; "
+		"cfg.get('clone_mode') and kw.update(speaker_wav=cfg['speaker_wav'], language=cfg['language']); "
+		"tts.tts_to_file(**kw)"
+	).arg(configFilePath);
 
 	QStringList args;
 	args << "-c" << pythonScript;
@@ -336,8 +347,9 @@ SynthesisResult TextToSpeech::synthesizeWithCoqui(
 	process.start("python3", args);
 	process.waitForFinished(120000);  // 2 min timeout for XTTS
 
-	// Clean up temp text file
+	// Clean up temp files
 	QFile::remove(textFilePath);
+	QFile::remove(configFilePath);
 
 	if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
 		result.error = QString("Coqui TTS failed: %1")

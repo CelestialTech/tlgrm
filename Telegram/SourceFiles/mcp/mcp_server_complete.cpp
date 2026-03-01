@@ -297,7 +297,12 @@ void Server::stop() {
 		_rbac.reset();
 	}
 
-	_db.close();
+	{
+		QString connName = _db.connectionName();
+		_db.close();
+		_db = QSqlDatabase();
+		QSqlDatabase::removeDatabase(connName);
+	}
 
 	_stdin.reset();
 	_stdout.reset();
@@ -811,6 +816,20 @@ QJsonObject Server::handleListTools(const QJsonObject &params) {
 }
 
 QJsonObject Server::handleCallTool(const QJsonObject &params) {
+	// Re-entrancy guard: prevent nested tool calls from QEventLoop re-entrancy
+	if (_processingToolCall) {
+		QJsonObject response;
+		QJsonArray contentArray;
+		QJsonObject textContent;
+		textContent["type"] = "text";
+		textContent["text"] = "{\"error\":\"Tool call rejected: another tool is already executing\"}";
+		contentArray.append(textContent);
+		response["content"] = contentArray;
+		response["isError"] = true;
+		return response;
+	}
+	_processingToolCall = true;
+
 	QString toolName = params["name"].toString();
 	QJsonObject arguments = params["arguments"].toObject();
 
@@ -837,6 +856,8 @@ QJsonObject Server::handleCallTool(const QJsonObject &params) {
 		QString errorMsg = hasError ? result["error"].toString() : QString();
 		_auditLogger->logToolCompleted(toolName, hasError ? "error" : "success", 0, errorMsg);
 	}
+
+	_processingToolCall = false;
 
 	// Build response object
 	QJsonObject response;

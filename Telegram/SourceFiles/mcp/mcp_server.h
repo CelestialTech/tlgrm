@@ -714,6 +714,7 @@ private:
 	// State
 	bool _initialized = false;
 	bool _sessionComponentsInitialized = false;
+	bool _processingToolCall = false;
 	QString _databasePath;
 	Main::Session *_session = nullptr;
 	QDateTime _startTime = QDateTime::currentDateTime();

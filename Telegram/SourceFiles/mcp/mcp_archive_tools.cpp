@@ -17,7 +17,7 @@ QJsonObject Server::toolArchiveChat(const QJsonObject &args) {
 	}
 
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
-	int limit = args.value("limit").toInt(1000);
+	int limit = clampLimit(args.value("limit").toInt(1000), 1000);
 
 	bool success = _archiver->archiveChat(chatId, limit);
 
@@ -39,6 +39,14 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QString outputPath = args["output_path"].toString();
+
+	// Sanitize output path if provided
+	if (!outputPath.isEmpty()) {
+		outputPath = sanitizePath(outputPath, defaultExportDir());
+		if (outputPath.isEmpty()) {
+			return toolError("Invalid output_path: path traversal not allowed");
+		}
+	}
 
 	if (!_session) {
 		QJsonObject error;
@@ -243,7 +251,7 @@ QJsonObject Server::toolGetEphemeralMessages(const QJsonObject &args) {
 
 	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
 	QString type = args.value("type").toString();  // "self_destruct", "view_once", "vanishing", or empty for all
-	int limit = args.value("limit").toInt(50);
+	int limit = clampLimit(args.value("limit").toInt(50));
 
 	// Query ephemeral messages from database
 	QSqlQuery query(_archiver->database());
@@ -318,7 +326,7 @@ QJsonObject Server::toolSearchArchive(const QJsonObject &args) {
 
 	QString query = args["query"].toString();
 	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
-	int limit = args.value("limit").toInt(50);
+	int limit = clampLimit(args.value("limit").toInt(50));
 
 	QJsonArray results = _archiver->searchMessages(chatId, query, limit);
 
@@ -1257,7 +1265,7 @@ void Server::downloadNextMediaItem() {
 			item.failed = true;
 			_activeExport->mediaFailed++;
 			_activeExport->currentMediaIndex++;
-			QTimer::singleShot(100, [this]() { downloadNextMediaItem(); });
+			QTimer::singleShot(100, this, [this]() { downloadNextMediaItem(); });
 			return;
 		}
 
@@ -1336,7 +1344,7 @@ void Server::downloadNextMediaItem() {
 			item.failed = true;
 			_activeExport->mediaFailed++;
 			_activeExport->currentMediaIndex++;
-			QTimer::singleShot(100, [this]() { downloadNextMediaItem(); });
+			QTimer::singleShot(100, this, [this]() { downloadNextMediaItem(); });
 			return;
 		}
 
@@ -1556,7 +1564,7 @@ void Server::onMediaItemTimeout() {
 	_activeExport->currentMediaIndex++;
 
 	// Small delay before next item
-	QTimer::singleShot(200, [this]() { downloadNextMediaItem(); });
+	QTimer::singleShot(200, this, [this]() { downloadNextMediaItem(); });
 }
 
 void Server::generateVideoThumbnails() {

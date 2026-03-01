@@ -50,7 +50,11 @@ QJsonObject Server::toolStartGradualExport(const QJsonObject &args) {
 		config.exportFormat = args.value("export_format").toString();
 	}
 	if (args.contains("export_path")) {
-		config.exportPath = args.value("export_path").toString();
+		QString exportPath = sanitizePath(args.value("export_path").toString(), defaultExportDir());
+		if (exportPath.isEmpty()) {
+			return toolError("Invalid export_path: path traversal not allowed");
+		}
+		config.exportPath = exportPath;
 	}
 
 	bool started = _gradualArchiver->startGradualArchive(chatId, config);

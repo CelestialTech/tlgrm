@@ -212,7 +212,10 @@ QJsonObject Server::toolGetChatInfo(const QJsonObject &args) {
 
 QJsonObject Server::toolReadMessages(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
-	int limit = args.value("limit").toInt(50);
+	if (chatId == 0) {
+		return toolError("chat_id is required and must be non-zero");
+	}
+	int limit = clampLimit(args.value("limit").toInt(50));
 	qint64 beforeTimestamp = args.value("before_timestamp").toVariant().toLongLong();
 
 	QJsonArray messages;
@@ -320,6 +323,13 @@ QJsonObject Server::toolSendMessage(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QString text = args["text"].toString();
 
+	if (chatId == 0) {
+		return toolError("chat_id is required and must be non-zero");
+	}
+	if (text.isEmpty()) {
+		return toolError("text is required and must not be empty");
+	}
+
 	QJsonObject result;
 
 	// Check if session is available
@@ -364,8 +374,11 @@ QJsonObject Server::toolSendMessage(const QJsonObject &args) {
 
 QJsonObject Server::toolSearchMessages(const QJsonObject &args) {
 	QString query = args["query"].toString();
+	if (query.isEmpty()) {
+		return toolError("query is required and must not be empty");
+	}
 	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
-	int limit = args.value("limit").toInt(50);
+	int limit = clampLimit(args.value("limit").toInt(50));
 
 	QJsonArray results;
 

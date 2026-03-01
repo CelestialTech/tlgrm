@@ -255,7 +255,7 @@ QJsonObject Server::toolGetTimeSeries(const QJsonObject &args) {
 
 QJsonObject Server::toolGetTopUsers(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
-	int limit = args.value("limit").toInt(10);
+	int limit = clampLimit(args.value("limit").toInt(10), 10);
 
 	if (_analytics) {
 		auto topUsers = _analytics->getTopUsers(chatId, limit);
@@ -309,7 +309,7 @@ QJsonObject Server::toolGetTopUsers(const QJsonObject &args) {
 
 QJsonObject Server::toolGetTopWords(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
-	int limit = args.value("limit").toInt(20);
+	int limit = clampLimit(args.value("limit").toInt(20), 20);
 
 	if (_analytics) {
 		auto topWords = _analytics->getTopWords(chatId, limit);
@@ -392,6 +392,14 @@ QJsonObject Server::toolExportAnalytics(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	QString outputPath = args["output_path"].toString();
 	QString format = args.value("format").toString("json");
+
+	// Sanitize output path if provided
+	if (!outputPath.isEmpty()) {
+		outputPath = sanitizePath(outputPath);
+		if (outputPath.isEmpty()) {
+			return toolError("Invalid output_path: path traversal not allowed");
+		}
+	}
 
 	if (_analytics) {
 		QString resultPath = _analytics->exportAnalytics(chatId, format, outputPath);

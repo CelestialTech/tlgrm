@@ -605,4 +605,49 @@ private:
 		} \
 	} while (0)
 
+// ============================================================
+// LIMIT CLAMPING - Prevent unbounded queries
+// ============================================================
+
+inline int clampLimit(int value, int defaultValue = 50, int maxValue = 10000) {
+	if (value <= 0) return defaultValue;
+	return qBound(1, value, maxValue);
+}
+
+// ============================================================
+// PATH SANITIZATION - Prevent path traversal attacks
+// ============================================================
+
+inline QString sanitizePath(const QString &userPath, const QString &baseDir = QString()) {
+	QString cleaned = QDir::cleanPath(userPath);
+
+	// Reject paths containing ".." components
+	if (cleaned.contains("..")) {
+		return QString();
+	}
+
+	// If a base directory is specified, ensure the path stays within it
+	if (!baseDir.isEmpty()) {
+		QString base = QDir::cleanPath(baseDir);
+		if (!base.endsWith('/')) {
+			base += '/';
+		}
+		// If the path is relative, resolve it against base
+		if (QDir::isRelativePath(cleaned)) {
+			cleaned = base + cleaned;
+		}
+		// Ensure the resolved path starts with the base
+		if (!cleaned.startsWith(base) && cleaned != base.chopped(1)) {
+			return QString();
+		}
+	}
+
+	return cleaned;
+}
+
+// Default export directory for file output operations
+inline QString defaultExportDir() {
+	return QDir::homePath() + "/Library/Application Support/Tlgrm/exports";
+}
+
 } // namespace MCP

@@ -12,7 +12,7 @@ namespace MCP {
 QJsonObject Server::toolSemanticSearch(const QJsonObject &args) {
 	QString query = args["query"].toString();
 	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
-	int limit = args.value("limit").toInt(10);
+	int limit = clampLimit(args.value("limit").toInt(10), 10);
 	float minSimilarity = args.value("min_similarity").toDouble(0.7);
 
 	if (_semanticSearch) {
@@ -108,7 +108,7 @@ QJsonObject Server::toolSemanticSearch(const QJsonObject &args) {
 
 QJsonObject Server::toolIndexMessages(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
-	int limit = args.value("limit").toInt(1000);
+	int limit = clampLimit(args.value("limit").toInt(1000), 1000);
 	bool rebuild = args.value("rebuild").toBool(false);
 
 	QJsonObject result;

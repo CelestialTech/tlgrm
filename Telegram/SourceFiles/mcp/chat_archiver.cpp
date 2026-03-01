@@ -69,7 +69,12 @@ bool ChatArchiver::start(const QString &databasePath) {
 	// Initialize schema
 	if (!initializeDatabase()) {
 		Q_EMIT error("Failed to initialize database schema");
-		_db.close();
+		{
+			QString connName = _db.connectionName();
+			_db.close();
+			_db = QSqlDatabase();
+			QSqlDatabase::removeDatabase(connName);
+		}
 		return false;
 	}
 
@@ -88,7 +93,12 @@ void ChatArchiver::stop() {
 	}
 
 	_checkTimer->stop();
-	_db.close();
+	{
+		QString connName = _db.connectionName();
+		_db.close();
+		_db = QSqlDatabase();
+		QSqlDatabase::removeDatabase(connName);
+	}
 	_isRunning = false;
 }
 

@@ -99,7 +99,8 @@ void BotManager::shutdown() {
 		}
 	}
 
-	// Clear registry
+	// Delete and clear registry
+	qDeleteAll(_bots);
 	_bots.clear();
 	_stats.clear();
 	_configs.clear();
