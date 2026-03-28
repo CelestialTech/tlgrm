@@ -201,6 +201,8 @@ private:
 
 	// Name extraction
 	QString extractDeletedAccountName(qint64 peerId);
+	QString detectPeerNameFromMessages(qint64 peerId);
+	QString transliterateToCyrillic(const QString &latin);
 
 	// Forward mode helpers
 	void forwardCollectedBatch();
@@ -253,6 +255,7 @@ private:
 	QDate _lastDateHeaderSent;
 	QVector<HistoryItem*> _forwardItems; // Items collected for forwarding
 	int _forwardIndex = 0;
+	QString _detectedPeerName; // Name detected from message analysis
 };
 
 } // namespace MCP

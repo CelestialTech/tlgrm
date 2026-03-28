@@ -33,6 +33,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QStandardPaths>
+#include <QtCore/QRegularExpression>
 
 namespace MCP {
 
@@ -666,6 +667,9 @@ QJsonObject GradualArchiver::statusJson() const {
 		if (!_status.currentDeletedChatName.isEmpty()) {
 			obj["current_deleted_chat"] = _status.currentDeletedChatName;
 		}
+		if (!_detectedPeerName.isEmpty()) {
+			obj["detected_peer_name"] = _detectedPeerName;
+		}
 	}
 
 	return obj;
@@ -923,6 +927,7 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 							return a->date() < b->date();
 						});
 					_forwardIndex = 0;
+					_detectedPeerName = detectPeerNameFromMessages(_status.chatId);
 					Q_EMIT operationLog(QString("All %1 messages collected, forwarding in chronological order")
 						.arg(_forwardItems.size()));
 					forwardNextItem();
@@ -1006,6 +1011,10 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 						return a->date() < b->date();
 					});
 				_forwardIndex = 0;
+
+				// Detect real name of deleted account peer
+				_detectedPeerName = detectPeerNameFromMessages(_status.chatId);
+
 				Q_EMIT operationLog(QString("All %1 messages collected, forwarding in chronological order")
 					.arg(_forwardItems.size()));
 				forwardNextItem();
@@ -1346,6 +1355,165 @@ QString GradualArchiver::extractDeletedAccountName(qint64 peerId) {
 	return QString();
 }
 
+QString GradualArchiver::transliterateToCyrillic(const QString &latin) {
+	// Common Latin→Cyrillic transliteration (reverse of GOST/passport style)
+	static const QVector<QPair<QString, QString>> rules = {
+		{"shch", "щ"}, {"sch", "щ"},
+		{"zh", "ж"}, {"ch", "ч"}, {"sh", "ш"},
+		{"ts", "ц"}, {"ya", "я"}, {"yu", "ю"},
+		{"ye", "е"}, {"yo", "ё"}, {"ya", "я"},
+		{"iy", "ий"}, {"ey", "ей"}, {"oy", "ой"},
+		{"kh", "х"}, {"ph", "ф"},
+		{"th", "т"}, {"ie", "ие"},
+		{"a", "а"}, {"b", "б"}, {"v", "в"}, {"g", "г"},
+		{"d", "д"}, {"e", "е"}, {"z", "з"}, {"i", "и"},
+		{"y", "й"}, {"k", "к"}, {"l", "л"}, {"m", "м"},
+		{"n", "н"}, {"o", "о"}, {"p", "п"}, {"r", "р"},
+		{"s", "с"}, {"t", "т"}, {"u", "у"}, {"f", "ф"},
+		{"h", "х"}, {"c", "к"}, {"w", "в"}, {"x", "кс"},
+		{"j", "дж"},
+	};
+
+	QString result;
+	QString lower = latin.toLower();
+	int i = 0;
+	while (i < lower.length()) {
+		bool matched = false;
+		// Try longest rules first (4, 3, 2, then 1 char)
+		for (int len = qMin(4, lower.length() - i); len >= 1; --len) {
+			QString sub = lower.mid(i, len);
+			for (const auto &rule : rules) {
+				if (rule.first == sub) {
+					// Capitalize first character if original was uppercase
+					if (i == 0 && latin[0].isUpper()) {
+						QString cyr = rule.second;
+						cyr[0] = cyr[0].toUpper();
+						result += cyr;
+					} else {
+						result += rule.second;
+					}
+					i += len;
+					matched = true;
+					break;
+				}
+			}
+			if (matched) break;
+		}
+		if (!matched) {
+			result += lower[i];
+			i++;
+		}
+	}
+	return result;
+}
+
+QString GradualArchiver::detectPeerNameFromMessages(qint64 peerId) {
+	if (_forwardItems.isEmpty() || !_mainSession) return QString();
+
+	const auto myId = _mainSession->userId();
+	QHash<QString, int> firstNameCandidates;
+	QString emailUsername;
+
+	// Common Russian words that look like names but aren't
+	static const QSet<QString> skipWords = {
+		"Привет", "Здравствуйте", "Здравствуй", "Добрый",
+		"Доброе", "Спасибо", "Пожалуйста", "Хорошо", "Ладно",
+		"Понял", "Ясно", "Слушай", "Смотри", "Скажи", "Напиши",
+		"Подожди", "Давай", "Короче", "Кстати", "Погоди",
+		"Hello", "Thanks", "Please", "Sorry", "Hey",
+	};
+
+	static const QRegularExpression nameCommaRx(
+		"^([\\p{Lu}][\\p{Ll}]{2,})\\s*[,!]");
+	static const QRegularExpression greetNameRx(
+		"(?:Привет|Здравствуй|Здравствуйте|Добрый день|Доброе утро|Добрый вечер|Hi|Hello)[,!]?\\s+([\\p{Lu}][\\p{Ll}]{2,})");
+	static const QRegularExpression introRx(
+		"(?:[Мм]еня зовут|[Яя]\\s*[-–—]\\s*)([\\p{Lu}][\\p{Ll}]{2,})");
+	static const QRegularExpression emailRx(
+		"([a-zA-Z][a-zA-Z0-9._%+-]*)@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}");
+	static const QRegularExpression fullNameRx(
+		"^([\\p{Lu}][\\p{Ll}]{2,})\\s+([\\p{Lu}][\\p{Ll}]{2,})[,!\\s]");
+
+	for (auto *item : _forwardItems) {
+		const QString text = item->originalText().text.trimmed();
+		if (text.isEmpty()) continue;
+
+		const bool isOutgoing = item->from()
+			&& (item->from()->id == PeerId(myId));
+
+		if (isOutgoing) {
+			// Strategy 1: "Name, ..." — user addresses the other person
+			auto m = nameCommaRx.match(text);
+			if (m.hasMatch() && !skipWords.contains(m.captured(1))) {
+				firstNameCandidates[m.captured(1)] += 2;
+			}
+
+			// Strategy 2: "Привет, Name" — greeting with name
+			m = greetNameRx.match(text);
+			if (m.hasMatch() && !skipWords.contains(m.captured(1))) {
+				firstNameCandidates[m.captured(1)] += 3;
+			}
+
+			// Strategy 3: "FirstName LastName, ..." — full name address
+			m = fullNameRx.match(text);
+			if (m.hasMatch() && !skipWords.contains(m.captured(1))) {
+				firstNameCandidates[m.captured(1) + " " + m.captured(2)] += 4;
+			}
+		} else {
+			// Strategy 4: Email address from the deleted account
+			auto m = emailRx.match(text);
+			if (m.hasMatch() && emailUsername.isEmpty()) {
+				emailUsername = m.captured(1);
+				// Strip digits and dots from the end
+				emailUsername.remove(QRegularExpression("[0-9._-]+$"));
+				if (emailUsername.length() < 3) {
+					emailUsername.clear();
+				}
+			}
+
+			// Strategy 5: Self-introduction "Меня зовут Name"
+			m = introRx.match(text);
+			if (m.hasMatch() && !skipWords.contains(m.captured(1))) {
+				firstNameCandidates[m.captured(1)] += 5;
+			}
+		}
+	}
+
+	// Find best candidate
+	QString bestName;
+	int bestScore = 0;
+	for (auto it = firstNameCandidates.begin(); it != firstNameCandidates.end(); ++it) {
+		if (it.value() > bestScore) {
+			bestScore = it.value();
+			bestName = it.key();
+		}
+	}
+
+	// Try to build full name: detected first name + email-derived surname
+	if (!bestName.isEmpty() && !bestName.contains(' ') && !emailUsername.isEmpty()) {
+		// Email username might be a surname — transliterate to Cyrillic
+		QString surname = transliterateToCyrillic(emailUsername);
+		if (!surname.isEmpty()) {
+			surname[0] = surname[0].toUpper();
+			bestName = bestName + " " + surname;
+		}
+	}
+
+	// Fallback: if no name from conversation but we have email, use email-derived name
+	if (bestName.isEmpty() && !emailUsername.isEmpty()) {
+		bestName = transliterateToCyrillic(emailUsername);
+		if (!bestName.isEmpty()) {
+			bestName[0] = bestName[0].toUpper();
+		}
+	}
+
+	if (!bestName.isEmpty()) {
+		Q_EMIT operationLog(QString("Detected peer name: %1").arg(bestName));
+	}
+
+	return bestName;
+}
+
 void GradualArchiver::createArchiveGroup(const QString &title, Fn<void(qint64)> done) {
 	if (!_mainSession) {
 		Q_EMIT error("Main session not available for group creation");
@@ -1635,6 +1803,12 @@ void GradualArchiver::doForwardItem() {
 	QString senderName;
 	if (const auto from = item->from()) {
 		senderName = from->name();
+		// Replace "Deleted Account" with detected real name
+		if ((senderName.isEmpty() || senderName == "Deleted Account")
+			&& !_detectedPeerName.isEmpty()
+			&& from->id == PeerId(_status.chatId)) {
+			senderName = _detectedPeerName;
+		}
 	}
 
 	QString footer;
