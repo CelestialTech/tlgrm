@@ -527,10 +527,10 @@ print("✓ MCP integration working")
 |----------|-------|--------|
 | Core Messaging | 6 | Implemented |
 | Archive & Export | 9 | Implemented |
-| Deleted Account Archiving | 6 | Implemented |
+| Deleted Account Archiving | 7 | Implemented |
 | Analytics | 8 | Implemented |
 | Semantic Search | 5 | Stub |
-| Message Operations | 6 | Implemented |
+| Message Operations | 7 | Implemented |
 | Batch Operations | 5 | Stub |
 | Scheduler | 4 | Stub |
 | System | 4 | Implemented |
@@ -554,7 +554,7 @@ print("✓ MCP integration working")
 | `search_messages` | Search messages in local database |
 | `get_user_info` | Get information about a Telegram user |
 
-### Message Operations (6 tools) - IMPLEMENTED
+### Message Operations (7 tools) - IMPLEMENTED
 | Tool | Description |
 |------|-------------|
 | `edit_message` | Edit a message in a chat |
@@ -563,6 +563,7 @@ print("✓ MCP integration working")
 | `pin_message` | Pin a message in a chat |
 | `unpin_message` | Unpin a message |
 | `add_reaction` | Add a reaction to a message |
+| `rename_chat` | Rename a group or channel title |
 
 ### Profile Settings Tools (5 tools) - IMPLEMENTED
 | Tool | Description | Status |
@@ -608,19 +609,35 @@ print("✓ MCP integration working")
 | `search_archive` | Search archived messages |
 | `purge_archive` | Purge old archive data |
 
-### Deleted Account Archiving Tools (6 tools) - IMPLEMENTED
+### Deleted Account Archiving Tools (7 tools) - IMPLEMENTED
 | Tool | Description |
 |------|-------------|
 | `list_deleted_accounts` | Scan and list all chats with deleted user accounts, with message previews |
 | `archive_deleted_accounts` | Forward all messages from deleted account chats to an archive group |
-| `get_deleted_archive_status` | Get progress of deleted account archiving operation |
+| `get_deleted_archive_status` | Get progress of deleted account archiving operation (includes `detected_peer_name`) |
 | `pause_deleted_archive` | Pause an in-progress deleted account archive |
+| `resume_deleted_archive` | Resume a paused deleted account archive |
 | `cancel_deleted_archive` | Cancel an in-progress deleted account archive |
 | `list_deleted_channels` | List forbidden/deactivated channels and groups with message previews |
 
-**Architecture**: Uses direct `MTPmessages_GetHistory` API to fetch full server history (bypasses `requestHistory` which only populates `history->blocks` for UI-visible chats). Messages are processed into `HistoryItem` objects via `addNewMessage()` then re-sent with `Api::SendExistingDocument`/`Api::SendExistingPhoto` (for media) or `api().sendMessage()` (for text-only) to preserve all media (photos, videos, documents) while embedding a `#YYYYMMDD` date hashtag in each message's text/caption. Human simulation (random delays, jitter, burst pauses, FLOOD_WAIT handling) from `GradualArchiver` is fully reused.
+**Architecture**: Uses direct `MTPmessages_GetHistory` API to fetch full server history (bypasses `requestHistory` which only populates `history->blocks` for UI-visible chats). Messages are collected across ALL server batches into `_forwardItems`, then sorted oldest-first by `item->date()` for correct chronological order. Each message is re-sent with `Api::SendExistingDocument`/`Api::SendExistingPhoto` (for media) or `api().sendMessage()` (for text-only) to preserve all media (photos, videos, documents).
 
-**Key files**: `mcp_deleted_account_tools.cpp` (6 tool handlers), `gradual_archiver.cpp` (forward mode in `fetchBatchFromServer`, `forwardNextItem`, `doForwardItem`)
+**Message footer format**: Each archived message gets a metadata footer after a blank line:
+```
+#Month_Day_Year | SenderName | HH:MM
+```
+Example: `#January_5_2025 | 𝙿𝚊𝚟𝚎𝚕 𝙿𝚘𝚕𝚒𝚔𝚊𝚜𝚑𝚒𝚗 | 14:30`. Hashtags use underscores (no spaces) so they are clickable in Telegram.
+
+**Name detection**: `detectPeerNameFromMessages()` analyzes collected messages to recover the real name of a deleted account peer:
+1. Outgoing messages starting with "Name," or "Name!" (user addressing the other person)
+2. Greeting patterns: "Привет, Name"
+3. Email addresses in incoming messages (surname extracted and transliterated Latin→Cyrillic)
+4. Self-introductions: "Меня зовут Name"
+The detected name replaces "Deleted Account" in message footers and is used in the auto-generated group title: "Archive Name (peerId)".
+
+**Group naming**: Auto-creates supergroup named "Archive \<detected_name\> (\<peerId\>)" or "Archive \<peerId\>" if name detection fails. Use `rename_chat` tool to change the title afterwards.
+
+**Key files**: `mcp_deleted_account_tools.cpp` (7 tool handlers), `gradual_archiver.cpp` (forward mode: `fetchBatchFromServer`, `detectPeerNameFromMessages`, `doForwardItem`)
 
 ### Analytics Tools (8 tools) - IMPLEMENTED
 | Tool | Description |
@@ -937,10 +954,10 @@ log stream --predicate 'process == "Telegram"' --level debug
 
 ---
 
-**Last Updated**: 2025-11-28
+**Last Updated**: 2026-03-28
 **Maintained for**: AI assistants working on tdesktop MCP integration
 **Base Commit**: aadc81279a (Telegram Desktop 6.3)
-**MCP Tools**: 200+ tools (52 implemented, 150+ stub implementations)
+**MCP Tools**: 200+ tools (54 implemented, 150+ stub implementations)
 
 ## Adding New MCP Tools
 
