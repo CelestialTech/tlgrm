@@ -62,8 +62,8 @@ struct GradualArchiveConfig {
 	// Forward mode (deleted account archiving)
 	bool forwardMode = false;              // Forward to group instead of archiving to SQLite
 	qint64 forwardTargetGroupId = 0;       // Target group peer ID for forwarding
-	bool addDateHeaders = true;            // Insert "# YYYY-MM-DD" headers at date boundaries
-	QString dateHeaderFormat = "# %1";     // %1 = YYYY-MM-DD
+	bool addDateHeaders = true;            // Embed date hashtag in every message
+	QString dateHeaderFormat = "#%1";      // %1 = YYYYMMDD (clickable Telegram hashtag)
 	bool addChatSeparators = true;         // Insert separator between different chats
 	QString groupTitle = "Deleted Accounts Archive"; // Title for auto-created group
 	QVector<qint64> specificPeerIds;                // If non-empty, only archive these peer IDs

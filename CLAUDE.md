@@ -618,7 +618,7 @@ print("✓ MCP integration working")
 | `cancel_deleted_archive` | Cancel an in-progress deleted account archive |
 | `list_deleted_channels` | List forbidden/deactivated channels and groups with message previews |
 
-**Architecture**: Uses direct `MTPmessages_GetHistory` API to fetch full server history (bypasses `requestHistory` which only populates `history->blocks` for UI-visible chats). Messages are processed into `HistoryItem` objects via `addNewMessage()` then forwarded with `forwardMessages()` to preserve all media (photos, videos, documents). Date headers (`# YYYY-MM-DD`) are inserted between day boundaries. Human simulation (random delays, jitter, burst pauses, FLOOD_WAIT handling) from `GradualArchiver` is fully reused.
+**Architecture**: Uses direct `MTPmessages_GetHistory` API to fetch full server history (bypasses `requestHistory` which only populates `history->blocks` for UI-visible chats). Messages are processed into `HistoryItem` objects via `addNewMessage()` then re-sent with `Api::SendExistingDocument`/`Api::SendExistingPhoto` (for media) or `api().sendMessage()` (for text-only) to preserve all media (photos, videos, documents) while embedding a `#YYYYMMDD` date hashtag in each message's text/caption. Human simulation (random delays, jitter, burst pauses, FLOOD_WAIT handling) from `GradualArchiver` is fully reused.
 
 **Key files**: `mcp_deleted_account_tools.cpp` (6 tool handlers), `gradual_archiver.cpp` (forward mode in `fetchBatchFromServer`, `forwardNextItem`, `doForwardItem`)
 

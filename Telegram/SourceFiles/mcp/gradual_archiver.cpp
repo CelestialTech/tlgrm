@@ -25,6 +25,7 @@
 #include "main/main_session.h"
 #include "apiwrap.h"
 #include "api/api_common.h"
+#include "api/api_sending.h"
 #include "storage/file_download.h"
 #include "storage/storage_account.h"
 
@@ -1479,10 +1480,11 @@ void GradualArchiver::sendDateHeader(const QDate &date, Fn<void()> done) {
 		return;
 	}
 
-	QString header = _config.dateHeaderFormat.arg(date.toString("yyyy-MM-dd"));
+	// Use YYYYMMDD format (no hyphens) for valid Telegram hashtag
+	QString header = _config.dateHeaderFormat.arg(date.toString("yyyyMMdd"));
 	_lastDateHeaderSent = date;
 
-	Q_EMIT operationLog(QString("Sending date header: %1").arg(header));
+	Q_EMIT operationLog(QString("Sending date tag: %1").arg(header));
 	sendTextToGroup(_config.forwardTargetGroupId, header, done);
 }
 
@@ -1532,20 +1534,8 @@ void GradualArchiver::forwardCollectedBatch() {
 
 void GradualArchiver::forwardNextItem() {
 	if (_forwardIndex >= _forwardItems.size()) {
-		// Batch done, schedule next server fetch
 		_forwardItems.clear();
 		scheduleNextBatch();
-		return;
-	}
-
-	auto item = _forwardItems[_forwardIndex];
-	QDate itemDate = QDateTime::fromSecsSinceEpoch(item->date()).date();
-
-	// Insert date header when date changes
-	if (_config.addDateHeaders && itemDate != _lastDateHeaderSent) {
-		sendDateHeader(itemDate, [this]() {
-			doForwardItem();
-		});
 		return;
 	}
 
@@ -1570,22 +1560,47 @@ void GradualArchiver::doForwardItem() {
 		return;
 	}
 
-	// Forward the message — this preserves all media (photos, videos, docs)
-	Data::ResolvedForwardDraft draft;
-	draft.items.push_back(item);
+	// Build date hashtag
+	QString dateTag;
+	if (_config.addDateHeaders) {
+		QDate d = QDateTime::fromSecsSinceEpoch(item->date()).date();
+		dateTag = _config.dateHeaderFormat.arg(d.toString("yyyyMMdd"));
+	}
+
+	// Build message text with embedded date hashtag
+	QString originalText = item->originalText().text;
+	QString fullText = dateTag.isEmpty()
+		? originalText
+		: (dateTag + "\n" + originalText);
 
 	auto action = Api::SendAction(targetHistory);
 	action.clearDraft = false;
+	auto message = Api::MessageToSend(action);
+	message.textWithTags.text = fullText;
 
-	_mainSession->api().forwardMessages(std::move(draft), action);
+	// Send with media if present, otherwise plain text
+	bool sentMedia = false;
+	if (item->media()) {
+		if (const auto doc = item->media()->document()) {
+			Api::SendExistingDocument(std::move(message), doc);
+			sentMedia = true;
+		} else if (const auto photo = item->media()->photo()) {
+			Api::SendExistingPhoto(std::move(message), photo);
+			sentMedia = true;
+		}
+	}
+
+	if (!sentMedia) {
+		_mainSession->api().sendMessage(std::move(message));
+	}
 
 	_forwardIndex++;
 	Q_EMIT progressChanged(_status.archivedMessages, _status.totalMessages);
 
-	// Human-like delay between forwards
+	// Human-like delay
 	int delay = 300;
 	if (_config.simulateReading) {
-		delay = qMax(calculateReadingTime(item->originalText().text.length()), 300);
+		delay = qMax(calculateReadingTime(originalText.length()), 300);
 		delay = qMin(delay, 2000);
 	}
 	delay += _rng.bounded(0, delay / 3);
