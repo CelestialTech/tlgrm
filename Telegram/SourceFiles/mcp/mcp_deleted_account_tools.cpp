@@ -101,6 +101,7 @@ QJsonObject Server::toolArchiveDeletedAccounts(const QJsonObject &args) {
 
 	GradualArchiveConfig config;
 	config.forwardMode = true;
+	config.respectActiveHours = false; // Don't pause for active hours in archive mode
 
 	if (args.contains("group_title")) {
 		config.groupTitle = args.value("group_title").toString();
@@ -182,6 +183,30 @@ QJsonObject Server::toolPauseDeletedArchive(const QJsonObject &args) {
 	QJsonObject result;
 	result["success"] = true;
 	result["message"] = "Deleted account archive paused";
+	result["status"] = _gradualArchiver->statusJson();
+	return result;
+}
+
+QJsonObject Server::toolResumeDeletedArchive(const QJsonObject &args) {
+	Q_UNUSED(args);
+
+	if (!_gradualArchiver) {
+		QJsonObject result;
+		result["success"] = false;
+		result["error"] = "No archive to resume";
+		return result;
+	}
+
+	// Disable active hours restriction so resume always works
+	auto config = _gradualArchiver->config();
+	config.respectActiveHours = false;
+	_gradualArchiver->setConfig(config);
+
+	_gradualArchiver->resume();
+
+	QJsonObject result;
+	result["success"] = true;
+	result["message"] = "Deleted account archive resumed";
 	result["status"] = _gradualArchiver->statusJson();
 	return result;
 }

@@ -2597,6 +2597,18 @@ void Server::registerTools() {
 
 	{
 		Tool tool;
+		tool.name = "resume_deleted_archive";
+		tool.description = "Resume a paused deleted account archiving operation";
+
+		QJsonObject schema;
+		schema["type"] = "object";
+		schema["properties"] = QJsonObject();
+		tool.inputSchema = schema;
+		_tools.append(tool);
+	}
+
+	{
+		Tool tool;
 		tool.name = "cancel_deleted_archive";
 		tool.description = "Cancel the deleted account archiving operation";
 

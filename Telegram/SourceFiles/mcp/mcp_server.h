@@ -613,6 +613,7 @@ private:
 	QJsonObject toolArchiveDeletedAccounts(const QJsonObject &args);
 	QJsonObject toolGetDeletedArchiveStatus(const QJsonObject &args);
 	QJsonObject toolPauseDeletedArchive(const QJsonObject &args);
+	QJsonObject toolResumeDeletedArchive(const QJsonObject &args);
 	QJsonObject toolCancelDeletedArchive(const QJsonObject &args);
 	QJsonObject toolListDeletedChannels(const QJsonObject &args);
 

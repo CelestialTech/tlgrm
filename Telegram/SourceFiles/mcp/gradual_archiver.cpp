@@ -1560,18 +1560,34 @@ void GradualArchiver::doForwardItem() {
 		return;
 	}
 
-	// Build date hashtag
+	// Build metadata header: sender, timestamp, date hashtag
+	QDateTime msgTime = QDateTime::fromSecsSinceEpoch(item->date());
 	QString dateTag;
 	if (_config.addDateHeaders) {
-		QDate d = QDateTime::fromSecsSinceEpoch(item->date()).date();
-		dateTag = _config.dateHeaderFormat.arg(d.toString("yyyyMMdd"));
+		dateTag = _config.dateHeaderFormat.arg(msgTime.date().toString("yyyyMMdd"));
 	}
 
-	// Build message text with embedded date hashtag
+	// Sender identification
+	QString senderName;
+	if (const auto from = item->from()) {
+		senderName = from->name();
+	}
+
+	// Build header: #dYYYYMMDD | Sender | HH:MM
+	QString header;
+	if (!dateTag.isEmpty()) {
+		header = dateTag;
+	}
+	if (!senderName.isEmpty()) {
+		header += (header.isEmpty() ? "" : " | ") + senderName;
+	}
+	header += (header.isEmpty() ? "" : " | ") + msgTime.toString("HH:mm");
+
+	// Combine header + original text
 	QString originalText = item->originalText().text;
-	QString fullText = dateTag.isEmpty()
-		? originalText
-		: (dateTag + "\n" + originalText);
+	QString fullText = originalText.isEmpty()
+		? header
+		: (header + "\n" + originalText);
 
 	auto action = Api::SendAction(targetHistory);
 	action.clearDraft = false;

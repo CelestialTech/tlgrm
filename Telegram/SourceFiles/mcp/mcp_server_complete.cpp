@@ -981,6 +981,7 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["archive_deleted_accounts"] = [this](const QJsonObject &args) { return toolArchiveDeletedAccounts(args); };
 	_toolHandlers["get_deleted_archive_status"] = [this](const QJsonObject &args) { return toolGetDeletedArchiveStatus(args); };
 	_toolHandlers["pause_deleted_archive"] = [this](const QJsonObject &args) { return toolPauseDeletedArchive(args); };
+	_toolHandlers["resume_deleted_archive"] = [this](const QJsonObject &args) { return toolResumeDeletedArchive(args); };
 	_toolHandlers["cancel_deleted_archive"] = [this](const QJsonObject &args) { return toolCancelDeletedArchive(args); };
 	_toolHandlers["list_deleted_channels"] = [this](const QJsonObject &args) { return toolListDeletedChannels(args); };
 
