@@ -1410,7 +1410,6 @@ QString GradualArchiver::transliterateToCyrillic(const QString &latin) {
 QString GradualArchiver::detectPeerNameFromMessages(qint64 peerId) {
 	if (_forwardItems.isEmpty() || !_mainSession) return QString();
 
-	const auto myId = _mainSession->userId();
 	QHash<QString, int> firstNameCandidates;
 	QString emailUsername;
 
@@ -1438,8 +1437,8 @@ QString GradualArchiver::detectPeerNameFromMessages(qint64 peerId) {
 		const QString text = item->originalText().text.trimmed();
 		if (text.isEmpty()) continue;
 
-		const bool isOutgoing = item->from()
-			&& (item->from()->id == PeerId(myId));
+		// Use out() flag — reliable for private chat messages
+		const bool isOutgoing = item->out();
 
 		if (isOutgoing) {
 			// Strategy 1: "Name, ..." — user addresses the other person
@@ -1803,12 +1802,12 @@ void GradualArchiver::doForwardItem() {
 	QString senderName;
 	if (const auto from = item->from()) {
 		senderName = from->name();
-		// Replace "Deleted Account" with detected real name
-		if ((senderName.isEmpty() || senderName == "Deleted Account")
-			&& !_detectedPeerName.isEmpty()
-			&& from->id == PeerId(_status.chatId)) {
-			senderName = _detectedPeerName;
-		}
+	}
+	// Replace "Deleted Account" with detected real name for incoming messages
+	if (!item->out()
+		&& !_detectedPeerName.isEmpty()
+		&& (senderName.isEmpty() || senderName == "Deleted Account")) {
+		senderName = _detectedPeerName;
 	}
 
 	QString footer;
