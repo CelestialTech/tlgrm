@@ -1010,6 +1010,7 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["pin_message"] = [this](const QJsonObject &args) { return toolPinMessage(args); };
 	_toolHandlers["unpin_message"] = [this](const QJsonObject &args) { return toolUnpinMessage(args); };
 	_toolHandlers["add_reaction"] = [this](const QJsonObject &args) { return toolAddReaction(args); };
+	_toolHandlers["rename_chat"] = [this](const QJsonObject &args) { return toolRenameChatTitle(args); };
 
 	// BATCH OPERATIONS
 	_toolHandlers["batch_send"] = [this](const QJsonObject &args) { return toolBatchSend(args); };

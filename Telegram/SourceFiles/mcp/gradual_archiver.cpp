@@ -1389,10 +1389,14 @@ bool GradualArchiver::startDeletedAccountArchive(const GradualArchiveConfig &con
 	// Create archive group if no target specified
 	if (localConfig.forwardTargetGroupId == 0) {
 		Q_EMIT operationLog("Creating archive group...");
-		createArchiveGroup(
-			localConfig.groupTitle.isEmpty()
-				? QString("Deleted Accounts Archive")
-				: localConfig.groupTitle,
+		// Default title: "Archive <peerId>"
+		QString title = localConfig.groupTitle;
+		if (title.isEmpty() && !_deletedChats.isEmpty()) {
+			title = QString("Archive %1").arg(_deletedChats.first().peerId);
+		} else if (title.isEmpty()) {
+			title = "Archive";
+		}
+		createArchiveGroup(title,
 			[this, localConfig](qint64 groupId) mutable {
 				localConfig.forwardTargetGroupId = groupId;
 				_config = localConfig;
@@ -1560,34 +1564,32 @@ void GradualArchiver::doForwardItem() {
 		return;
 	}
 
-	// Build metadata header: sender, timestamp, date hashtag
+	// Build metadata footer: #dYYYYMMDD | Sender | HH:MM
 	QDateTime msgTime = QDateTime::fromSecsSinceEpoch(item->date());
 	QString dateTag;
 	if (_config.addDateHeaders) {
 		dateTag = _config.dateHeaderFormat.arg(msgTime.date().toString("yyyyMMdd"));
 	}
 
-	// Sender identification
 	QString senderName;
 	if (const auto from = item->from()) {
 		senderName = from->name();
 	}
 
-	// Build header: #dYYYYMMDD | Sender | HH:MM
-	QString header;
+	QString footer;
 	if (!dateTag.isEmpty()) {
-		header = dateTag;
+		footer = dateTag;
 	}
 	if (!senderName.isEmpty()) {
-		header += (header.isEmpty() ? "" : " | ") + senderName;
+		footer += (footer.isEmpty() ? "" : " | ") + senderName;
 	}
-	header += (header.isEmpty() ? "" : " | ") + msgTime.toString("HH:mm");
+	footer += (footer.isEmpty() ? "" : " | ") + msgTime.toString("HH:mm");
 
-	// Combine header + original text
+	// Message text first, then blank line, then metadata footer
 	QString originalText = item->originalText().text;
 	QString fullText = originalText.isEmpty()
-		? header
-		: (header + "\n" + originalText);
+		? footer
+		: (originalText + "\n\n" + footer);
 
 	auto action = Api::SendAction(targetHistory);
 	action.clearDraft = false;

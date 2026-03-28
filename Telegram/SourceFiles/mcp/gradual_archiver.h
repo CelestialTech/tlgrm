@@ -65,7 +65,7 @@ struct GradualArchiveConfig {
 	bool addDateHeaders = true;            // Embed date hashtag in every message
 	QString dateHeaderFormat = "#d%1";     // %1 = YYYYMMDD; needs letter prefix for clickable hashtag
 	bool addChatSeparators = true;         // Insert separator between different chats
-	QString groupTitle = "Deleted Accounts Archive"; // Title for auto-created group
+	QString groupTitle; // Empty = auto "Archive <peerId>"
 	QVector<qint64> specificPeerIds;                // If non-empty, only archive these peer IDs
 };
 

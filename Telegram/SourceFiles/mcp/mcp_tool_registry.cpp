@@ -629,6 +629,25 @@ void Server::registerTools() {
 			}
 		},
 
+		Tool{
+			"rename_chat",
+			"Rename a group or channel title",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat/group/channel ID"}
+					}},
+					{"title", QJsonObject{
+						{"type", "string"},
+						{"description", "New title"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "title"}},
+			}
+		},
+
 		// ===== BATCH OPERATIONS (5) =====
 		Tool{
 			"batch_send",

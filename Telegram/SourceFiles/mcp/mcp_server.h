@@ -189,6 +189,7 @@ private:
 	QJsonObject toolPinMessage(const QJsonObject &args);
 	QJsonObject toolUnpinMessage(const QJsonObject &args);
 	QJsonObject toolAddReaction(const QJsonObject &args);
+	QJsonObject toolRenameChatTitle(const QJsonObject &args);
 
 	// Batch operations (5 tools)
 	QJsonObject toolBatchSend(const QJsonObject &args);

@@ -396,4 +396,60 @@ QJsonObject Server::toolAddReaction(const QJsonObject &args) {
 }
 
 
+QJsonObject Server::toolRenameChatTitle(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Session not available";
+		return error;
+	}
+
+	qint64 chatId = args["chat_id"].toVariant().toLongLong();
+	QString title = args["title"].toString();
+
+	if (chatId == 0 || title.isEmpty()) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "chat_id and title are required";
+		return error;
+	}
+
+	auto &owner = _session->data();
+	const auto peerId = PeerId(chatId);
+	const auto peer = owner.peerLoaded(peerId);
+	if (!peer) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Chat not found";
+		return error;
+	}
+
+	if (peer->isChannel()) {
+		_session->api().request(MTPchannels_EditTitle(
+			peer->asChannel()->inputChannel(),
+			MTP_string(title)
+		)).done([](const MTPUpdates &) {
+		}).fail([](const MTP::Error &) {
+		}).send();
+	} else if (peer->isChat()) {
+		_session->api().request(MTPmessages_EditChatTitle(
+			peer->asChat()->inputChat(),
+			MTP_string(title)
+		)).done([](const MTPUpdates &) {
+		}).fail([](const MTP::Error &) {
+		}).send();
+	} else {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Can only rename groups and channels";
+		return error;
+	}
+
+	QJsonObject result;
+	result["success"] = true;
+	result["chat_id"] = QString::number(chatId);
+	result["new_title"] = title;
+	return result;
+}
+
 } // namespace MCP
