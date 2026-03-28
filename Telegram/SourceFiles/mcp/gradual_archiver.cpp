@@ -8,11 +8,17 @@
 #include "data/data_session.h"
 #include "data/data_file_origin.h"
 #include "data/data_peer.h"
+#include "data/data_peer_id.h"
 #include "data/data_document.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
 #include "data/data_document_media.h"
 #include "data/data_histories.h"
+#include "data/data_user.h"
+#include "data/data_chat.h"
+#include "data/data_channel.h"
+#include "data/data_folder.h"
+#include "dialogs/dialogs_main_list.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/view/history_view_element.h"
@@ -71,10 +77,21 @@ bool GradualArchiver::startGradualArchive(
 	}
 
 	_config = config;
+	// Preserve forward-mode status fields across reset
+	const auto savedForwardTarget = _status.forwardTargetGroupId;
+	const auto savedTotalDeleted = _status.totalDeletedChats;
+	const auto savedProcessedDeleted = _status.processedDeletedChats;
+	const auto savedDeletedChatName = _status.currentDeletedChatName;
 	_status = GradualArchiveStatus{};
 	_status.chatId = chatId;
 	_status.state = GradualArchiveStatus::State::Running;
 	_status.startTime = QDateTime::currentDateTime();
+	if (_config.forwardMode) {
+		_status.forwardTargetGroupId = savedForwardTarget;
+		_status.totalDeletedChats = savedTotalDeleted;
+		_status.processedDeletedChats = savedProcessedDeleted;
+		_status.currentDeletedChatName = savedDeletedChatName;
+	}
 
 	// Clear in-memory message storage
 	_collectedMessages = QJsonArray{};
@@ -554,12 +571,43 @@ void GradualArchiver::startExport() {
 
 void GradualArchiver::processNextInQueue() {
 	if (_queue.isEmpty()) {
+		if (_config.forwardMode && !_deletedChats.isEmpty()) {
+			// All deleted chats archived
+			_status.state = GradualArchiveStatus::State::Completed;
+			Q_EMIT operationLog(QString("All %1 deleted account chats archived successfully")
+				.arg(_deletedChats.size()));
+			Q_EMIT stateChanged(_status.state);
+			Q_EMIT archiveCompleted(0, _status.archivedMessages);
+			return;
+		}
 		_status.state = GradualArchiveStatus::State::Idle;
 		Q_EMIT stateChanged(_status.state);
 		return;
 	}
 
 	QueuedChat next = _queue.takeFirst();
+
+	// In forward mode, send chat separator before starting next chat
+	if (_config.forwardMode && _config.addChatSeparators) {
+		_status.processedDeletedChats++;
+		// Find the deleted chat info for the separator
+		for (const auto &dc : _deletedChats) {
+			if (dc.peerId == next.chatId) {
+				_status.currentDeletedChatName = dc.name;
+				int chatDelay = _rng.bounded(2000, _config.longPauseMs / 2);
+				Q_EMIT operationLog(QString("Waiting %1s before next chat...")
+					.arg(chatDelay / 1000));
+				QTimer::singleShot(chatDelay, this, [this, next, dc]() {
+					sendChatSeparator(dc, [this, next]() {
+						_lastDateHeaderSent = QDate();
+						startGradualArchive(next.chatId, next.config);
+					});
+				});
+				return;
+			}
+		}
+	}
+
 	startGradualArchive(next.chatId, next.config);
 }
 
@@ -608,6 +656,17 @@ QJsonObject GradualArchiver::statusJson() const {
 		obj["last_error"] = _status.lastError;
 	}
 
+	// Deleted account archiving fields
+	if (_config.forwardMode) {
+		obj["forward_mode"] = true;
+		obj["forward_target_group_id"] = _status.forwardTargetGroupId;
+		obj["total_deleted_chats"] = _status.totalDeletedChats;
+		obj["processed_deleted_chats"] = _status.processedDeletedChats;
+		if (!_status.currentDeletedChatName.isEmpty()) {
+			obj["current_deleted_chat"] = _status.currentDeletedChatName;
+		}
+	}
+
 	return obj;
 }
 
@@ -633,6 +692,15 @@ QJsonObject GradualArchiver::configJson() const {
 	obj["auto_export_on_complete"] = _config.autoExportOnComplete;
 	obj["export_format"] = _config.exportFormat;
 	obj["export_path"] = _config.exportPath;
+
+	// Forward mode config
+	obj["forward_mode"] = _config.forwardMode;
+	obj["forward_target_group_id"] = _config.forwardTargetGroupId;
+	obj["add_date_headers"] = _config.addDateHeaders;
+	obj["date_header_format"] = _config.dateHeaderFormat;
+	obj["add_chat_separators"] = _config.addChatSeparators;
+	obj["group_title"] = _config.groupTitle;
+
 	return obj;
 }
 
@@ -677,6 +745,20 @@ bool GradualArchiver::loadConfigFromJson(const QJsonObject &json) {
 		_config.exportFormat = json["export_format"].toString();
 	if (json.contains("export_path"))
 		_config.exportPath = json["export_path"].toString();
+
+	if (json.contains("forward_mode"))
+		_config.forwardMode = json["forward_mode"].toBool();
+	if (json.contains("forward_target_group_id"))
+		_config.forwardTargetGroupId = json["forward_target_group_id"].toVariant().toLongLong();
+	if (json.contains("add_date_headers"))
+		_config.addDateHeaders = json["add_date_headers"].toBool();
+	if (json.contains("date_header_format"))
+		_config.dateHeaderFormat = json["date_header_format"].toString();
+	if (json.contains("add_chat_separators"))
+		_config.addChatSeparators = json["add_chat_separators"].toBool();
+	if (json.contains("group_title"))
+		_config.groupTitle = json["group_title"].toString();
+
 	return true;
 }
 
@@ -761,9 +843,6 @@ void GradualArchiver::loadState() {
 }
 
 void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
-	// This method fetches messages from the server by mimicking user scrolling
-	// Uses the normal messages.getHistory API which bypasses export restrictions
-
 	if (!_mainSession || !_session) {
 		_status.lastError = "Session not available for server fetch";
 		Q_EMIT error(_status.lastError);
@@ -780,21 +859,185 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 		return;
 	}
 
+	// Forward mode: use direct MTP API (messages.getHistory) to bypass
+	// requestHistory's optimization that only populates history->blocks
+	// for UI-visible chats. For non-UI chats (deleted accounts etc),
+	// requestHistory loads to data layer but blocks stay empty.
+	if (_config.forwardMode) {
+		auto peer = _session->peer(peerId);
+		if (!peer) {
+			_status.lastError = "Peer not available";
+			Q_EMIT error(_status.lastError);
+			scheduleNextBatch();
+			return;
+		}
+
+		const auto offsetIdInt = int(std::clamp(
+			offsetId,
+			qint64(0),
+			qint64(0x3FFFFFFF)));
+
+		Q_EMIT operationLog(QString("Fetching %1 messages from server (offset: %2)...")
+			.arg(limit)
+			.arg(offsetIdInt));
+
+		_mainSession->api().request(MTPmessages_GetHistory(
+			peer->input(),
+			MTP_int(offsetIdInt),  // offset_id
+			MTP_int(0),            // offset_date
+			MTP_int(0),            // add_offset
+			MTP_int(limit),        // limit
+			MTP_int(0),            // max_id
+			MTP_int(0),            // min_id
+			MTP_long(0)            // hash
+		)).done([this, limit](const MTPmessages_Messages &result) {
+			const QVector<MTPMessage> *messagesList = nullptr;
+			bool hasMore = false;
+
+			result.match([&](const MTPDmessages_messages &data) {
+				_mainSession->data().processUsers(data.vusers());
+				_mainSession->data().processChats(data.vchats());
+				messagesList = &data.vmessages().v;
+				hasMore = false;
+			}, [&](const MTPDmessages_messagesSlice &data) {
+				_mainSession->data().processUsers(data.vusers());
+				_mainSession->data().processChats(data.vchats());
+				messagesList = &data.vmessages().v;
+				hasMore = (data.vmessages().v.size() >= limit);
+			}, [&](const MTPDmessages_channelMessages &data) {
+				_mainSession->data().processUsers(data.vusers());
+				_mainSession->data().processChats(data.vchats());
+				messagesList = &data.vmessages().v;
+				hasMore = (data.vmessages().v.size() >= limit);
+			}, [&](const MTPDmessages_messagesNotModified &) {
+				hasMore = false;
+			});
+
+			if (!messagesList || messagesList->isEmpty()) {
+				Q_EMIT operationLog("No more messages from server");
+				completeArchive();
+				return;
+			}
+
+			// Process MTP messages into HistoryItem objects via addNewMessage.
+			// This creates proper items in the data layer so forwardMessages
+			// can forward them with all media (photos, videos, documents).
+			int archived = 0;
+			qint64 oldestMsgId = INT64_MAX;
+			_forwardItems.clear();
+
+			for (const auto &message : *messagesList) {
+				qint64 msgId = 0;
+				bool isService = false;
+				bool isEmpty = false;
+
+				message.match([&](const MTPDmessage &data) {
+					msgId = data.vid().v;
+				}, [&](const MTPDmessageService &data) {
+					msgId = data.vid().v;
+					isService = true;
+				}, [&](const MTPDmessageEmpty &data) {
+					msgId = data.vid().v;
+					isEmpty = true;
+				});
+
+				if (msgId < oldestMsgId) {
+					oldestMsgId = msgId;
+				}
+
+				if (isService || isEmpty) {
+					continue;
+				}
+
+				// Create HistoryItem from MTP message
+				auto *item = _mainSession->data().addNewMessage(
+					message,
+					MessageFlags(),
+					NewMessageType::Existing);
+
+				if (item) {
+					_forwardItems.append(item);
+					archived++;
+					_status.archivedMessages++;
+					_status.messagesArchivedThisHour++;
+					_status.messagesArchivedToday++;
+					_status.totalBytesProcessed += item->originalText().text.toUtf8().size();
+					if (item->media()) {
+						if (const auto doc = item->media()->document()) {
+							_status.totalMediaBytes += doc->size;
+						} else if (item->media()->photo()) {
+							_status.totalMediaBytes += 512 * 1024;
+						}
+					}
+				}
+			}
+
+			_currentOffsetId = oldestMsgId;
+
+			Q_EMIT operationLog(QString("Batch: %1 messages fetched (%2 total), hasMore=%3")
+				.arg(archived)
+				.arg(_status.archivedMessages)
+				.arg(hasMore));
+
+			if (archived > 0) {
+				_retryCount = 0;
+				_consecutiveBatches++;
+				_status.batchesCompleted++;
+				_status.lastActivityTime = QDateTime::currentDateTime();
+
+				// Sort by date (oldest first) for chronological forwarding
+				std::sort(_forwardItems.begin(), _forwardItems.end(),
+					[](HistoryItem *a, HistoryItem *b) {
+						return a->date() < b->date();
+					});
+
+				_forwardIndex = 0;
+				Q_EMIT operationLog(QString("Forwarding %1 messages to archive group")
+					.arg(_forwardItems.size()));
+				forwardNextItem();
+			} else if (!hasMore) {
+				completeArchive();
+			} else {
+				_retryCount++;
+				if (_retryCount >= _config.maxRetries) {
+					completeArchive();
+				} else {
+					int retryDelay = _config.maxDelayMs * (_retryCount + 1);
+					_batchTimer->start(retryDelay);
+				}
+			}
+		}).fail([this](const MTP::Error &error) {
+			if (error.type().startsWith("FLOOD_WAIT_")) {
+				int waitSecs = error.type().mid(11).toInt();
+				if (waitSecs < 1) waitSecs = 5;
+				Q_EMIT operationLog(QString("FLOOD_WAIT: retrying in %1s").arg(waitSecs));
+				handleFloodWait(waitSecs);
+			} else {
+				_status.lastError = "Fetch failed: " + error.type();
+				Q_EMIT this->error(_status.lastError);
+				_retryCount++;
+				if (_retryCount >= _config.maxRetries) {
+					completeArchive();
+				} else {
+					scheduleNextBatch();
+				}
+			}
+		}).send();
+		return;
+	}
+
+	// Non-forward mode: use requestHistory which populates history->blocks
+	// (works for chats that have been opened in the UI)
 	Q_EMIT operationLog(QString("Fetching %1 messages from server (offset: %2)...")
 		.arg(limit)
 		.arg(offsetId));
 
-	// Request history from server - this mimics scrolling behavior
-	// The API will load messages into history->blocks automatically
 	_mainSession->api().requestHistory(
 		history,
 		MsgId(offsetId),
 		Data::LoadDirection::Before);
 
-	// After requesting, wait a moment then process what we got
-	// The messages will be loaded into history->blocks by tdesktop's normal flow
 	QTimer::singleShot(1500, this, [this, limit, offsetId]() {
-		// Now process the messages that were loaded
 		PeerId peerId(_status.chatId);
 		auto history = _session->history(peerId);
 		if (!history) {
@@ -807,14 +1050,12 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 		qint64 lastMsgId = offsetId;
 		qint64 oldestMsgId = offsetId > 0 ? offsetId : INT64_MAX;
 
-		// Collect messages from the loaded blocks
 		for (auto blockIt = history->blocks.rbegin();
 			 blockIt != history->blocks.rend() && archived < limit;
 			 ++blockIt) {
 			const auto &block = *blockIt;
 			if (!block) continue;
 
-			// Iterate in reverse to go from newest to oldest
 			for (auto msgIt = block->messages.rbegin();
 				 msgIt != block->messages.rend() && archived < limit;
 				 ++msgIt) {
@@ -823,22 +1064,18 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 				auto item = element->data();
 				if (!item) continue;
 
-				// Skip if we've already processed this message (at or after offset)
 				if (offsetId > 0 && item->id.bare >= offsetId) {
 					continue;
 				}
 
-				// Track oldest message for next batch
 				if (item->id.bare < oldestMsgId) {
 					oldestMsgId = item->id.bare;
 				}
 
-				// Archive the message
 				bool msgArchived = false;
 				if (_archiver) {
 					msgArchived = _archiver->archiveMessage(item);
 				} else {
-					// Store in memory instead
 					QJsonObject msgObj;
 					msgObj["id"] = QString::number(item->id.bare);
 					msgObj["date"] = QString::number(item->date());
@@ -847,16 +1084,12 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 						msgObj["from"] = from->name();
 						msgObj["from_id"] = QString::number(from->id.value);
 					}
-
-					// Include media info
 					if (item->media()) {
 						if (const auto doc = item->media()->document()) {
 							msgObj["has_document"] = true;
 							msgObj["document_name"] = doc->filename();
 							msgObj["document_size"] = QString::number(doc->size);
 							msgObj["document_mime"] = doc->mimeString();
-
-							// Trigger media download (bypasses restrictions)
 							downloadMedia(item);
 						}
 						if (item->media()->photo()) {
@@ -864,7 +1097,6 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 							downloadMedia(item);
 						}
 					}
-
 					_collectedMessages.append(msgObj);
 					msgArchived = true;
 				}
@@ -875,27 +1107,19 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 					_status.messagesArchivedThisHour++;
 					_status.messagesArchivedToday++;
 					lastMsgId = item->id.bare;
-
-					// Track text content size
 					const auto textSize = item->originalText().text.toUtf8().size();
 					_status.totalBytesProcessed += textSize;
-
-					// Track media size if present
 					if (item->media()) {
 						if (const auto doc = item->media()->document()) {
 							_status.totalMediaBytes += doc->size;
 						} else if (item->media()->photo()) {
-							// Estimate photo size (~500KB typical)
 							_status.totalMediaBytes += 512 * 1024;
 						}
 					}
-
-					// Simulate reading time if configured
 					if (_config.simulateReading) {
 						int readTime = calculateReadingTime(
 							item->originalText().text.length());
 						if (readTime > 50) {
-							// Use shorter delays in async mode
 							QThread::msleep(qMin(readTime / 2, 500));
 						}
 					}
@@ -905,7 +1129,6 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 			}
 		}
 
-		// Update offset for next batch
 		_currentOffsetId = oldestMsgId;
 
 		if (archived > 0) {
@@ -923,23 +1146,18 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 			Q_EMIT progressChanged(_status.archivedMessages, _status.totalMessages);
 			Q_EMIT sizeUpdated(_status.totalBytesProcessed, _status.totalMediaBytes);
 
-			// Check if we've reached the beginning (no more messages)
 			if (oldestMsgId <= 1 || archived < limit / 2) {
 				completeArchive();
 				return;
 			}
 
-			// Schedule next batch
 			scheduleNextBatch();
 			saveState();
 		} else {
-			// No messages found - might have reached the beginning
 			_retryCount++;
 			if (_retryCount >= _config.maxRetries) {
-				// Assume we've got all messages
 				completeArchive();
 			} else {
-				// Retry with a delay
 				int retryDelay = _config.maxDelayMs * (_retryCount + 1);
 				_batchTimer->start(retryDelay);
 			}
@@ -1033,6 +1251,348 @@ void GradualArchiver::downloadMedia(not_null<HistoryItem*> item) {
 			Q_EMIT operationLog("Downloading photo...");
 		}
 	}
+}
+
+QVector<GradualArchiver::DeletedAccountChat> GradualArchiver::scanDeletedAccounts() {
+	QVector<DeletedAccountChat> result;
+	if (!_session) return result;
+
+	auto scanList = [&](not_null<Dialogs::MainList*> list) {
+		for (const auto &row : *list->indexed()) {
+			if (!row || !row->thread()) continue;
+			auto peer = row->thread()->peer();
+			if (!peer || !peer->isUser()) continue;
+			if (!peer->asUser()->isInaccessible()) continue;
+
+			DeletedAccountChat chat;
+			chat.peerId = peer->id.value;
+			chat.name = peer->name();
+
+			if (auto history = _session->historyLoaded(peer->id)) {
+				TimeId first = INT32_MAX, last = 0;
+				for (const auto &block : history->blocks) {
+					if (!block) continue;
+					for (const auto &elem : block->messages) {
+						auto item = elem->data();
+						if (!item) continue;
+						chat.messageCount++;
+						if (item->date() < first) first = item->date();
+						if (item->date() > last) last = item->date();
+					}
+				}
+				chat.firstMessageDate = (first == INT32_MAX) ? 0 : first;
+				chat.lastMessageDate = last;
+			}
+
+			result.append(chat);
+		}
+	};
+
+	scanList(_session->chatsList());
+	if (auto folder = _session->folderLoaded(1)) {
+		scanList(folder->chatsList());
+	}
+
+	return result;
+}
+
+void GradualArchiver::createArchiveGroup(const QString &title, Fn<void(qint64)> done) {
+	if (!_mainSession) {
+		Q_EMIT error("Main session not available for group creation");
+		return;
+	}
+
+	Q_EMIT operationLog(QString("Creating archive group: %1").arg(title));
+
+	_mainSession->api().request(MTPchannels_CreateChannel(
+		MTP_flags(MTPchannels_CreateChannel::Flag::f_megagroup),
+		MTP_string(title),
+		MTP_string("Archive of deleted account conversations"),
+		MTPInputGeoPoint(), // geo_point
+		MTPstring(), // address
+		MTP_int(0) // ttl_period
+	)).done([this, done](const MTPUpdates &result) {
+		_mainSession->api().applyUpdates(result);
+
+		// Extract channel from updates (same pattern as add_contact_box.cpp)
+		ChannelData *channel = nullptr;
+		const QVector<MTPChat> *chats = nullptr;
+		result.match([&](const MTPDupdates &data) {
+			chats = &data.vchats().v;
+		}, [&](const MTPDupdatesCombined &data) {
+			chats = &data.vchats().v;
+		}, [](const auto &) {});
+
+		if (chats && !chats->isEmpty() && chats->front().type() == mtpc_channel) {
+			channel = _mainSession->data().channel(
+				chats->front().c_channel().vid());
+		}
+
+		if (channel) {
+			qint64 peerId = channel->id.value;
+			Q_EMIT operationLog(QString("Archive group created (peer ID: %1)").arg(peerId));
+			if (done) done(peerId);
+		} else {
+			Q_EMIT error("Failed to extract group ID from creation response");
+		}
+	}).fail([this](const MTP::Error &error) {
+		_status.lastError = "Group creation failed: " + error.type();
+		_status.state = GradualArchiveStatus::State::Failed;
+		Q_EMIT stateChanged(_status.state);
+		Q_EMIT this->error(_status.lastError);
+	}).send();
+}
+
+bool GradualArchiver::startDeletedAccountArchive(const GradualArchiveConfig &config) {
+	if (_status.state == GradualArchiveStatus::State::Running) {
+		Q_EMIT error("Archive already in progress. Cancel first.");
+		return false;
+	}
+
+	if (!_session || !_mainSession) {
+		Q_EMIT error("Session not available");
+		return false;
+	}
+
+	auto localConfig = config;
+	localConfig.forwardMode = true;
+
+	_deletedChats = scanDeletedAccounts();
+
+	// Filter to specific peer IDs if requested
+	if (!localConfig.specificPeerIds.isEmpty()) {
+		QSet<qint64> wanted(localConfig.specificPeerIds.begin(),
+			localConfig.specificPeerIds.end());
+		QVector<DeletedAccountChat> filtered;
+		for (const auto &chat : _deletedChats) {
+			if (wanted.contains(chat.peerId)) {
+				filtered.append(chat);
+			}
+		}
+		_deletedChats = filtered;
+	}
+
+	if (_deletedChats.isEmpty()) {
+		Q_EMIT error("No matching deleted account chats found");
+		return false;
+	}
+
+	_currentDeletedChatIndex = 0;
+	_lastDateHeaderSent = QDate();
+	_forwardItems.clear();
+	_forwardIndex = 0;
+
+	Q_EMIT operationLog(QString("Found %1 deleted account chats to archive")
+		.arg(_deletedChats.size()));
+
+	// Create archive group if no target specified
+	if (localConfig.forwardTargetGroupId == 0) {
+		Q_EMIT operationLog("Creating archive group...");
+		createArchiveGroup(
+			localConfig.groupTitle.isEmpty()
+				? QString("Deleted Accounts Archive")
+				: localConfig.groupTitle,
+			[this, localConfig](qint64 groupId) mutable {
+				localConfig.forwardTargetGroupId = groupId;
+				_config = localConfig;
+				_status.forwardTargetGroupId = groupId;
+				_status.totalDeletedChats = _deletedChats.size();
+				_status.processedDeletedChats = 0;
+				startNextDeletedChat();
+			});
+		return true;
+	}
+
+	// Target group already specified
+	_config = localConfig;
+	_status.forwardTargetGroupId = localConfig.forwardTargetGroupId;
+	_status.totalDeletedChats = _deletedChats.size();
+	_status.processedDeletedChats = 0;
+	startNextDeletedChat();
+	return true;
+}
+
+void GradualArchiver::startNextDeletedChat() {
+	if (_currentDeletedChatIndex >= _deletedChats.size()) {
+		// All chats processed
+		_status.state = GradualArchiveStatus::State::Completed;
+		Q_EMIT operationLog(QString("All %1 deleted account chats archived")
+			.arg(_deletedChats.size()));
+		Q_EMIT stateChanged(_status.state);
+		Q_EMIT archiveCompleted(0, _status.archivedMessages);
+		return;
+	}
+
+	const auto &chat = _deletedChats[_currentDeletedChatIndex];
+	_status.currentDeletedChatName = chat.name;
+	_lastDateHeaderSent = QDate();
+
+	Q_EMIT operationLog(QString("Starting chat %1/%2: %3 (ID: %4)")
+		.arg(_currentDeletedChatIndex + 1)
+		.arg(_deletedChats.size())
+		.arg(chat.name)
+		.arg(chat.peerId));
+
+	// Send chat separator first
+	if (_config.addChatSeparators) {
+		sendChatSeparator(chat, [this, chat]() {
+			// Then start the gradual archive for this chat
+			// Use the existing startGradualArchive which handles everything
+			startGradualArchive(chat.peerId, _config);
+		});
+	} else {
+		startGradualArchive(chat.peerId, _config);
+	}
+}
+
+void GradualArchiver::sendTextToGroup(qint64 groupPeerId, const QString &text, Fn<void()> done) {
+	if (!_mainSession) {
+		if (done) done();
+		return;
+	}
+
+	PeerId peerId(groupPeerId);
+	auto history = _mainSession->data().history(peerId);
+	if (!history) {
+		Q_EMIT operationLog("Warning: target group history not available");
+		if (done) done();
+		return;
+	}
+
+	auto action = Api::SendAction(history);
+	action.clearDraft = false;
+	auto message = Api::MessageToSend(action);
+	message.textWithTags.text = text;
+
+	_mainSession->api().sendMessage(std::move(message));
+
+	// Use human-like delay after sending
+	int delay = calculateReadingTime(text.length());
+	QTimer::singleShot(qMax(delay, 500), this, [done]() {
+		if (done) done();
+	});
+}
+
+void GradualArchiver::sendDateHeader(const QDate &date, Fn<void()> done) {
+	if (_config.forwardTargetGroupId == 0) {
+		if (done) done();
+		return;
+	}
+
+	QString header = _config.dateHeaderFormat.arg(date.toString("yyyy-MM-dd"));
+	_lastDateHeaderSent = date;
+
+	Q_EMIT operationLog(QString("Sending date header: %1").arg(header));
+	sendTextToGroup(_config.forwardTargetGroupId, header, done);
+}
+
+void GradualArchiver::sendChatSeparator(const DeletedAccountChat &chat, Fn<void()> done) {
+	if (_config.forwardTargetGroupId == 0) {
+		if (done) done();
+		return;
+	}
+
+	QString dateRange;
+	if (chat.firstMessageDate > 0 && chat.lastMessageDate > 0) {
+		QString first = QDateTime::fromSecsSinceEpoch(chat.firstMessageDate).date().toString("yyyy-MM-dd");
+		QString last = QDateTime::fromSecsSinceEpoch(chat.lastMessageDate).date().toString("yyyy-MM-dd");
+		dateRange = QString("%1 to %2").arg(first, last);
+	}
+
+	QString separator = QString::fromUtf8(
+		"\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81"
+		"\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81"
+		"\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81"
+		"\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81"
+		"\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81"
+		"\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81");
+
+	QString text = separator + "\n"
+		+ QString("Chat: %1 (ID: %2)").arg(chat.name).arg(chat.peerId);
+	if (!dateRange.isEmpty()) {
+		text += "\n" + QString("Messages: %1 | %2").arg(chat.messageCount).arg(dateRange);
+	}
+	text += "\n" + separator;
+
+	Q_EMIT operationLog(QString("Sending chat separator for: %1").arg(chat.name));
+	sendTextToGroup(_config.forwardTargetGroupId, text, done);
+}
+
+void GradualArchiver::forwardCollectedBatch() {
+	// Legacy path — forwarding is now initiated directly from fetchBatchFromServer
+	// after sorting _forwardItems and calling forwardNextItem.
+	// This method is kept for the non-forward-mode path.
+	if (!_forwardItems.isEmpty()) {
+		_forwardIndex = 0;
+		forwardNextItem();
+		return;
+	}
+	scheduleNextBatch();
+}
+
+void GradualArchiver::forwardNextItem() {
+	if (_forwardIndex >= _forwardItems.size()) {
+		// Batch done, schedule next server fetch
+		_forwardItems.clear();
+		scheduleNextBatch();
+		return;
+	}
+
+	auto item = _forwardItems[_forwardIndex];
+	QDate itemDate = QDateTime::fromSecsSinceEpoch(item->date()).date();
+
+	// Insert date header when date changes
+	if (_config.addDateHeaders && itemDate != _lastDateHeaderSent) {
+		sendDateHeader(itemDate, [this]() {
+			doForwardItem();
+		});
+		return;
+	}
+
+	doForwardItem();
+}
+
+void GradualArchiver::doForwardItem() {
+	if (_forwardIndex >= _forwardItems.size()) {
+		_forwardItems.clear();
+		scheduleNextBatch();
+		return;
+	}
+
+	auto item = _forwardItems[_forwardIndex];
+
+	PeerId targetPeerId(_config.forwardTargetGroupId);
+	auto targetHistory = _mainSession->data().history(targetPeerId);
+	if (!targetHistory) {
+		Q_EMIT operationLog("Target history not available");
+		_forwardItems.clear();
+		scheduleNextBatch();
+		return;
+	}
+
+	// Forward the message — this preserves all media (photos, videos, docs)
+	Data::ResolvedForwardDraft draft;
+	draft.items.push_back(item);
+
+	auto action = Api::SendAction(targetHistory);
+	action.clearDraft = false;
+
+	_mainSession->api().forwardMessages(std::move(draft), action);
+
+	_forwardIndex++;
+	Q_EMIT progressChanged(_status.archivedMessages, _status.totalMessages);
+
+	// Human-like delay between forwards
+	int delay = 300;
+	if (_config.simulateReading) {
+		delay = qMax(calculateReadingTime(item->originalText().text.length()), 300);
+		delay = qMin(delay, 2000);
+	}
+	delay += _rng.bounded(0, delay / 3);
+
+	QTimer::singleShot(delay, this, [this]() {
+		forwardNextItem();
+	});
 }
 
 } // namespace MCP

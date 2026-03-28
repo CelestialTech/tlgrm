@@ -2483,6 +2483,144 @@ void Server::registerTools() {
 				{"required", QJsonArray{"chat_id"}}
 			}
 		},
+
+	};
+
+	// ============================================================
+	// DELETED ACCOUNT ARCHIVING TOOLS
+	// ============================================================
+
+	{
+		Tool tool;
+		tool.name = "list_deleted_accounts";
+		tool.description = "Scan and list all chats with deleted Telegram accounts";
+
+		QJsonObject includeArchiveProp;
+		includeArchiveProp["type"] = "boolean";
+		includeArchiveProp["description"] = "Also scan the archive folder (default: true)";
+
+		QJsonObject properties;
+		properties["include_archive_folder"] = includeArchiveProp;
+
+		QJsonObject schema;
+		schema["type"] = "object";
+		schema["properties"] = properties;
+		tool.inputSchema = schema;
+		_tools.append(tool);
+	}
+
+	{
+		Tool tool;
+		tool.name = "archive_deleted_accounts";
+		tool.description = "Archive all deleted account chats to a group with date headers. Uses human simulation (random delays, active hours, rate limits) to avoid detection.";
+
+		QJsonObject groupTitleProp;
+		groupTitleProp["type"] = "string";
+		groupTitleProp["description"] = "Name for the archive group (default: 'Deleted Accounts Archive')";
+
+		QJsonObject targetGroupIdProp;
+		targetGroupIdProp["type"] = "integer";
+		targetGroupIdProp["description"] = "Existing group peer ID to archive into (0 = auto-create new group)";
+
+		QJsonObject minDelayProp;
+		minDelayProp["type"] = "integer";
+		minDelayProp["description"] = "Minimum delay between batches in ms (default: 3000)";
+
+		QJsonObject maxDelayProp;
+		maxDelayProp["type"] = "integer";
+		maxDelayProp["description"] = "Maximum delay between batches in ms (default: 15000)";
+
+		QJsonObject dateFormatProp;
+		dateFormatProp["type"] = "string";
+		dateFormatProp["description"] = "Date header format, %1 = YYYY-MM-DD (default: '# %1')";
+
+		QJsonObject addDateHeadersProp;
+		addDateHeadersProp["type"] = "boolean";
+		addDateHeadersProp["description"] = "Insert date headers between messages (default: true)";
+
+		QJsonObject addChatSepProp;
+		addChatSepProp["type"] = "boolean";
+		addChatSepProp["description"] = "Insert separator between different chat archives (default: true)";
+
+		QJsonObject properties;
+		properties["group_title"] = groupTitleProp;
+		properties["target_group_id"] = targetGroupIdProp;
+		properties["min_delay_ms"] = minDelayProp;
+		properties["max_delay_ms"] = maxDelayProp;
+		properties["date_format"] = dateFormatProp;
+		properties["add_date_headers"] = addDateHeadersProp;
+		properties["add_chat_separators"] = addChatSepProp;
+
+		QJsonObject peerIdProp;
+		peerIdProp["type"] = "integer";
+		peerIdProp["description"] = "Archive a single specific peer ID";
+		properties["peer_id"] = peerIdProp;
+
+		QJsonObject peerIdsProp;
+		peerIdsProp["type"] = "array";
+		QJsonObject peerIdItemSchema;
+		peerIdItemSchema["type"] = "integer";
+		peerIdsProp["items"] = peerIdItemSchema;
+		peerIdsProp["description"] = "Archive specific peer IDs (array)";
+		properties["peer_ids"] = peerIdsProp;
+
+		QJsonObject schema;
+		schema["type"] = "object";
+		schema["properties"] = properties;
+		tool.inputSchema = schema;
+		_tools.append(tool);
+	}
+
+	{
+		Tool tool;
+		tool.name = "get_deleted_archive_status";
+		tool.description = "Get current status of deleted account archiving operation";
+
+		QJsonObject schema;
+		schema["type"] = "object";
+		schema["properties"] = QJsonObject();
+		tool.inputSchema = schema;
+		_tools.append(tool);
+	}
+
+	{
+		Tool tool;
+		tool.name = "pause_deleted_archive";
+		tool.description = "Pause the deleted account archiving operation";
+
+		QJsonObject schema;
+		schema["type"] = "object";
+		schema["properties"] = QJsonObject();
+		tool.inputSchema = schema;
+		_tools.append(tool);
+	}
+
+	{
+		Tool tool;
+		tool.name = "cancel_deleted_archive";
+		tool.description = "Cancel the deleted account archiving operation";
+
+		QJsonObject schema;
+		schema["type"] = "object";
+		schema["properties"] = QJsonObject();
+		tool.inputSchema = schema;
+		_tools.append(tool);
+	}
+
+	{
+		Tool tool;
+		tool.name = "list_deleted_channels";
+		tool.description = "List deleted/deactivated/forbidden channels and groups with their IDs and last 5 messages for identification";
+
+		QJsonObject schema;
+		schema["type"] = "object";
+		schema["properties"] = QJsonObject();
+		tool.inputSchema = schema;
+		_tools.append(tool);
+	}
+
+	// Continue with remaining tools in initializer list style
+	const std::vector<Tool> moreTools = {
 		// ===== VOICE & TRANSLATION TOOLS =====
 		Tool{
 			"get_voice_transcription",
@@ -3057,6 +3195,9 @@ void Server::registerTools() {
 			{"format", QJsonObject{{"type", "string"}, {"description", "Export format: 'json' or 'text'"}, {"default", "json"}, {"enum", QJsonArray{"json", "text"}}}}
 		}}, {"required", QJsonArray{"chat_id", "topic_id"}}}},
 	};
+	for (const auto &t : moreTools) {
+		_tools.append(t);
+	}
 }
 
 } // namespace MCP

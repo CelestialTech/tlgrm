@@ -608,6 +608,14 @@ private:
 	QJsonObject toolQueueGradualExport(const QJsonObject &args);
 	QJsonObject toolGetGradualExportQueue(const QJsonObject &args);
 
+	// Deleted account archiving tools
+	QJsonObject toolListDeletedAccounts(const QJsonObject &args);
+	QJsonObject toolArchiveDeletedAccounts(const QJsonObject &args);
+	QJsonObject toolGetDeletedArchiveStatus(const QJsonObject &args);
+	QJsonObject toolPauseDeletedArchive(const QJsonObject &args);
+	QJsonObject toolCancelDeletedArchive(const QJsonObject &args);
+	QJsonObject toolListDeletedChannels(const QJsonObject &args);
+
 	// ============================================================
 	// LOCAL DATABASE MANAGEMENT
 	// ============================================================

@@ -10,7 +10,10 @@
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonArray>
+#include <QtCore/QDate>
 #include <QtSql/QSqlDatabase>
+
+class HistoryItem;
 
 namespace Main {
 class Session;
@@ -55,6 +58,15 @@ struct GradualArchiveConfig {
 	bool autoExportOnComplete = true;
 	QString exportFormat = "html"; // html, markdown, or both
 	QString exportPath;
+
+	// Forward mode (deleted account archiving)
+	bool forwardMode = false;              // Forward to group instead of archiving to SQLite
+	qint64 forwardTargetGroupId = 0;       // Target group peer ID for forwarding
+	bool addDateHeaders = true;            // Insert "# YYYY-MM-DD" headers at date boundaries
+	QString dateHeaderFormat = "# %1";     // %1 = YYYY-MM-DD
+	bool addChatSeparators = true;         // Insert separator between different chats
+	QString groupTitle = "Deleted Accounts Archive"; // Title for auto-created group
+	QVector<qint64> specificPeerIds;                // If non-empty, only archive these peer IDs
 };
 
 // Status of a gradual archive job
@@ -94,6 +106,12 @@ struct GradualArchiveStatus {
 	int floodWaitSeconds = 0;
 
 	QString lastError;
+
+	// Deleted account archiving status
+	int totalDeletedChats = 0;
+	int processedDeletedChats = 0;
+	QString currentDeletedChatName;
+	qint64 forwardTargetGroupId = 0;
 };
 
 // Gradual archiver - covert export with natural timing
@@ -101,6 +119,14 @@ class GradualArchiver : public QObject {
 	Q_OBJECT
 
 public:
+	struct DeletedAccountChat {
+		qint64 peerId = 0;
+		QString name;
+		int messageCount = 0;
+		TimeId firstMessageDate = 0;
+		TimeId lastMessageDate = 0;
+	};
+
 	explicit GradualArchiver(QObject *parent = nullptr);
 	~GradualArchiver();
 
@@ -122,6 +148,11 @@ public:
 	bool queueChat(qint64 chatId, const GradualArchiveConfig &config);
 	void clearQueue();
 	QJsonArray getQueue() const;
+
+	// Deleted account archiving
+	QVector<DeletedAccountChat> scanDeletedAccounts();
+	void createArchiveGroup(const QString &title, Fn<void(qint64 groupPeerId)> done);
+	bool startDeletedAccountArchive(const GradualArchiveConfig &config = GradualArchiveConfig{});
 
 	// Status
 	GradualArchiveStatus status() const { return _status; }
@@ -168,6 +199,15 @@ private:
 	void startExport();
 	void downloadMedia(not_null<HistoryItem*> item);
 
+	// Forward mode helpers
+	void forwardCollectedBatch();
+	void forwardNextItem();
+	void doForwardItem();
+	void sendTextToGroup(qint64 groupPeerId, const QString &text, Fn<void()> done);
+	void sendDateHeader(const QDate &date, Fn<void()> done);
+	void sendChatSeparator(const DeletedAccountChat &chat, Fn<void()> done);
+	void startNextDeletedChat();
+
 	// Queue management
 	void processNextInQueue();
 
@@ -203,6 +243,13 @@ private:
 	QJsonArray _collectedMessages;
 
 	QRandomGenerator _rng;
+
+	// Deleted account archiving state
+	QVector<DeletedAccountChat> _deletedChats;
+	int _currentDeletedChatIndex = 0;
+	QDate _lastDateHeaderSent;
+	QVector<HistoryItem*> _forwardItems; // Items collected for forwarding
+	int _forwardIndex = 0;
 };
 
 } // namespace MCP

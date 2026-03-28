@@ -527,6 +527,7 @@ print("✓ MCP integration working")
 |----------|-------|--------|
 | Core Messaging | 6 | Implemented |
 | Archive & Export | 9 | Implemented |
+| Deleted Account Archiving | 6 | Implemented |
 | Analytics | 8 | Implemented |
 | Semantic Search | 5 | Stub |
 | Message Operations | 6 | Implemented |
@@ -606,6 +607,20 @@ print("✓ MCP integration working")
 | `get_ephemeral_messages` | Retrieve captured ephemeral messages |
 | `search_archive` | Search archived messages |
 | `purge_archive` | Purge old archive data |
+
+### Deleted Account Archiving Tools (6 tools) - IMPLEMENTED
+| Tool | Description |
+|------|-------------|
+| `list_deleted_accounts` | Scan and list all chats with deleted user accounts, with message previews |
+| `archive_deleted_accounts` | Forward all messages from deleted account chats to an archive group |
+| `get_deleted_archive_status` | Get progress of deleted account archiving operation |
+| `pause_deleted_archive` | Pause an in-progress deleted account archive |
+| `cancel_deleted_archive` | Cancel an in-progress deleted account archive |
+| `list_deleted_channels` | List forbidden/deactivated channels and groups with message previews |
+
+**Architecture**: Uses direct `MTPmessages_GetHistory` API to fetch full server history (bypasses `requestHistory` which only populates `history->blocks` for UI-visible chats). Messages are processed into `HistoryItem` objects via `addNewMessage()` then forwarded with `forwardMessages()` to preserve all media (photos, videos, documents). Date headers (`# YYYY-MM-DD`) are inserted between day boundaries. Human simulation (random delays, jitter, burst pauses, FLOOD_WAIT handling) from `GradualArchiver` is fully reused.
+
+**Key files**: `mcp_deleted_account_tools.cpp` (6 tool handlers), `gradual_archiver.cpp` (forward mode in `fetchBatchFromServer`, `forwardNextItem`, `doForwardItem`)
 
 ### Analytics Tools (8 tools) - IMPLEMENTED
 | Tool | Description |

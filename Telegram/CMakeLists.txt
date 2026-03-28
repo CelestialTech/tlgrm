@@ -1268,6 +1268,7 @@ PRIVATE
     mcp/mcp_settings_tools.cpp
     mcp/mcp_v651_tools.cpp
     mcp/mcp_gradual_tools.cpp
+    mcp/mcp_deleted_account_tools.cpp
     mcp/chat_archiver.cpp
     mcp/chat_archiver.h
     mcp/gradual_archiver.cpp

@@ -43,6 +43,7 @@
 #include "data/data_user.h"
 #include "data/data_chat.h"
 #include "data/data_channel.h"
+#include "data/data_folder.h"
 #include "data/data_thread.h"
 #include "data/data_histories.h"
 #include "dialogs/dialogs_main_list.h"

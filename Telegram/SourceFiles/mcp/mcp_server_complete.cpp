@@ -976,6 +976,14 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["queue_gradual_export"] = [this](const QJsonObject &args) { return toolQueueGradualExport(args); };
 	_toolHandlers["get_gradual_export_queue"] = [this](const QJsonObject &args) { return toolGetGradualExportQueue(args); };
 
+	// Deleted account archiving tools
+	_toolHandlers["list_deleted_accounts"] = [this](const QJsonObject &args) { return toolListDeletedAccounts(args); };
+	_toolHandlers["archive_deleted_accounts"] = [this](const QJsonObject &args) { return toolArchiveDeletedAccounts(args); };
+	_toolHandlers["get_deleted_archive_status"] = [this](const QJsonObject &args) { return toolGetDeletedArchiveStatus(args); };
+	_toolHandlers["pause_deleted_archive"] = [this](const QJsonObject &args) { return toolPauseDeletedArchive(args); };
+	_toolHandlers["cancel_deleted_archive"] = [this](const QJsonObject &args) { return toolCancelDeletedArchive(args); };
+	_toolHandlers["list_deleted_channels"] = [this](const QJsonObject &args) { return toolListDeletedChannels(args); };
+
 	// ANALYTICS TOOLS
 	_toolHandlers["get_message_stats"] = [this](const QJsonObject &args) { return toolGetMessageStats(args); };
 	_toolHandlers["get_user_activity"] = [this](const QJsonObject &args) { return toolGetUserActivity(args); };
