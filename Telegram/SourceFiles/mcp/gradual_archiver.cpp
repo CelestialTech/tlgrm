@@ -916,16 +916,26 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 
 			if (!messagesList || messagesList->isEmpty()) {
 				Q_EMIT operationLog("No more messages from server");
-				completeArchive();
+				if (!_forwardItems.isEmpty()) {
+					// All messages collected — sort oldest-first and forward
+					std::sort(_forwardItems.begin(), _forwardItems.end(),
+						[](HistoryItem *a, HistoryItem *b) {
+							return a->date() < b->date();
+						});
+					_forwardIndex = 0;
+					Q_EMIT operationLog(QString("All %1 messages collected, forwarding in chronological order")
+						.arg(_forwardItems.size()));
+					forwardNextItem();
+				} else {
+					completeArchive();
+				}
 				return;
 			}
 
 			// Process MTP messages into HistoryItem objects via addNewMessage.
-			// This creates proper items in the data layer so forwardMessages
-			// can forward them with all media (photos, videos, documents).
+			// Accumulate across batches — don't forward yet.
 			int archived = 0;
 			qint64 oldestMsgId = INT64_MAX;
-			_forwardItems.clear();
 
 			for (const auto &message : *messagesList) {
 				qint64 msgId = 0;
@@ -950,7 +960,6 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 					continue;
 				}
 
-				// Create HistoryItem from MTP message
 				auto *item = _mainSession->data().addNewMessage(
 					message,
 					MessageFlags(),
@@ -975,9 +984,9 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 
 			_currentOffsetId = oldestMsgId;
 
-			Q_EMIT operationLog(QString("Batch: %1 messages fetched (%2 total), hasMore=%3")
+			Q_EMIT operationLog(QString("Batch: %1 fetched (%2 total collected), hasMore=%3")
 				.arg(archived)
-				.arg(_status.archivedMessages)
+				.arg(_forwardItems.size())
 				.arg(hasMore));
 
 			if (archived > 0) {
@@ -985,27 +994,21 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 				_consecutiveBatches++;
 				_status.batchesCompleted++;
 				_status.lastActivityTime = QDateTime::currentDateTime();
+			}
 
-				// Sort by date (oldest first) for chronological forwarding
+			if (hasMore) {
+				// More messages on server — fetch next batch
+				scheduleNextBatch();
+			} else {
+				// All done — sort oldest-first and start forwarding
 				std::sort(_forwardItems.begin(), _forwardItems.end(),
 					[](HistoryItem *a, HistoryItem *b) {
 						return a->date() < b->date();
 					});
-
 				_forwardIndex = 0;
-				Q_EMIT operationLog(QString("Forwarding %1 messages to archive group")
+				Q_EMIT operationLog(QString("All %1 messages collected, forwarding in chronological order")
 					.arg(_forwardItems.size()));
 				forwardNextItem();
-			} else if (!hasMore) {
-				completeArchive();
-			} else {
-				_retryCount++;
-				if (_retryCount >= _config.maxRetries) {
-					completeArchive();
-				} else {
-					int retryDelay = _config.maxDelayMs * (_retryCount + 1);
-					_batchTimer->start(retryDelay);
-				}
 			}
 		}).fail([this](const MTP::Error &error) {
 			if (error.type().startsWith("FLOOD_WAIT_")) {
@@ -1297,6 +1300,52 @@ QVector<GradualArchiver::DeletedAccountChat> GradualArchiver::scanDeletedAccount
 	return result;
 }
 
+QString GradualArchiver::extractDeletedAccountName(qint64 peerId) {
+	if (!_session) return QString();
+
+	PeerId pid(peerId);
+	auto peer = _session->peerLoaded(pid);
+	if (!peer || !peer->isUser()) return QString();
+
+	auto user = peer->asUser();
+
+	// Try 1: Check if user has first/last name cached from before deletion
+	QString first = user->firstName;
+	QString last = user->lastName;
+	if (!first.isEmpty() && first != "Deleted Account") {
+		return last.isEmpty() ? first : (first + " " + last);
+	}
+
+	// Try 2: Check if user is a saved contact (contact name persists)
+	if (user->isContact()) {
+		QString name = user->name();
+		if (!name.isEmpty() && name != "Deleted Account") {
+			return name;
+		}
+	}
+
+	// Try 3: Scan messages for a non-"Deleted Account" sender name
+	if (auto history = _session->historyLoaded(pid)) {
+		for (const auto &block : history->blocks) {
+			if (!block) continue;
+			for (const auto &elem : block->messages) {
+				auto item = elem->data();
+				if (!item) continue;
+				if (const auto from = item->from()) {
+					if (from->id == pid) {
+						QString name = from->name();
+						if (!name.isEmpty() && name != "Deleted Account") {
+							return name;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return QString();
+}
+
 void GradualArchiver::createArchiveGroup(const QString &title, Fn<void(qint64)> done) {
 	if (!_mainSession) {
 		Q_EMIT error("Main session not available for group creation");
@@ -1389,10 +1438,16 @@ bool GradualArchiver::startDeletedAccountArchive(const GradualArchiveConfig &con
 	// Create archive group if no target specified
 	if (localConfig.forwardTargetGroupId == 0) {
 		Q_EMIT operationLog("Creating archive group...");
-		// Default title: "Archive <peerId>"
+		// Default title: "Archive <name or peerId>"
 		QString title = localConfig.groupTitle;
 		if (title.isEmpty() && !_deletedChats.isEmpty()) {
-			title = QString("Archive %1").arg(_deletedChats.first().peerId);
+			qint64 pid = _deletedChats.first().peerId;
+			QString name = extractDeletedAccountName(pid);
+			if (!name.isEmpty()) {
+				title = QString("Archive %1 (%2)").arg(name).arg(pid);
+			} else {
+				title = QString("Archive %1").arg(pid);
+			}
 		} else if (title.isEmpty()) {
 			title = "Archive";
 		}
@@ -1564,11 +1619,17 @@ void GradualArchiver::doForwardItem() {
 		return;
 	}
 
-	// Build metadata footer: #dYYYYMMDD | Sender | HH:MM
+	// Build metadata footer: #Month_Day_Year | Sender | HH:MM
 	QDateTime msgTime = QDateTime::fromSecsSinceEpoch(item->date());
 	QString dateTag;
 	if (_config.addDateHeaders) {
-		dateTag = _config.dateHeaderFormat.arg(msgTime.date().toString("yyyyMMdd"));
+		// Build clickable hashtag: #January_5_2025
+		QDate d = msgTime.date();
+		QString month = d.toString("MMMM");
+		dateTag = QString("#%1_%2_%3")
+			.arg(month)
+			.arg(d.day())
+			.arg(d.year());
 	}
 
 	QString senderName;

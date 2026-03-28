@@ -199,6 +199,9 @@ private:
 	void startExport();
 	void downloadMedia(not_null<HistoryItem*> item);
 
+	// Name extraction
+	QString extractDeletedAccountName(qint64 peerId);
+
 	// Forward mode helpers
 	void forwardCollectedBatch();
 	void forwardNextItem();
