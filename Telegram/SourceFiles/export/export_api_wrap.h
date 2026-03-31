@@ -276,6 +276,7 @@ private:
 	void filePartExtractReference(
 		int64 offset,
 		const MTPstories_Stories &result);
+	void filePartRetryDownload(int64 offset);
 
 	template <typename Request>
 	class RequestBuilder;

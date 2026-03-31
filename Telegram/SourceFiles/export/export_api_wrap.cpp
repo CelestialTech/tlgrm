@@ -3058,6 +3058,11 @@ void ApiWrap::filePartExtractReference(
 	}, [&](const auto &data) {
 		Expects(_selfId.has_value());
 
+		if (!_chatProcess) {
+			filePartUnavailable();
+			return;
+		}
+
 		auto context = Data::ParseMediaContext();
 		context.selfPeerId = peerFromUser(*_selfId);
 		const auto messages = Data::ParseMessagesSlice(
@@ -3075,13 +3080,7 @@ void ApiWrap::filePartExtractReference(
 					_fileProcess->location,
 					message.thumb().file.location);
 				if (refresh1 || refresh2) {
-					_fileProcess->requestId = fileRequest(
-						_fileProcess->location,
-						offset
-					).done([=](const MTPupload_File &result) {
-						_fileProcess->requestId = 0;
-						filePartDone(offset, result);
-					}).send();
+					filePartRetryDownload(offset);
 					return;
 				}
 			}
@@ -3108,18 +3107,47 @@ void ApiWrap::filePartExtractReference(
 				_fileProcess->location,
 				story.thumb().file.location);
 			if (refresh1 || refresh2) {
-				_fileProcess->requestId = fileRequest(
-					_fileProcess->location,
-					offset
-				).done([=](const MTPupload_File &result) {
-					_fileProcess->requestId = 0;
-					filePartDone(offset, result);
-				}).send();
+				filePartRetryDownload(offset);
 				return;
 			}
 		}
 	}
 	filePartUnavailable();
+}
+
+void ApiWrap::filePartRetryDownload(int64 offset) {
+	Expects(_fileProcess != nullptr);
+	Expects(_fileProcess->requestId == 0);
+
+	const auto &location = _fileProcess->location;
+	if (isGradualMode()) {
+		_fileProcess->requestId = _mtp.request(MTPupload_GetFile(
+			MTP_flags(0),
+			location.data,
+			MTP_long(offset),
+			MTP_int(kFileChunkSize)
+		)).done([=](const MTPupload_File &result) {
+			_fileProcess->requestId = 0;
+			filePartDone(offset, result);
+		}).fail([=](const MTP::Error &result) {
+			_fileProcess->requestId = 0;
+			if (result.type() == u"LOCATION_INVALID"_q
+				|| result.type() == u"VERSION_INVALID"_q
+				|| result.type() == u"LOCATION_NOT_AVAILABLE"_q) {
+				filePartUnavailable();
+			} else {
+				error(result);
+			}
+		}).toDC(MTP::ShiftDcId(location.dcId, MTP::kExportMediaDcShift)).send();
+	} else {
+		_fileProcess->requestId = fileRequest(
+			location,
+			offset
+		).done([=](const MTPupload_File &result) {
+			_fileProcess->requestId = 0;
+			filePartDone(offset, result);
+		}).send();
+	}
 }
 
 void ApiWrap::filePartUnavailable() {
