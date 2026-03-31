@@ -2388,7 +2388,8 @@ void Server::registerTools() {
 					{"min_batch_size", QJsonObject{{"type", "integer"}, {"description", "Min messages per batch"}, {"default", 10}}},
 					{"max_batch_size", QJsonObject{{"type", "integer"}, {"description", "Max messages per batch"}, {"default", 50}}},
 					{"export_format", QJsonObject{{"type", "string"}, {"description", "html, markdown, or both"}, {"default", "html"}}},
-					{"export_path", QJsonObject{{"type", "string"}, {"description", "Output directory path"}}}
+					{"export_path", QJsonObject{{"type", "string"}, {"description", "Output directory path"}}},
+					{"resume_from_message_id", QJsonObject{{"type", "integer"}, {"description", "Resume export starting from this message ID (skips newer messages)"}}}
 				}},
 				{"required", QJsonArray{"chat_id"}}
 			}
@@ -2497,6 +2498,10 @@ void Server::registerTools() {
 					{"export_path", QJsonObject{
 						{"type", "string"},
 						{"description", "Custom export path (optional)"}
+					}},
+					{"resume_from_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Resume export starting from this message ID (skips newer messages)"}
 					}}
 				}},
 				{"required", QJsonArray{"chat_id"}}
