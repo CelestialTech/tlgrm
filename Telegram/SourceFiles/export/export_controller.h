@@ -68,6 +68,7 @@ struct ProcessingState {
 
 	int itemIndex = 0;
 	int itemCount = 0;
+	int itemSkipped = 0;  // messages skipped (already exported)
 
 	uint64 bytesRandomId = 0;
 	QString bytesName;

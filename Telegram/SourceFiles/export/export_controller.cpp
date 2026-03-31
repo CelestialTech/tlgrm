@@ -123,6 +123,7 @@ private:
 
 	int _messagesWritten = 0;
 	int _messagesCount = 0;
+	int _messagesSkipped = 0;
 
 	int _userpicsWritten = 0;
 	int _userpicsCount = 0;
@@ -607,9 +608,10 @@ void ControllerObject::exportNextDialog() {
 			_messagesCount = ranges::accumulate(
 				info.messagesCountPerSplit,
 				0);
-			_messagesWritten = std::min(
+			_messagesSkipped = std::min(
 				_settings.singlePeerResumeSkipCount,
 				_messagesCount);
+			_messagesWritten = _messagesSkipped;
 			setState(stateDialogs(DownloadProgress()));
 			return true;
 		}, [=](DownloadProgress progress) {
@@ -760,6 +762,7 @@ void ControllerObject::fillMessagesState(
 		: ProcessingState::EntityType::Chat;
 	result.itemIndex = _messagesWritten + progress.itemIndex;
 	result.itemCount = std::max(_messagesCount, result.itemIndex);
+	result.itemSkipped = _messagesSkipped;
 	result.bytesRandomId = progress.randomId;
 	if (!progress.path.isEmpty()) {
 		const auto last = progress.path.lastIndexOf('/');
