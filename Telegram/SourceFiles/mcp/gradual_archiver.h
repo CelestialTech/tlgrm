@@ -135,11 +135,9 @@ public:
 	void setMainSession(Main::Session *mainSession) { _mainSession = mainSession; }
 
 	// Start gradual archiving of a chat
-	// If resumeFromMessageId > 0, skip messages newer than that ID
 	bool startGradualArchive(
 		qint64 chatId,
-		const GradualArchiveConfig &config = GradualArchiveConfig{},
-		qint64 resumeFromMessageId = 0);
+		const GradualArchiveConfig &config = GradualArchiveConfig{});
 
 	// Control methods
 	void pause();

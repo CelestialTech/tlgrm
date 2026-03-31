@@ -66,8 +66,7 @@ GradualArchiver::~GradualArchiver() {
 
 bool GradualArchiver::startGradualArchive(
 		qint64 chatId,
-		const GradualArchiveConfig &config,
-		qint64 resumeFromMessageId) {
+		const GradualArchiveConfig &config) {
 
 	if (_status.state == GradualArchiveStatus::State::Running) {
 		Q_EMIT error("Archive already in progress. Use queue or cancel first.");
@@ -121,13 +120,9 @@ bool GradualArchiver::startGradualArchive(
 		_status.totalMessages = count > 0 ? count : 1000; // Default estimate
 	}
 
-	_currentOffsetId = resumeFromMessageId;
+	_currentOffsetId = 0;
 	_consecutiveBatches = 0;
 	_retryCount = 0;
-
-	if (resumeFromMessageId > 0) {
-		Q_EMIT operationLog(QString("Resuming from message ID %1").arg(resumeFromMessageId));
-	}
 
 	// Start timers
 	_hourlyResetTimer->start();

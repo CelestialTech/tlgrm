@@ -57,23 +57,13 @@ QJsonObject Server::toolStartGradualExport(const QJsonObject &args) {
 		config.exportPath = exportPath;
 	}
 
-	qint64 resumeFromId = 0;
-	if (args.contains("resume_from_message_id")) {
-		resumeFromId = args.value("resume_from_message_id").toVariant().toLongLong();
-	}
-
-	bool started = _gradualArchiver->startGradualArchive(chatId, config, resumeFromId);
+	bool started = _gradualArchiver->startGradualArchive(chatId, config);
 
 	QJsonObject result;
 	result["success"] = started;
 	if (started) {
-		result["message"] = resumeFromId > 0
-			? QString("Gradual export resumed from message ID %1").arg(resumeFromId)
-			: QString("Gradual export started");
+		result["message"] = "Gradual export started";
 		result["chat_id"] = QString::number(chatId);
-		if (resumeFromId > 0) {
-			result["resume_from_message_id"] = QString::number(resumeFromId);
-		}
 	} else {
 		result["error"] = "Failed to start gradual export - another export may be in progress";
 	}
