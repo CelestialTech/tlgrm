@@ -30,7 +30,8 @@ void Manager::start(not_null<PeerData*> peer) {
 void Manager::startAutoExport(
 		not_null<PeerData*> peer,
 		int32 resumeFromId,
-		int32 skipCount) {
+		int32 skipCount,
+		const QString &resumeExportDir) {
 	if (_panel) {
 		_panel->activatePanel();
 		return;
@@ -45,10 +46,12 @@ void Manager::startAutoExport(
 	settings.singlePeer = peer->input();
 	settings.singlePeerResumeFromId = resumeFromId;
 	settings.singlePeerResumeSkipCount = skipCount;
+	settings.resumeExportDir = resumeExportDir;
 	View::ResolveSettings(session, settings);
 	qWarning() << "Export: startAutoExport peer=" << peer->name()
 	           << "resumeFromId=" << resumeFromId
-	           << "skipCount=" << skipCount;
+	           << "skipCount=" << skipCount
+	           << "resumeDir=" << resumeExportDir;
 	_panel->startExportNow(settings);
 }
 

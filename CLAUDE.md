@@ -600,7 +600,7 @@ print("✓ MCP integration working")
 | Tool | Description |
 |------|-------------|
 | `archive_chat` | Archive a chat to local database |
-| `export_chat` | Export chat to JSON/HTML/TXT |
+| `export_chat` | Export chat to JSON/HTML/TXT (auto-resumes interrupted exports) |
 | `list_archived_chats` | List all archived chats |
 | `get_archive_stats` | Get archive statistics |
 | `configure_ephemeral_capture` | Configure disappearing message capture |
@@ -954,7 +954,7 @@ log stream --predicate 'process == "Telegram"' --level debug
 
 ---
 
-**Last Updated**: 2026-03-28
+**Last Updated**: 2026-03-31
 **Maintained for**: AI assistants working on tdesktop MCP integration
 **Base Commit**: aadc81279a (Telegram Desktop 6.3)
 **MCP Tools**: 200+ tools (54 implemented, 150+ stub implementations)

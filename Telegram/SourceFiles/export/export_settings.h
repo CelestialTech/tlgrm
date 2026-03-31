@@ -91,6 +91,7 @@ struct Settings {
 	TimeId singlePeerTill = 0;
 	int32 singlePeerResumeFromId = 0;
 	int32 singlePeerResumeSkipCount = 0;
+	QString resumeExportDir;  // If set, reuse this directory instead of creating new
 
 	int32 singleTopicRootId = 0;
 	uint64 singleTopicPeerId = 0;

@@ -39,7 +39,8 @@ public:
 	void startAutoExport(
 		not_null<PeerData*> peer,
 		int32 resumeFromId = 0,
-		int32 skipCount = 0);
+		int32 skipCount = 0,
+		const QString &resumeExportDir = QString());
 	void startTopic(
 		not_null<PeerData*> peer,
 		MsgId topicRootId,

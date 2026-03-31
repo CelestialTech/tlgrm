@@ -81,16 +81,33 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 	// If files/ exists but no HTML → scan API for matching document names
 	if (resumeFromId == -1 && !exportDirPath.isEmpty()) {
 		QDir filesDir(exportDirPath + "/files");
-		QStringList fileList = filesDir.entryList(QDir::Files);
+		QStringList fileList = filesDir.entryList(
+			QDir::Files, QDir::Time); // sorted newest-first
+
+		// Remove partially written files from interrupted export.
+		// The last file being downloaded gets truncated to a buffer
+		// boundary (power-of-2 size) when the app is killed.
+		if (!fileList.isEmpty()) {
+			const auto &newest = fileList.first();
+			QFileInfo fi(filesDir.absoluteFilePath(newest));
+			const auto sz = fi.size();
+			if (sz > 0 && (sz & (sz - 1)) == 0 && sz <= 64 * 1024 * 1024) {
+				qWarning() << "MCP: Removing likely truncated file:"
+				           << newest << "size:" << sz;
+				QFile::remove(fi.absoluteFilePath());
+				fileList.removeFirst();
+			}
+		}
+
 		if (!fileList.isEmpty()) {
 			QSet<QString> filenames(fileList.begin(), fileList.end());
 			// Build normalized set and size map for robust matching
 			QSet<QString> normalized;
-			QMap<qint64, QString> sizeMap;
+			QMultiMap<qint64, QString> sizeMap;
 			for (const auto &fn : fileList) {
 				normalized.insert(normalizeFilename(fn));
-				QFileInfo fi(filesDir.absoluteFilePath(fn));
-				sizeMap.insert(fi.size(), fn);
+				QFileInfo nfi(filesDir.absoluteFilePath(fn));
+				sizeMap.insert(nfi.size(), fn);
 			}
 			qWarning() << "MCP: Starting async resume detection for"
 			           << peer->name() << "with" << filenames.size()
@@ -103,7 +120,7 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 				           << "normalized:" << normalizeFilename(fn);
 			}
 			startResumeDetection(peer, filenames, normalized,
-				sizeMap, args);
+				sizeMap, exportDirPath, args);
 
 			QJsonObject result;
 			result["success"] = true;
@@ -140,7 +157,8 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 	_session->local().writeExportSettings(settings);
 
 	// Open the export UI panel (same as right-click → Export chat history)
-	Core::App().exportManager().startAutoExport(peer, resumeFromId);
+	Core::App().exportManager().startAutoExport(
+		peer, resumeFromId, 0, exportDirPath);
 
 	qWarning() << "MCP: toolExportChat opened export panel for"
 	           << peer->name() << "resume_from:" << resumeFromId;
@@ -252,10 +270,12 @@ int32 Server::autoDetectResumeId(
 }
 
 QString Server::normalizeFilename(const QString &name) {
+	// NFC normalize first (macOS HFS+ returns NFD, API returns NFC)
+	const auto nfc = name.normalized(QString::NormalizationForm_C);
 	// Lowercase, keep only alphanumeric + dot for extension matching
 	QString result;
-	result.reserve(name.size());
-	for (const auto &ch : name) {
+	result.reserve(nfc.size());
+	for (const auto &ch : nfc) {
 		if (ch.isLetterOrNumber() || ch == '.') {
 			result.append(ch.toLower());
 		}
@@ -267,13 +287,15 @@ void Server::startResumeDetection(
 		PeerData *peer,
 		const QSet<QString> &filenames,
 		const QSet<QString> &normalizedNames,
-		const QMap<qint64, QString> &sizeMap,
+		const QMultiMap<qint64, QString> &sizeMap,
+		const QString &existingExportDir,
 		const QJsonObject &exportArgs) {
 	_resumeScan = std::make_unique<ResumeDetectScan>();
 	_resumeScan->peer = peer;
 	_resumeScan->exportedFilenames = filenames;
 	_resumeScan->normalizedDiskNames = normalizedNames;
 	_resumeScan->diskSizeToName = sizeMap;
+	_resumeScan->exportDirPath = existingExportDir;
 	_resumeScan->originalArgs = exportArgs;
 
 	fetchNextDocumentBatch();
@@ -299,33 +321,57 @@ void Server::fetchNextDocumentBatch() {
 	)).done([this](const MTPmessages_Messages &result) {
 		processDocumentBatch(result);
 	}).fail([this](const MTP::Error &error) {
-		qWarning() << "MCP: Resume detection failed:" << error.type();
-		if (_resumeScan) {
-			auto *peer = _resumeScan->peer;
-			_resumeScan.reset();
-			Core::App().exportManager().startAutoExport(peer);
+		if (!_session || !_resumeScan) return;
+		const auto type = error.type();
+		if (type.startsWith("FLOOD_WAIT_")) {
+			const auto secs = std::max(type.mid(11).toInt(), 5);
+			qWarning() << "MCP: Resume scan FLOOD_WAIT, retry in"
+			           << secs << "s";
+			QTimer::singleShot(secs * 1000, this, [this]() {
+				fetchNextDocumentBatch();
+			});
+			return;
 		}
+		qWarning() << "MCP: Resume detection failed:" << type;
+		auto *peer = _resumeScan->peer;
+		_resumeScan.reset();
+		Core::App().exportManager().startAutoExport(peer);
 	}).send();
 }
 
 void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 	if (!_resumeScan) return;
 
-	int messageCount = 0;
-	int32 lastIdInBatch = 0;
+	const auto previousOffsetId = _resumeScan->offsetId;
 	bool foundInBatch = false;
 
 	auto processMessages = [&](const QVector<MTPMessage> &messages) {
+		if (messages.isEmpty()) return;
+
 		// Count ALL messages in batch (for progress tracking)
 		_resumeScan->totalMessagesSeen += messages.size();
+
+		// Track last ID from ANY message type (prevents infinite loop
+		// on service-message-only batches)
+		for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
+			it->match(
+				[&](const MTPDmessage &d) {
+					_resumeScan->offsetId = d.vid().v;
+				},
+				[&](const MTPDmessageService &d) {
+					_resumeScan->offsetId = d.vid().v;
+				},
+				[&](const MTPDmessageEmpty &d) {
+					_resumeScan->offsetId = d.vid().v;
+				});
+			if (_resumeScan->offsetId > 0) break;
+		}
 
 		// First pass: find document matches
 		for (const auto &msg : messages) {
 			if (msg.type() != mtpc_message) continue;
 			const auto &data = msg.c_message();
 			const auto msgId = data.vid().v;
-			lastIdInBatch = msgId;
-			messageCount++;
 
 			if (!data.vmedia()) continue;
 			const auto &media = *data.vmedia();
@@ -373,6 +419,10 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 			if (matched) {
 				foundInBatch = true;
 				_resumeScan->matchCount++;
+				if (_resumeScan->batchOfFirstMatch < 0) {
+					_resumeScan->batchOfFirstMatch =
+						_resumeScan->batchesScanned;
+				}
 				if (msgId < _resumeScan->lowestMatchedId) {
 					_resumeScan->lowestMatchedId = msgId;
 				}
@@ -384,8 +434,8 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 			}
 		}
 
-		// Second pass: count messages at or below resume point
-		// (for accurate progress display)
+		// Second pass: count messages ABOVE resume point
+		// (messages that were already exported = skip count)
 		if (_resumeScan->highestMatchedId > 0) {
 			for (const auto &msg : messages) {
 				int32 msgId = 0;
@@ -393,9 +443,8 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 					[&](const MTPDmessage &d) { msgId = d.vid().v; },
 					[&](const MTPDmessageService &d) { msgId = d.vid().v; },
 					[&](const MTPDmessageEmpty &d) { msgId = d.vid().v; });
-				if (msgId > 0
-					&& msgId <= _resumeScan->highestMatchedId) {
-					_resumeScan->messagesAtOrBelowResume++;
+				if (msgId > _resumeScan->highestMatchedId) {
+					_resumeScan->messagesAboveResume++;
 				}
 			}
 		}
@@ -429,27 +478,35 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 	_resumeScan->batchesScanned++;
 
 	// Stop conditions:
-	// 1. No more messages
+	// 1. No more messages (batch was empty)
 	// 2. Found all exported filenames
-	// 3. Safety: scanned 500 batches (50000 messages)
-	// Note: do NOT stop on consecutive empty batches — PDFs can be
-	// spread across thousands of messages in a busy channel.
-	const bool noMore = (messageCount == 0);
+	// 3. Found first match and scanned enough to count above-resume
+	//    (batches arrive newest→oldest, so first match = highest ID;
+	//    all messages above resume are in earlier batches, already counted)
+	// 4. Safety: scanned 500 batches (50000 messages)
+	const bool noMore = (_resumeScan->offsetId == 0)
+		|| (_resumeScan->offsetId == previousOffsetId);
 	const bool allFound = (_resumeScan->matchCount
 		>= _resumeScan->exportedFilenames.size());
+	const bool firstMatchDone = (_resumeScan->batchOfFirstMatch >= 0
+		&& _resumeScan->batchesScanned
+			>= _resumeScan->batchOfFirstMatch + 3);
 	const bool safetyLimit = (_resumeScan->batchesScanned >= 500);
 
-	if (noMore || allFound || safetyLimit) {
+	if (noMore || allFound || firstMatchDone || safetyLimit) {
 		const auto matchCount = _resumeScan->matchCount;
 		const auto totalFiles = _resumeScan->exportedFilenames.size();
 		auto *peer = _resumeScan->peer;
 		auto args = _resumeScan->originalArgs;
 
-		// Compute skip count for progress counter
-		const auto remaining = _resumeScan->totalMessagesSeen
-			- _resumeScan->messagesAtOrBelowResume;
+		// Compute skip count for progress counter.
+		// messagesAboveResume = messages with id > highestMatchedId
+		// (i.e., messages newer than the resume point, already exported).
+		// For channels not fully scanned, extrapolate from the scanned
+		// portion: above-resume messages are all in the first batches.
 		const auto totalChannel = _resumeScan->totalChannelMessages;
-		const auto skipCount = std::max(totalChannel - remaining, 0);
+		const auto skipCount = std::max(
+			_resumeScan->messagesAboveResume, 0);
 
 		int32 finalResumeId = 0;
 
@@ -462,7 +519,7 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 			           << "lowest:" << _resumeScan->lowestMatchedId
 			           << "totalChannel:" << totalChannel
 			           << "seen:" << _resumeScan->totalMessagesSeen
-			           << "atOrBelow:" << _resumeScan->messagesAtOrBelowResume
+			           << "aboveResume:" << _resumeScan->messagesAboveResume
 			           << "skipCount:" << skipCount;
 		} else {
 			qWarning() << "MCP: Resume detection found no matches"
@@ -488,14 +545,16 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 		}
 		_session->local().writeExportSettings(settings);
 
+		const auto resumeDir = _resumeScan->exportDirPath;
 		_resumeScan.reset();
 		Core::App().exportManager().startAutoExport(
-			peer, finalResumeId, skipCount);
+			peer, finalResumeId, skipCount, resumeDir);
 		return;
 	}
 
 	// Continue scanning with delay (gradual, like the export itself)
-	_resumeScan->offsetId = lastIdInBatch;
+	// offsetId was already set inside processMessages from the last
+	// message in the batch (any type, not just mtpc_message)
 	QTimer::singleShot(1500, this, [this]() {
 		fetchNextDocumentBatch();
 	});
@@ -674,7 +733,10 @@ QJsonObject Server::toolPurgeArchive(const QJsonObject &args) {
 		return error;
 	}
 
-	int daysToKeep = args["days_to_keep"].toInt();
+	const int daysToKeep = args["days_to_keep"].toInt();
+	if (daysToKeep <= 0) {
+		return toolError("days_to_keep must be a positive integer");
+	}
 
 	qint64 cutoffTimestamp = QDateTime::currentSecsSinceEpoch() - (daysToKeep * 86400);
 	int deleted = _archiver->purgeOldMessages(cutoffTimestamp);

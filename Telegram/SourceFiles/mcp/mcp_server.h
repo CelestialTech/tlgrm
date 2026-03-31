@@ -671,7 +671,8 @@ private:
 		PeerData *peer,
 		const QSet<QString> &filenames,
 		const QSet<QString> &normalizedNames,
-		const QMap<qint64, QString> &sizeMap,
+		const QMultiMap<qint64, QString> &sizeMap,
+		const QString &existingExportDir,
 		const QJsonObject &exportArgs);
 	void fetchNextDocumentBatch();
 	void processDocumentBatch(const MTPmessages_Messages &result);
@@ -739,16 +740,18 @@ private:
 		PeerData *peer = nullptr;
 		QSet<QString> exportedFilenames;       // raw disk filenames
 		QSet<QString> normalizedDiskNames;     // normalized for fuzzy match
-		QMap<qint64, QString> diskSizeToName;  // file size → name (for size match)
+		QMultiMap<qint64, QString> diskSizeToName;  // file size → name(s)
 		int32 lowestMatchedId = INT32_MAX;
 		int32 highestMatchedId = 0;
 		int matchCount = 0;
 		int32 offsetId = 0;
 		int batchesScanned = 0;
+		int batchOfFirstMatch = -1;  // batch# when first match found
 		int totalDocsScanned = 0;
+		QString exportDirPath;  // existing dir to resume into
 		int totalChannelMessages = 0;
 		int totalMessagesSeen = 0;
-		int messagesAtOrBelowResume = 0;
+		int messagesAboveResume = 0;  // messages with id > highestMatchedId
 		QJsonObject originalArgs;
 	};
 	std::unique_ptr<ResumeDetectScan> _resumeScan;

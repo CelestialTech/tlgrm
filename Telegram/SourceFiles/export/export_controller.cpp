@@ -304,6 +304,18 @@ void ControllerObject::startExport(
 	_settings.singleTopicPeerId = _topicPeerId;
 
 	_settings.path = Output::NormalizePath(_settings);
+
+	// If resume dir was requested but NormalizePath fell through
+	// (dir deleted), clear resume fields to avoid partial export.
+	if (!_settings.resumeExportDir.isEmpty()
+		&& !_settings.path.startsWith(
+			QDir(_settings.resumeExportDir).absolutePath())) {
+		qWarning() << "[Export] Resume dir lost, starting fresh export";
+		_settings.singlePeerResumeFromId = 0;
+		_settings.singlePeerResumeSkipCount = 0;
+		_settings.resumeExportDir.clear();
+	}
+
 	_writer = Output::CreateWriter(_settings.format);
 	fillExportSteps();
 	exportNext();
@@ -592,10 +604,12 @@ void ControllerObject::exportNextDialog() {
 			if (ioCatchError(_writer->writeDialogStart(info))) {
 				return false;
 			}
-			_messagesWritten = _settings.singlePeerResumeSkipCount;
 			_messagesCount = ranges::accumulate(
 				info.messagesCountPerSplit,
 				0);
+			_messagesWritten = std::min(
+				_settings.singlePeerResumeSkipCount,
+				_messagesCount);
 			setState(stateDialogs(DownloadProgress()));
 			return true;
 		}, [=](DownloadProgress progress) {

@@ -9,7 +9,7 @@ A custom fork of [Telegram Desktop](https://github.com/telegramdesktop/tdesktop)
 - **Privacy controls** - manage who can see your data
 - **Message management** - send, edit, delete, forward, pin messages
 - **Analytics** - get statistics about your chats and usage
-- **Archive & Export** - backup and export chat histories
+- **Archive & Export** - backup and export chat histories with auto-resume for interrupted exports
 
 ## Quick Start
 

@@ -53,6 +53,21 @@ QString SanitizeForFilesystem(const QString &name) {
 } // namespace
 
 QString NormalizePath(const Settings &settings) {
+	// If resuming into an existing export directory, reuse it as-is
+	if (!settings.resumeExportDir.isEmpty()) {
+		QDir dir(settings.resumeExportDir);
+		if (dir.exists()) {
+			auto result = dir.absolutePath();
+			if (!result.endsWith('/')) {
+				result += '/';
+			}
+			qWarning() << "[Export] Reusing existing export dir:" << result;
+			return result;
+		}
+		qWarning() << "[Export] Resume dir gone, creating fresh:"
+		           << settings.resumeExportDir;
+	}
+
 	QDir folder(settings.path);
 	const auto path = folder.absolutePath();
 	auto result = path.endsWith('/') ? path : (path + '/');
