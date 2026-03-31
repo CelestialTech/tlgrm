@@ -434,9 +434,14 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 			}
 		}
 
-		// Second pass: count messages ABOVE resume point
-		// (messages that were already exported = skip count)
-		if (_resumeScan->highestMatchedId > 0) {
+		// Track messages above resume point for progress counter.
+		// Batches arrive newest→oldest. Before first match, ALL
+		// messages are above the resume point. After first match,
+		// count only those with id > highestMatchedId.
+		if (_resumeScan->highestMatchedId == 0) {
+			// No match yet — all messages in this batch are above
+			_resumeScan->messagesBeforeFirstMatch += messages.size();
+		} else {
 			for (const auto &msg : messages) {
 				int32 msgId = 0;
 				msg.match(
@@ -444,7 +449,7 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 					[&](const MTPDmessageService &d) { msgId = d.vid().v; },
 					[&](const MTPDmessageEmpty &d) { msgId = d.vid().v; });
 				if (msgId > _resumeScan->highestMatchedId) {
-					_resumeScan->messagesAboveResume++;
+					_resumeScan->messagesAboveInMatchBatches++;
 				}
 			}
 		}
@@ -500,13 +505,12 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 		auto args = _resumeScan->originalArgs;
 
 		// Compute skip count for progress counter.
-		// messagesAboveResume = messages with id > highestMatchedId
-		// (i.e., messages newer than the resume point, already exported).
-		// For channels not fully scanned, extrapolate from the scanned
-		// portion: above-resume messages are all in the first batches.
+		// All messages in batches before the first match are above
+		// the resume point, plus any above-resume messages in the
+		// match batch itself.
 		const auto totalChannel = _resumeScan->totalChannelMessages;
-		const auto skipCount = std::max(
-			_resumeScan->messagesAboveResume, 0);
+		const auto skipCount = _resumeScan->messagesBeforeFirstMatch
+			+ _resumeScan->messagesAboveInMatchBatches;
 
 		int32 finalResumeId = 0;
 
@@ -519,7 +523,8 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 			           << "lowest:" << _resumeScan->lowestMatchedId
 			           << "totalChannel:" << totalChannel
 			           << "seen:" << _resumeScan->totalMessagesSeen
-			           << "aboveResume:" << _resumeScan->messagesAboveResume
+			           << "beforeMatch:" << _resumeScan->messagesBeforeFirstMatch
+			           << "aboveInMatchBatches:" << _resumeScan->messagesAboveInMatchBatches
 			           << "skipCount:" << skipCount;
 		} else {
 			qWarning() << "MCP: Resume detection found no matches"

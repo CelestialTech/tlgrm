@@ -751,7 +751,8 @@ private:
 		QString exportDirPath;  // existing dir to resume into
 		int totalChannelMessages = 0;
 		int totalMessagesSeen = 0;
-		int messagesAboveResume = 0;  // messages with id > highestMatchedId
+		int messagesBeforeFirstMatch = 0;  // all msgs in batches before first match
+		int messagesAboveInMatchBatches = 0;  // msgs above resume in match+ batches
 		QJsonObject originalArgs;
 	};
 	std::unique_ptr<ResumeDetectScan> _resumeScan;
