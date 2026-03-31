@@ -133,7 +133,7 @@ void Server::registerTools() {
 		},
 		Tool{
 			"export_chat",
-			"Export chat history to JSON/JSONL/CSV format",
+			"Export chat via gradual export (mimics user behavior). Opens export UI panel. Auto-detects resume point from previous export.",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
@@ -143,15 +143,19 @@ void Server::registerTools() {
 					}},
 					{"format", QJsonObject{
 						{"type", "string"},
-						{"enum", QJsonArray{"json", "jsonl", "csv"}},
-						{"description", "Export format"}
+						{"enum", QJsonArray{"html", "json"}},
+						{"description", "Export format (default: html)"}
 					}},
 					{"output_path", QJsonObject{
 						{"type", "string"},
-						{"description", "Output directory path (optional - uses UI export settings if not specified)"}
+						{"description", "Output directory path (optional)"}
+					}},
+					{"resume_from_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Resume from this message ID. If omitted, auto-detects from previous export."}
 					}}
 				}},
-				{"required", QJsonArray{"chat_id", "format"}},
+				{"required", QJsonArray{"chat_id"}},
 			}
 		},
 		Tool{

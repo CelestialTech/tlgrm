@@ -29,6 +29,7 @@
 #include <QtCore/QDebug>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QTextStream>
 #include <QtCore/QProcess>
 #include <QtCore/QRegularExpression>
@@ -67,6 +68,10 @@
 #include "apiwrap.h"
 #include "storage/storage_account.h"
 #include "core/file_utilities.h"
+#include "core/application.h"
+#include "export/export_manager.h"
+#include "export/export_settings.h"
+#include "export/output/export_output_abstract.h"
 #include "mtproto/mtp_instance.h"
 #include "api/api_credits.h"
 #include "api/api_premium.h"

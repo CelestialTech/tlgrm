@@ -46,6 +46,9 @@ public:
 	void activatePanel();
 	void stopWithConfirmation(Fn<void()> callback = nullptr);
 
+	// Auto-start export with given settings (MCP use).
+	void startExportNow(const Settings &settings);
+
 	[[nodiscard]] rpl::producer<> stopRequests() const;
 
 	[[nodiscard]] rpl::lifetime &lifetime() {

@@ -247,13 +247,8 @@ void Server::stop() {
 		_auditLogger->logSystemEvent("server_stop", "MCP Server stopping");
 	}
 
-	// Cancel active export (holds rpl lifetime + timers referencing session)
-	if (_mediaItemTimeoutTimer) {
-		_mediaItemTimeoutTimer->stop();
-		delete _mediaItemTimeoutTimer;
-		_mediaItemTimeoutTimer = nullptr;
-	}
-	_activeExport.reset();
+	// Cancel any in-progress resume detection scan
+	_resumeScan.reset();
 
 	// Shutdown bot manager first (it holds raw pointers to other components)
 	_botManager.reset();
@@ -319,15 +314,8 @@ void Server::clearSession() {
 		(void*)_session, _sessionComponentsInitialized);
 	fflush(stderr);
 
-	// Cancel active export first — its rpl lifetime and timers
-	// hold references to session data that must be killed before
-	// the session is destroyed.
-	if (_mediaItemTimeoutTimer) {
-		_mediaItemTimeoutTimer->stop();
-		delete _mediaItemTimeoutTimer;
-		_mediaItemTimeoutTimer = nullptr;
-	}
-	_activeExport.reset();
+	// Cancel any in-progress resume detection scan
+	_resumeScan.reset();
 
 	// Tear down session-dependent components
 	_botManager.reset();

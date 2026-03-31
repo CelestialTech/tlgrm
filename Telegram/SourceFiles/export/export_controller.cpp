@@ -592,7 +592,7 @@ void ControllerObject::exportNextDialog() {
 			if (ioCatchError(_writer->writeDialogStart(info))) {
 				return false;
 			}
-			_messagesWritten = 0;
+			_messagesWritten = _settings.singlePeerResumeSkipCount;
 			_messagesCount = ranges::accumulate(
 				info.messagesCountPerSplit,
 				0);

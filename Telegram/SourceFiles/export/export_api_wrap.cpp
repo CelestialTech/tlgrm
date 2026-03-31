@@ -1573,6 +1573,13 @@ void ApiWrap::messagesCountLoaded(int localSplitIndex, int count) {
 	if (localSplitIndex + 1 < _chatProcess->info.splits.size()) {
 		requestMessagesCount(localSplitIndex + 1);
 	} else if (_chatProcess->start(_chatProcess->info)) {
+		if (_settings->singlePeerResumeFromId > 0) {
+			_chatProcess->largestIdPlusOne =
+				_settings->singlePeerResumeFromId + 1;
+			qWarning() << "[Export] Resuming from message ID"
+				<< _settings->singlePeerResumeFromId
+				<< "skipCount:" << _settings->singlePeerResumeSkipCount;
+		}
 		requestMessagesSlice();
 	}
 }

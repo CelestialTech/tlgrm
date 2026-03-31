@@ -273,6 +273,13 @@ void PanelController::showSettings() {
 	_panel->showInner(std::move(settings));
 }
 
+void PanelController::startExportNow(const Settings &settings) {
+	*_settings = settings;
+	createPanel();
+	showProgress();
+	_process->startExport(*_settings, PrepareEnvironment(_session));
+}
+
 void PanelController::showError(const ApiErrorState &error) {
 	LOG(("Export Info: API Error '%1'.").arg(error.data.type()));
 

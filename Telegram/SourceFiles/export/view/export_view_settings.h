@@ -93,6 +93,8 @@ private:
 		not_null<Ui::VerticalLayout*> container);
 	void addLimitsLabel(
 		not_null<Ui::VerticalLayout*> container);
+	void addResumeFromLabel(
+		not_null<Ui::VerticalLayout*> container);
 	void chooseFolder();
 	void chooseFormat();
 	void refreshButtons(

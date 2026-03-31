@@ -34,32 +34,23 @@ QJsonObject Server::toolArchiveChat(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolExportChat(const QJsonObject &args) {
-	// Direct export using messages.getHistory - no Takeout/Export::Controller.
-	// Returns immediately; use get_export_status to poll for completion.
+	// Opens the gradual export UI for the specified peer.
+	// Pre-sets resume_from_message_id in export settings if provided,
+	// or auto-detects from previous export output.
+	// Uses Export::Manager → Export::Controller → export_api_wrap (gradual mode).
 
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
-	QString outputPath = args["output_path"].toString();
-
-	// Sanitize output path if provided
-	if (!outputPath.isEmpty()) {
-		outputPath = sanitizePath(outputPath, defaultExportDir());
-		if (outputPath.isEmpty()) {
-			return toolError("Invalid output_path: path traversal not allowed");
-		}
-	}
 
 	if (!_session) {
-		QJsonObject error;
-		error["error"] = "No active session";
-		return error;
+		return toolError("No active session");
 	}
 
-	if (_activeExport && !_activeExport->finished) {
-		QJsonObject error;
-		error["error"] = "Another export is already in progress";
-		error["chat_id"] = _activeExport->chatId;
-		error["chat_name"] = _activeExport->chatName;
-		return error;
+	if (Core::App().exportManager().inProgress(_session)) {
+		return toolError("Export already in progress for this session");
+	}
+
+	if (_resumeScan) {
+		return toolError("Resume detection already in progress");
 	}
 
 	// Resolve peer
@@ -72,12 +63,117 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 		}
 	}
 	if (!peer) {
-		QJsonObject error;
-		error["error"] = "Chat not found: " + QString::number(chatId);
-		return error;
+		return toolError("Chat not found: " + QString::number(chatId));
 	}
 
-	// Determine peer type
+	// Determine resume point
+	int32 resumeFromId = 0;
+	QString exportDirPath;
+	if (args.contains("resume_from_message_id")) {
+		resumeFromId = static_cast<int32>(
+			args["resume_from_message_id"].toVariant().toLongLong());
+	} else {
+		// Auto-detect from previous export
+		resumeFromId = autoDetectResumeId(
+			not_null<PeerData*>(peer), &exportDirPath);
+	}
+
+	// If files/ exists but no HTML → scan API for matching document names
+	if (resumeFromId == -1 && !exportDirPath.isEmpty()) {
+		QDir filesDir(exportDirPath + "/files");
+		QStringList fileList = filesDir.entryList(QDir::Files);
+		if (!fileList.isEmpty()) {
+			QSet<QString> filenames(fileList.begin(), fileList.end());
+			// Build normalized set and size map for robust matching
+			QSet<QString> normalized;
+			QMap<qint64, QString> sizeMap;
+			for (const auto &fn : fileList) {
+				normalized.insert(normalizeFilename(fn));
+				QFileInfo fi(filesDir.absoluteFilePath(fn));
+				sizeMap.insert(fi.size(), fn);
+			}
+			qWarning() << "MCP: Starting async resume detection for"
+			           << peer->name() << "with" << filenames.size()
+			           << "filenames to match";
+			// Log first 5 disk filenames for debugging
+			int logged = 0;
+			for (const auto &fn : fileList) {
+				if (++logged > 5) break;
+				qWarning() << "  DISK:" << fn
+				           << "normalized:" << normalizeFilename(fn);
+			}
+			startResumeDetection(peer, filenames, normalized,
+				sizeMap, args);
+
+			QJsonObject result;
+			result["success"] = true;
+			result["status"] = "scanning";
+			result["chat_id"] = chatId;
+			result["chat_name"] = peer->name();
+			result["files_to_match"] = fileList.size();
+			result["message"] = QString(
+				"Scanning channel documents to find message IDs for %1 "
+				"previously exported files. Export panel will open "
+				"automatically when detection completes.")
+				.arg(fileList.size());
+			return result;
+		}
+	}
+
+	// Direct path: we have a resume ID or no previous export
+	auto settings = _session->local().readExportSettings();
+	settings.singlePeer = peer->input();
+	if (resumeFromId > 0) {
+		settings.singlePeerResumeFromId = resumeFromId;
+	}
+	if (args.contains("output_path")) {
+		settings.path = args["output_path"].toString();
+	}
+	if (args.contains("format")) {
+		QString fmt = args["format"].toString().toLower();
+		if (fmt == "json") {
+			settings.format = Export::Output::Format::Json;
+		} else {
+			settings.format = Export::Output::Format::Html;
+		}
+	}
+	_session->local().writeExportSettings(settings);
+
+	// Open the export UI panel (same as right-click → Export chat history)
+	Core::App().exportManager().startAutoExport(peer, resumeFromId);
+
+	qWarning() << "MCP: toolExportChat opened export panel for"
+	           << peer->name() << "resume_from:" << resumeFromId;
+
+	QJsonObject result;
+	result["success"] = true;
+	result["status"] = "panel_opened";
+	result["chat_id"] = chatId;
+	result["chat_name"] = peer->name();
+	if (resumeFromId > 0) {
+		result["resume_from_message_id"] = resumeFromId;
+		result["message"] = QString(
+			"Export panel opened with resume from message #%1. "
+			"Click Start to begin.").arg(resumeFromId);
+	} else {
+		result["message"] = "Export panel opened. Configure and click Start.";
+	}
+	return result;
+}
+
+int32 Server::autoDetectResumeId(
+		not_null<PeerData*> peer,
+		QString *exportDirOut) {
+	// Scan default download path for previous gradual exports of this peer.
+	// Export directories: {Type}-{Name}-{DDMMYYYY-HHMMSS}/
+	// HTML files contain: id="message{id}" attributes.
+	// Find the lowest message ID = where we stopped.
+
+	const auto downloadPath = File::DefaultDownloadPath(
+		gsl::make_not_null(_session));
+	QDir baseDir(downloadPath);
+	if (!baseDir.exists()) return 0;
+
 	QString peerType;
 	if (peer->isChannel()) {
 		peerType = peer->asChannel()->isBroadcast() ? "Channel" : "Group";
@@ -87,116 +183,349 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 		peerType = "Chat";
 	}
 
-	QString peerName = peer->name();
+	const auto safeName = sanitizeForFilename(peer->name());
+	const auto typePrefix = peerType + "-";
+	const auto exactPrefix = safeName.isEmpty()
+		? typePrefix : (typePrefix + safeName + "-");
 
-	if (outputPath.isEmpty()) {
-		outputPath = File::DefaultDownloadPath(
-			gsl::make_not_null(_session));
+	qWarning() << "MCP: autoDetect peerName:" << peer->name()
+	           << "safeName:" << safeName << "prefix:" << exactPrefix
+	           << "loaded:" << peer->isLoaded();
+
+	QStringList entries = baseDir.entryList(
+		QDir::Dirs | QDir::NoDotAndDotDot, QDir::Time);
+
+	// When peer name is unavailable, collect candidates with files/
+	// but no HTML and pick the most recent (entries sorted by time).
+	for (const auto &entry : entries) {
+		if (!entry.startsWith(exactPrefix)) continue;
+
+		QDir exportDir(baseDir.absoluteFilePath(entry));
+
+		// Method 1: Scan messages*.html for message IDs
+		QStringList htmlFiles = exportDir.entryList(
+			QStringList() << "messages*.html", QDir::Files, QDir::Name);
+		if (!htmlFiles.isEmpty()) {
+			QFile file(exportDir.absoluteFilePath(htmlFiles.last()));
+			if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+				int32 lowestId = INT32_MAX;
+				QRegularExpression re("id=\"message(\\d+)\"");
+				QTextStream stream(&file);
+				while (!stream.atEnd()) {
+					auto match = re.match(stream.readLine());
+					if (match.hasMatch()) {
+						int32 id = match.captured(1).toInt();
+						if (id > 0 && id < lowestId) lowestId = id;
+					}
+				}
+				file.close();
+				if (lowestId > 0 && lowestId < INT32_MAX) {
+					qWarning() << "MCP: Auto-detected resume from HTML"
+					           << entry << "- message ID:" << lowestId;
+					if (exportDirOut) {
+						*exportDirOut = exportDir.absolutePath();
+					}
+					return lowestId;
+				}
+			}
+		}
+
+		// Method 2: No HTML file (crash before write).
+		// Files/ directory has attachments but no message IDs.
+		// Return -1 so caller can start async API scan.
+		QDir filesDir(exportDir.absoluteFilePath("files"));
+		if (filesDir.exists()) {
+			QFileInfoList fileInfos = filesDir.entryInfoList(
+				QDir::Files, QDir::Time | QDir::Reversed);
+			if (!fileInfos.isEmpty()) {
+				qWarning() << "MCP: Found" << fileInfos.size()
+				           << "exported files in" << entry
+				           << "- will scan API for message IDs";
+				if (exportDirOut) {
+					*exportDirOut = exportDir.absolutePath();
+				}
+				return -1;
+			}
+		}
+	}
+	return 0;
+}
+
+QString Server::normalizeFilename(const QString &name) {
+	// Lowercase, keep only alphanumeric + dot for extension matching
+	QString result;
+	result.reserve(name.size());
+	for (const auto &ch : name) {
+		if (ch.isLetterOrNumber() || ch == '.') {
+			result.append(ch.toLower());
+		}
+	}
+	return result;
+}
+
+void Server::startResumeDetection(
+		PeerData *peer,
+		const QSet<QString> &filenames,
+		const QSet<QString> &normalizedNames,
+		const QMap<qint64, QString> &sizeMap,
+		const QJsonObject &exportArgs) {
+	_resumeScan = std::make_unique<ResumeDetectScan>();
+	_resumeScan->peer = peer;
+	_resumeScan->exportedFilenames = filenames;
+	_resumeScan->normalizedDiskNames = normalizedNames;
+	_resumeScan->diskSizeToName = sizeMap;
+	_resumeScan->originalArgs = exportArgs;
+
+	fetchNextDocumentBatch();
+}
+
+void Server::fetchNextDocumentBatch() {
+	if (!_resumeScan || !_session) return;
+
+	qWarning() << "MCP: Resume scan batch"
+	           << (_resumeScan->batchesScanned + 1)
+	           << "offset_id:" << _resumeScan->offsetId
+	           << "matches so far:" << _resumeScan->matchCount;
+
+	_session->api().request(MTPmessages_GetHistory(
+		_resumeScan->peer->input(),
+		MTP_int(_resumeScan->offsetId),
+		MTP_int(0),
+		MTP_int(0),
+		MTP_int(100),
+		MTP_int(0),
+		MTP_int(0),
+		MTP_long(0)
+	)).done([this](const MTPmessages_Messages &result) {
+		processDocumentBatch(result);
+	}).fail([this](const MTP::Error &error) {
+		qWarning() << "MCP: Resume detection failed:" << error.type();
+		if (_resumeScan) {
+			auto *peer = _resumeScan->peer;
+			_resumeScan.reset();
+			Core::App().exportManager().startAutoExport(peer);
+		}
+	}).send();
+}
+
+void Server::processDocumentBatch(const MTPmessages_Messages &result) {
+	if (!_resumeScan) return;
+
+	int messageCount = 0;
+	int32 lastIdInBatch = 0;
+	bool foundInBatch = false;
+
+	auto processMessages = [&](const QVector<MTPMessage> &messages) {
+		// Count ALL messages in batch (for progress tracking)
+		_resumeScan->totalMessagesSeen += messages.size();
+
+		// First pass: find document matches
+		for (const auto &msg : messages) {
+			if (msg.type() != mtpc_message) continue;
+			const auto &data = msg.c_message();
+			const auto msgId = data.vid().v;
+			lastIdInBatch = msgId;
+			messageCount++;
+
+			if (!data.vmedia()) continue;
+			const auto &media = *data.vmedia();
+			if (media.type() != mtpc_messageMediaDocument) continue;
+
+			const auto &docMedia = media.c_messageMediaDocument();
+			if (!docMedia.vdocument()) continue;
+			const auto &doc = *docMedia.vdocument();
+			if (doc.type() != mtpc_document) continue;
+
+			const auto &docData = doc.c_document();
+			const auto docSize = qint64(docData.vsize().v);
+			_resumeScan->totalDocsScanned++;
+
+			QString filename;
+			for (const auto &attr : docData.vattributes().v) {
+				if (attr.type() == mtpc_documentAttributeFilename) {
+					filename = qs(
+						attr.c_documentAttributeFilename().vfile_name());
+					break;
+				}
+			}
+
+			bool matched = false;
+			QString matchMethod;
+
+			if (!filename.isEmpty()
+				&& _resumeScan->exportedFilenames.contains(filename)) {
+				matched = true;
+				matchMethod = "exact";
+			}
+			if (!matched && !filename.isEmpty()) {
+				const auto norm = normalizeFilename(filename);
+				if (_resumeScan->normalizedDiskNames.contains(norm)) {
+					matched = true;
+					matchMethod = "normalized";
+				}
+			}
+			if (!matched && docSize > 100000
+				&& _resumeScan->diskSizeToName.contains(docSize)) {
+				matched = true;
+				matchMethod = QString("size(%1)").arg(docSize);
+			}
+
+			if (matched) {
+				foundInBatch = true;
+				_resumeScan->matchCount++;
+				if (msgId < _resumeScan->lowestMatchedId) {
+					_resumeScan->lowestMatchedId = msgId;
+				}
+				if (msgId > _resumeScan->highestMatchedId) {
+					_resumeScan->highestMatchedId = msgId;
+				}
+				qWarning() << "MCP: MATCHED [" << matchMethod << "]"
+				           << filename << "→ msg" << msgId;
+			}
+		}
+
+		// Second pass: count messages at or below resume point
+		// (for accurate progress display)
+		if (_resumeScan->highestMatchedId > 0) {
+			for (const auto &msg : messages) {
+				int32 msgId = 0;
+				msg.match(
+					[&](const MTPDmessage &d) { msgId = d.vid().v; },
+					[&](const MTPDmessageService &d) { msgId = d.vid().v; },
+					[&](const MTPDmessageEmpty &d) { msgId = d.vid().v; });
+				if (msgId > 0
+					&& msgId <= _resumeScan->highestMatchedId) {
+					_resumeScan->messagesAtOrBelowResume++;
+				}
+			}
+		}
+	};
+
+	result.match([&](const MTPDmessages_messages &data) {
+		_session->data().processUsers(data.vusers());
+		_session->data().processChats(data.vchats());
+		processMessages(data.vmessages().v);
+	}, [&](const MTPDmessages_messagesSlice &data) {
+		if (_resumeScan->totalChannelMessages == 0) {
+			_resumeScan->totalChannelMessages = data.vcount().v;
+		}
+		_session->data().processUsers(data.vusers());
+		_session->data().processChats(data.vchats());
+		processMessages(data.vmessages().v);
+	}, [&](const MTPDmessages_channelMessages &data) {
+		if (_resumeScan->totalChannelMessages == 0) {
+			_resumeScan->totalChannelMessages = data.vcount().v;
+		}
+		_session->data().processUsers(data.vusers());
+		_session->data().processChats(data.vchats());
+		if (const auto channel = _resumeScan->peer->asChannel()) {
+			channel->ptsReceived(data.vpts().v);
+		}
+		processMessages(data.vmessages().v);
+	}, [&](const MTPDmessages_messagesNotModified &) {
+		// Nothing to process
+	});
+
+	_resumeScan->batchesScanned++;
+
+	// Stop conditions:
+	// 1. No more messages
+	// 2. Found all exported filenames
+	// 3. Safety: scanned 500 batches (50000 messages)
+	// Note: do NOT stop on consecutive empty batches — PDFs can be
+	// spread across thousands of messages in a busy channel.
+	const bool noMore = (messageCount == 0);
+	const bool allFound = (_resumeScan->matchCount
+		>= _resumeScan->exportedFilenames.size());
+	const bool safetyLimit = (_resumeScan->batchesScanned >= 500);
+
+	if (noMore || allFound || safetyLimit) {
+		const auto matchCount = _resumeScan->matchCount;
+		const auto totalFiles = _resumeScan->exportedFilenames.size();
+		auto *peer = _resumeScan->peer;
+		auto args = _resumeScan->originalArgs;
+
+		// Compute skip count for progress counter
+		const auto remaining = _resumeScan->totalMessagesSeen
+			- _resumeScan->messagesAtOrBelowResume;
+		const auto totalChannel = _resumeScan->totalChannelMessages;
+		const auto skipCount = std::max(totalChannel - remaining, 0);
+
+		int32 finalResumeId = 0;
+
+		if (matchCount > 0
+			&& _resumeScan->highestMatchedId > 0) {
+			finalResumeId = _resumeScan->highestMatchedId;
+			qWarning() << "MCP: Resume detection complete."
+			           << matchCount << "/" << totalFiles
+			           << "files matched. Highest:" << finalResumeId
+			           << "lowest:" << _resumeScan->lowestMatchedId
+			           << "totalChannel:" << totalChannel
+			           << "seen:" << _resumeScan->totalMessagesSeen
+			           << "atOrBelow:" << _resumeScan->messagesAtOrBelowResume
+			           << "skipCount:" << skipCount;
+		} else {
+			qWarning() << "MCP: Resume detection found no matches"
+			           << "after" << _resumeScan->batchesScanned
+			           << "batches.";
+		}
+
+		// Write settings
+		auto settings = _session->local().readExportSettings();
+		settings.singlePeer = peer->input();
+		settings.singlePeerResumeFromId = finalResumeId;
+		settings.singlePeerResumeSkipCount = skipCount;
+		if (args.contains("output_path")) {
+			settings.path = args["output_path"].toString();
+		}
+		if (args.contains("format")) {
+			QString fmt = args["format"].toString().toLower();
+			if (fmt == "json") {
+				settings.format = Export::Output::Format::Json;
+			} else {
+				settings.format = Export::Output::Format::Html;
+			}
+		}
+		_session->local().writeExportSettings(settings);
+
+		_resumeScan.reset();
+		Core::App().exportManager().startAutoExport(
+			peer, finalResumeId, skipCount);
+		return;
 	}
 
-	QString resolvedPath = createExportDirectory(outputPath, peerType, peerName);
-
-	// Initialize active export tracking
-	_activeExport = std::make_unique<ActiveExport>();
-	_activeExport->chatId = chatId;
-	_activeExport->chatName = peerName;
-	_activeExport->chatType = peerType;
-	_activeExport->outputPath = outputPath;
-	_activeExport->resolvedPath = resolvedPath;
-	_activeExport->exportPeerId = peerId;
-	_activeExport->startTime = QDateTime::currentDateTime();
-
-	qWarning() << "MCP: toolExportChat starting direct export for"
-	           << peerName << "(" << peerType << ") to" << resolvedPath;
-
-	// Start async message fetch chain
-	startDirectExport();
-
-	QJsonObject result;
-	result["success"] = true;
-	result["status"] = "started";
-	result["chat_id"] = chatId;
-	result["chat_name"] = peerName;
-	result["chat_type"] = peerType;
-	result["output_path"] = resolvedPath;
-	result["message"] = "Export started. Use get_export_status to poll for completion.";
-
-	return result;
+	// Continue scanning with delay (gradual, like the export itself)
+	_resumeScan->offsetId = lastIdInBatch;
+	QTimer::singleShot(1500, this, [this]() {
+		fetchNextDocumentBatch();
+	});
 }
 
 QJsonObject Server::toolGetExportStatus(const QJsonObject &args) {
 	Q_UNUSED(args);
 
-	if (!_activeExport) {
-		QJsonObject result;
-		result["success"] = true;
-		result["state"] = "idle";
-		result["message"] = "No export in progress";
+	QJsonObject result;
+	result["success"] = true;
+
+	if (_resumeScan) {
+		result["state"] = "scanning_resume";
+		result["batches_scanned"] = _resumeScan->batchesScanned;
+		result["files_matched"] = _resumeScan->matchCount;
+		result["files_total"] = _resumeScan->exportedFilenames.size();
+		result["message"] = QString("Scanning messages to detect resume point: %1/%2 files matched")
+			.arg(_resumeScan->matchCount)
+			.arg(_resumeScan->exportedFilenames.size());
 		return result;
 	}
 
-	QJsonObject result;
-	result["success"] = true;
-	result["chat_id"] = _activeExport->chatId;
-	result["chat_name"] = _activeExport->chatName;
-	result["chat_type"] = _activeExport->chatType;
-	result["output_path"] = _activeExport->outputPath;
-
-	if (_activeExport->finished) {
-		result["state"] = _activeExport->success ? "completed" : "failed";
-		result["export_success"] = _activeExport->success;
-
-		if (_activeExport->success) {
-			result["output_directory"] = _activeExport->finishedPath;
-			result["files_count"] = _activeExport->filesCount;
-			result["bytes_count"] = _activeExport->bytesCount;
-			result["messages_exported"] = _activeExport->totalMessagesFetched;
-		} else {
-			result["error"] = _activeExport->errorMessage.isEmpty()
-				? "Export failed" : _activeExport->errorMessage;
-		}
-
-		// Calculate duration
-		qint64 durationSecs = _activeExport->startTime.secsTo(QDateTime::currentDateTime());
-		result["duration_seconds"] = durationSecs;
-	} else {
+	if (_session && Core::App().exportManager().inProgress(_session)) {
 		result["state"] = "in_progress";
-		result["current_step"] = _activeExport->currentStep;
-		result["messages_fetched"] = _activeExport->totalMessagesFetched;
-		result["batches_fetched"] = _activeExport->batchesFetched;
-
-		if (_activeExport->downloadingMedia) {
-			result["phase"] = "downloading_media";
-			result["media_total"] = _activeExport->mediaItems.size();
-			result["media_downloaded"] = _activeExport->mediaDownloaded;
-			result["media_failed"] = _activeExport->mediaFailed;
-			result["media_current"] = _activeExport->currentMediaIndex;
-			result["media_total_bytes"] = _activeExport->totalMediaBytes;
-			result["media_downloaded_bytes"] = _activeExport->mediaDownloadedBytes;
-
-			// ETA calculation based on download speed
-			qint64 mediaElapsed = _activeExport->mediaPhaseStartTime.secsTo(
-				QDateTime::currentDateTime());
-			if (mediaElapsed > 0 && _activeExport->mediaDownloadedBytes > 0) {
-				double bytesPerSec = double(_activeExport->mediaDownloadedBytes) / mediaElapsed;
-				result["download_speed_bps"] = qint64(bytesPerSec);
-				int64_t remainingBytes = _activeExport->totalMediaBytes
-					- _activeExport->mediaDownloadedBytes;
-				if (remainingBytes > 0 && bytesPerSec > 0) {
-					result["estimated_seconds_remaining"] = qint64(remainingBytes / bytesPerSec);
-				} else {
-					result["estimated_seconds_remaining"] = 0;
-				}
-			}
-		} else {
-			result["phase"] = "fetching_messages";
-		}
-
-		// Elapsed time
-		qint64 elapsedSecs = _activeExport->startTime.secsTo(QDateTime::currentDateTime());
-		result["elapsed_seconds"] = elapsedSecs;
+		result["message"] = "Export in progress (managed by Export::Controller)";
+		return result;
 	}
 
+	result["state"] = "idle";
+	result["message"] = "No export in progress";
 	return result;
 }
 
@@ -380,20 +709,12 @@ QString Server::sanitizeForFilename(const QString &name) {
 	return result;
 }
 
-QString Server::createExportDirectory(
-		const QString &basePath,
-		const QString &peerType,
-		const QString &peerName) {
-	QString safeName = sanitizeForFilename(peerName);
-	QString timestamp = QDateTime::currentDateTime().toString("ddMMyyyy-HHmmss");
-	QString dirName = peerType + "-" + safeName + "-" + timestamp;
+} // namespace MCP
 
-	QDir base(basePath);
-	base.mkpath(dirName);
+// Dead parallel export code removed. Export now uses
+// Export::Manager → Export::Controller → export_api_wrap (gradual mode).
 
-	return base.absoluteFilePath(dirName);
-}
-
+#if 0 // REMOVED: old parallel export system
 void Server::startDirectExport() {
 	if (!_activeExport) return;
 	_activeExport->currentStep = 0;
@@ -1638,5 +1959,4 @@ void Server::onAllMediaDownloaded() {
 
 	writeExportFiles();
 }
-
-} // namespace MCP
+#endif // REMOVED: old parallel export system

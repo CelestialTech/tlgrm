@@ -56,6 +56,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/layers/generic_box.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/text/text_utilities.h"
 #include "ui/boxes/calendar_box.h"
 #include "ui/boxes/choose_time.h"
@@ -524,6 +525,7 @@ void SettingsWidget::setupPathAndFormat(
 		addSinglePeerFormatLabel(container);
 		addSinglePeerPathLabel(container);
 		addLimitsLabel(container);
+		addResumeFromLabel(container);
 
 		// Explanation message (without "Gradual export mode" header)
 		container->add(
@@ -1036,6 +1038,61 @@ void SettingsWidget::addLimitsLabel(
 				});
 			};
 			editTimeLimit(now, done);
+		}
+	});
+}
+
+void SettingsWidget::addResumeFromLabel(
+		not_null<Ui::VerticalLayout*> container) {
+	auto resumeLink = value() | rpl::map([](const Settings &data) {
+		return data.singlePeerResumeFromId;
+	}) | rpl::distinct_until_changed(
+	) | rpl::map([](int32 id) {
+		const auto text = id > 0
+			? QString("message #%1").arg(id)
+			: QString("beginning");
+		return Ui::Text::Link(text, u"internal:edit_resume"_q);
+	});
+
+	auto text = std::move(resumeLink) | rpl::map([](TextWithEntities link) {
+		auto result = TextWithEntities();
+		result.append(QString::fromUtf8("Resume from: "));
+		result.append(std::move(link));
+		return result;
+	});
+
+	const auto label = container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			std::move(text),
+			st::exportLocationLabel),
+		st::exportLocationPadding);
+
+	label->overrideLinkClickHandler([=](const QString &url) {
+		if (url == u"internal:edit_resume"_q) {
+			_showBoxCallback(Box([=](not_null<Ui::GenericBox*> box) {
+				box->setTitle(rpl::single(
+					QString::fromUtf8("Resume from message ID")));
+				const auto input = box->addRow(
+					object_ptr<Ui::InputField>(
+						box,
+						st::defaultInputField,
+						rpl::single(QString::fromUtf8("Message ID (0 = beginning)")),
+						readData().singlePeerResumeFromId > 0
+							? QString::number(
+								readData().singlePeerResumeFromId)
+							: QString()));
+				box->addButton(tr::lng_settings_save(), [=] {
+					const auto value = input->getLastText().toInt();
+					changeData([&](Settings &settings) {
+						settings.singlePeerResumeFromId = value;
+					});
+					box->closeBox();
+				});
+				box->addButton(tr::lng_cancel(), [=] {
+					box->closeBox();
+				});
+			}));
 		}
 	});
 }

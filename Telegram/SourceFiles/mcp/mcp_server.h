@@ -15,6 +15,7 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QTextStream>
 #include <QtCore/QHash>
+#include <QtCore/QMap>
 #include <QtNetwork/QTcpServer>
 #include <QtSql/QSqlDatabase>
 
@@ -661,26 +662,22 @@ private:
 	// Extract message data to JSON - reduces code duplication
 	QJsonObject extractMessageJson(HistoryItem *item);
 
-	// Direct export helpers (messages.getHistory based, no Takeout)
-	void startDirectExport();
-	void fetchNextMessageBatch();
-	void onMessageBatchReceived(const MTPmessages_Messages &result);
-	void writeExportFiles();
-	void writeHtmlExport();
-	static QString escapeHtml(const QString &text);
-	static QString sanitizeForFilename(const QString &name);
-	QString createExportDirectory(const QString &basePath, const QString &peerType, const QString &peerName);
-	QJsonObject mtpMessageToJson(const MTPMessage &message);
+	// Auto-detect resume point from previous gradual export output
+	int32 autoDetectResumeId(not_null<PeerData*> peer,
+		QString *exportDirOut = nullptr);
 
-	// Media download helpers (uses same code path as UI)
-	void startMediaDownloadPhase();
-	void downloadNextMediaItem();
-	void onMediaDownloadComplete(not_null<DocumentData*> document);
-	void onMediaDownloadComplete(not_null<PhotoData*> photo);
-	void onAllMediaDownloaded();
-	void generateVideoThumbnails();
-	QString generateMediaFilename(DocumentData *document, int msgId);
-	QString generateMediaFilename(PhotoData *photo, int msgId);
+	// Async resume detection by scanning channel documents via API
+	void startResumeDetection(
+		PeerData *peer,
+		const QSet<QString> &filenames,
+		const QSet<QString> &normalizedNames,
+		const QMap<qint64, QString> &sizeMap,
+		const QJsonObject &exportArgs);
+	void fetchNextDocumentBatch();
+	void processDocumentBatch(const MTPmessages_Messages &result);
+
+	// Filename sanitizer (used by autoDetectResumeId)
+	static QString sanitizeForFilename(const QString &name);
 
 	// Tool dispatcher type alias
 	using ToolHandler = std::function<QJsonObject(const QJsonObject&)>;
@@ -734,56 +731,27 @@ private:
 
 	// RPL lifetime for session event subscriptions
 
-	// Active export tracking (non-blocking export_chat via messages.getHistory)
-	struct ActiveExport {
-		qint64 chatId = 0;
-		QString chatName;
-		QString chatType;
-		QString outputPath;
-		bool finished = false;
-		bool success = false;
-		QString finishedPath;
-		int filesCount = 0;
-		int64_t bytesCount = 0;
-		QString errorMessage;
-		int currentStep = -1;
-		QDateTime startTime;
-		// Direct export fields (messages.getHistory pagination)
-		QString resolvedPath;
-		int totalMessagesFetched = 0;
-		int batchesFetched = 0;
-		MsgId nextOffsetId = MsgId(0);
-		bool allMessagesFetched = false;
-		QJsonArray messages;
-		PeerId exportPeerId = PeerId(0);
+	// Normalize filename for fuzzy matching: lowercase, strip non-alnum
+	static QString normalizeFilename(const QString &name);
 
-		// Media download tracking
-		struct MediaItem {
-			enum Type { Document, Photo };
-			Type type;
-			DocumentId documentId = 0;
-			PhotoId photoId = 0;
-			int messageId = 0;
-			int messageIndex = -1;  // index in messages QJsonArray
-			QString targetFilename;
-			bool downloaded = false;
-			bool failed = false;
-		};
-		QVector<MediaItem> mediaItems;
-		int currentMediaIndex = 0;
-		int mediaDownloaded = 0;
-		int mediaFailed = 0;
-		bool downloadingMedia = false;
-		std::unique_ptr<rpl::lifetime> mediaLifetime;
-		// Time estimation
-		int64_t totalMediaBytes = 0;
-		int64_t mediaDownloadedBytes = 0;
-		QDateTime mediaPhaseStartTime;
+	// Async resume detection state (scans channel messages to match filenames)
+	struct ResumeDetectScan {
+		PeerData *peer = nullptr;
+		QSet<QString> exportedFilenames;       // raw disk filenames
+		QSet<QString> normalizedDiskNames;     // normalized for fuzzy match
+		QMap<qint64, QString> diskSizeToName;  // file size → name (for size match)
+		int32 lowestMatchedId = INT32_MAX;
+		int32 highestMatchedId = 0;
+		int matchCount = 0;
+		int32 offsetId = 0;
+		int batchesScanned = 0;
+		int totalDocsScanned = 0;
+		int totalChannelMessages = 0;
+		int totalMessagesSeen = 0;
+		int messagesAtOrBelowResume = 0;
+		QJsonObject originalArgs;
 	};
-	std::unique_ptr<ActiveExport> _activeExport;
-	QTimer *_mediaItemTimeoutTimer = nullptr;
-
-	void onMediaItemTimeout();
+	std::unique_ptr<ResumeDetectScan> _resumeScan;
 };
 
 } // namespace MCP

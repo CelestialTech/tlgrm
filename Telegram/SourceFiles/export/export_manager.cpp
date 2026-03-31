@@ -8,10 +8,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export/export_manager.h"
 
 #include "export/export_controller.h"
+#include "export/export_settings.h"
 #include "export/view/export_view_panel_controller.h"
 #include "data/data_peer.h"
 #include "main/main_session.h"
 #include "main/main_account.h"
+#include "storage/storage_account.h"
 #include "ui/layers/box_content.h"
 #include "base/unixtime.h"
 
@@ -23,6 +25,31 @@ Manager::~Manager() = default;
 
 void Manager::start(not_null<PeerData*> peer) {
 	start(&peer->session(), peer->input());
+}
+
+void Manager::startAutoExport(
+		not_null<PeerData*> peer,
+		int32 resumeFromId,
+		int32 skipCount) {
+	if (_panel) {
+		_panel->activatePanel();
+		return;
+	}
+	auto session = &peer->session();
+	_controller = std::make_unique<Controller>(
+		&session->mtp(),
+		peer->input());
+	setupPanel(session);
+
+	auto settings = session->local().readExportSettings();
+	settings.singlePeer = peer->input();
+	settings.singlePeerResumeFromId = resumeFromId;
+	settings.singlePeerResumeSkipCount = skipCount;
+	View::ResolveSettings(session, settings);
+	qWarning() << "Export: startAutoExport peer=" << peer->name()
+	           << "resumeFromId=" << resumeFromId
+	           << "skipCount=" << skipCount;
+	_panel->startExportNow(settings);
 }
 
 void Manager::startTopic(
