@@ -386,7 +386,6 @@ QJsonObject Server::toolQueueExports(const QJsonObject &args);  // Queue multipl
 6. **Reuses Export::Output** - Same HTML/JSON output quality
 7. **Pausable/Resumable** - Can stop and continue later
 8. **State persistence** - Can survive app restarts
-9. **Resume from message ID** - `resume_from_message_id` parameter skips already-exported messages, enabling resume after crash or app restart
 
 ## Detection Avoidance Summary
 
