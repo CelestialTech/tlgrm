@@ -573,6 +573,23 @@ rbac.revokeAPIKey(keyHash);
 | `search_archive` | `query`, `chat_id?` | Search archived messages |
 | `purge_archive` | `days_to_keep` | Delete old archived messages |
 
+### Gradual Export Tools (10)
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `start_gradual_export` | `chat_id`, `resume_from_message_id?`, timing params | Start covert export with natural timing patterns |
+| `get_gradual_export_status` | - | Get current progress (state, counts, bytes) |
+| `pause_gradual_export` | - | Pause export (preserves offset state) |
+| `resume_gradual_export` | - | Resume a paused export |
+| `cancel_gradual_export` | - | Cancel export |
+| `get_gradual_export_config` | - | Get current timing/batch config |
+| `set_gradual_export_config` | timing/batch params | Update config |
+| `queue_gradual_export` | `chat_id` | Queue a chat for sequential export |
+| `get_gradual_export_queue` | - | View queued chats |
+| `get_gradual_export_queue_status` | - | Check queue progress |
+
+**Resume support**: Pass `resume_from_message_id` to `start_gradual_export` to skip messages newer than that ID, enabling resume after crash or restart. State is also auto-persisted to `mcp_gradual_archive_state.json`.
+
 ### Analytics Tools (8)
 
 | Tool | Parameters | Description |
