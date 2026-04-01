@@ -78,6 +78,9 @@ struct ProcessingState {
 
 struct ApiErrorState {
 	MTP::Error data;
+	int32 resumeMessageId = 0;
+	int messagesWritten = 0;
+	QString exportPath;
 };
 
 struct OutputErrorState {

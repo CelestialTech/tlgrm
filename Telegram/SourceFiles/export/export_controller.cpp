@@ -165,7 +165,16 @@ ControllerObject::ControllerObject(
 , _state(PasswordCheckState{}) {
 	_api.errors(
 	) | rpl::on_next([=](const MTP::Error &error) {
-		setState(ApiErrorState{ error });
+		auto errorState = ApiErrorState{ error };
+		const auto progress = _api.currentResumeProgress();
+		errorState.resumeMessageId = progress.lastMessageId;
+		errorState.messagesWritten = _messagesWritten;
+		errorState.exportPath = _settings.path;
+		qWarning() << "[Export] Error occurred, saving resume state:"
+			<< "msgId=" << progress.lastMessageId
+			<< "written=" << _messagesWritten
+			<< "path=" << _settings.path;
+		setState(std::move(errorState));
 	}, _lifetime);
 
 	_api.ioErrors(
@@ -195,7 +204,16 @@ ControllerObject::ControllerObject(
 , _topicTitle(topicTitle) {
 	_api.errors(
 	) | rpl::on_next([=](const MTP::Error &error) {
-		setState(ApiErrorState{ error });
+		auto errorState = ApiErrorState{ error };
+		const auto progress = _api.currentResumeProgress();
+		errorState.resumeMessageId = progress.lastMessageId;
+		errorState.messagesWritten = _messagesWritten;
+		errorState.exportPath = _settings.path;
+		qWarning() << "[Export] Error occurred, saving resume state:"
+			<< "msgId=" << progress.lastMessageId
+			<< "written=" << _messagesWritten
+			<< "path=" << _settings.path;
+		setState(std::move(errorState));
 	}, _lifetime);
 
 	_api.ioErrors(
@@ -621,7 +639,12 @@ void ControllerObject::exportNextDialog() {
 			if (ioCatchError(_writer->writeDialogSlice(result))) {
 				return false;
 			}
+			if (!result.list.empty()) {
+				_settings.singlePeerResumeFromId = result.list.back().id;
+			}
 			_messagesWritten += result.list.size();
+			_settings.singlePeerResumeSkipCount = _messagesWritten;
+			_settings.resumeExportDir = _settings.path;
 			setState(stateDialogs(DownloadProgress()));
 			return true;
 		}, [=] {
@@ -844,10 +867,37 @@ ProcessingState ControllerObject::stateTopic(
 }
 
 void ControllerObject::setFinishedState() {
+	auto totalFiles = _stats.filesCount();
+	auto totalBytes = _stats.bytesCount();
+
+	// For resumed exports, count ALL files in the export directory
+	// (not just the ones downloaded in this run).
+	if (_settings.singlePeerResumeSkipCount > 0
+		&& !_settings.path.isEmpty()) {
+		const QDir dir(_settings.path);
+		int diskFiles = 0;
+		int64 diskBytes = 0;
+		const auto subdirs = QStringList()
+			<< "files" << "photos" << "video_files"
+			<< "voice_messages" << "stickers" << "round_video_messages";
+		for (const auto &sub : subdirs) {
+			const QDir subDir(dir.absoluteFilePath(sub));
+			if (!subDir.exists()) continue;
+			for (const auto &fi : subDir.entryInfoList(QDir::Files)) {
+				++diskFiles;
+				diskBytes += fi.size();
+			}
+		}
+		if (diskFiles > totalFiles) {
+			totalFiles = diskFiles;
+			totalBytes = diskBytes;
+		}
+	}
+
 	setState(FinishedState{
 		_writer->mainFilePath(),
-		_stats.filesCount(),
-		_stats.bytesCount() });
+		totalFiles,
+		totalBytes });
 }
 
 Controller::Controller(
