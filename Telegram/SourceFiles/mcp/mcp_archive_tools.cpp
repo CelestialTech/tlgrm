@@ -53,14 +53,30 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 		return toolError("Resume detection already in progress");
 	}
 
+	// Validate chat_id
+	if (chatId == 0) {
+		return toolError("Missing or invalid chat_id (got 0). "
+			"Use the 'id' field from list_chats output as chat_id.");
+	}
+
 	// Resolve peer
 	PeerId peerId(chatId);
+
+	// Validate PeerId type bits before touching session data
+	if (!peerIsUser(peerId)
+		&& !peerIsChat(peerId)
+		&& !peerIsChannel(peerId)) {
+		return toolError("Invalid chat_id: unrecognized peer type. "
+			"Raw value: " + QString::number(chatId)
+			+ ", type bits: " + QString::number(
+				(peerId.value >> 48) & 0xFF));
+	}
+
 	auto peer = _session->data().peerLoaded(peerId);
 	if (!peer) {
-		auto history = _session->data().history(peerId);
-		if (history) {
-			peer = history->peer;
-		}
+		// Peer not in memory — try creating minimal PeerData
+		// (safe now that we validated the type bits above)
+		peer = _session->data().peer(peerId);
 	}
 	if (!peer) {
 		return toolError("Chat not found: " + QString::number(chatId));
@@ -85,18 +101,46 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 			QDir::Files, QDir::Time); // sorted newest-first
 
 		// Remove partially written files from interrupted export.
-		// The last file being downloaded gets truncated to a buffer
-		// boundary (power-of-2 size) when the app is killed.
-		if (!fileList.isEmpty()) {
-			const auto &newest = fileList.first();
-			QFileInfo fi(filesDir.absoluteFilePath(newest));
+		// The export downloads in 128KB chunks (kFileChunkSize in
+		// export_api_wrap.cpp). Interrupted downloads produce files
+		// whose size is an exact multiple of 128KB. Check ALL files,
+		// not just the newest — multiple interruptions leave multiple
+		// truncated files.
+		constexpr auto kChunk = 128 * 1024; // matches export_api_wrap
+		QStringList toRemove;
+		for (const auto &fn : fileList) {
+			QFileInfo fi(filesDir.absoluteFilePath(fn));
 			const auto sz = fi.size();
-			if (sz > 0 && (sz & (sz - 1)) == 0 && sz <= 64 * 1024 * 1024) {
-				qWarning() << "MCP: Removing likely truncated file:"
-				           << newest << "size:" << sz;
-				QFile::remove(fi.absoluteFilePath());
-				fileList.removeFirst();
+			if (sz <= 0 || sz > 64 * 1024 * 1024) continue;
+			if ((sz % kChunk) != 0) continue;
+
+			// Size is exact multiple of 128KB — highly suspicious.
+			// For PDFs, double-check via missing %%EOF marker.
+			bool confirmed = false;
+			if (fn.endsWith(QLatin1String(".pdf"),
+					Qt::CaseInsensitive)) {
+				QFile f(fi.absoluteFilePath());
+				if (f.open(QIODevice::ReadOnly)) {
+					const auto tail = qMin(f.size(), qint64(1024));
+					f.seek(f.size() - tail);
+					confirmed = !f.readAll().contains("%%EOF");
+				}
+			} else {
+				// Non-PDF (jpg, mp4, aac, mp3, etc.): size check
+				// alone is sufficient (P(false positive) < 0.001%)
+				confirmed = true;
 			}
+
+			if (confirmed) {
+				qWarning() << "MCP: Removing truncated file:" << fn
+				           << "size:" << sz
+				           << "chunks:" << (sz / kChunk);
+				QFile::remove(fi.absoluteFilePath());
+				toRemove.append(fn);
+			}
+		}
+		for (const auto &fn : toRemove) {
+			fileList.removeOne(fn);
 		}
 
 		if (!fileList.isEmpty()) {
@@ -137,14 +181,46 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 		}
 	}
 
+	// Auto-detect skip count from existing HTML if output_path provided
+	int32 skipCount = 0;
+	if (args.contains("messages_written")) {
+		skipCount = static_cast<int32>(
+			args["messages_written"].toVariant().toLongLong());
+	} else if (resumeFromId > 0 && args.contains("output_path")) {
+		// Count id="message" occurrences in existing HTML files
+		const QString outPath = args["output_path"].toString();
+		QDir outDir(outPath);
+		const auto htmlFiles = outDir.entryList(
+			QStringList() << "messages*.html",
+			QDir::Files);
+		QRegularExpression msgRx("id=\"message(\\d+)\"");
+		for (const auto &htmlFile : htmlFiles) {
+			QFile f(outDir.absoluteFilePath(htmlFile));
+			if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+				const auto content = f.readAll();
+				auto it = msgRx.globalMatch(content);
+				while (it.hasNext()) {
+					it.next();
+					++skipCount;
+				}
+			}
+		}
+		if (skipCount > 0) {
+			qWarning() << "MCP: Auto-detected" << skipCount
+			           << "already-exported messages from HTML files";
+		}
+	}
+
 	// Direct path: we have a resume ID or no previous export
 	auto settings = _session->local().readExportSettings();
 	settings.singlePeer = peer->input();
 	if (resumeFromId > 0) {
 		settings.singlePeerResumeFromId = resumeFromId;
+		settings.singlePeerResumeSkipCount = skipCount;
 	}
 	if (args.contains("output_path")) {
 		settings.path = args["output_path"].toString();
+		settings.resumeExportDir = args["output_path"].toString();
 	}
 	if (args.contains("format")) {
 		QString fmt = args["format"].toString().toLower();
@@ -156,12 +232,18 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 	}
 	_session->local().writeExportSettings(settings);
 
+	// Use output_path as exportDirPath if provided
+	if (exportDirPath.isEmpty() && args.contains("output_path")) {
+		exportDirPath = args["output_path"].toString();
+	}
+
 	// Open the export UI panel (same as right-click → Export chat history)
 	Core::App().exportManager().startAutoExport(
-		peer, resumeFromId, 0, exportDirPath);
+		peer, resumeFromId, skipCount, exportDirPath);
 
 	qWarning() << "MCP: toolExportChat opened export panel for"
-	           << peer->name() << "resume_from:" << resumeFromId;
+	           << peer->name() << "resume_from:" << resumeFromId
+	           << "skip:" << skipCount << "dir:" << exportDirPath;
 
 	QJsonObject result;
 	result["success"] = true;
@@ -170,9 +252,11 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 	result["chat_name"] = peer->name();
 	if (resumeFromId > 0) {
 		result["resume_from_message_id"] = resumeFromId;
+		result["messages_already_exported"] = skipCount;
 		result["message"] = QString(
-			"Export panel opened with resume from message #%1. "
-			"Click Start to begin.").arg(resumeFromId);
+			"Export started with resume from message #%1 "
+			"(%2 messages already exported).")
+			.arg(resumeFromId).arg(skipCount);
 	} else {
 		result["message"] = "Export panel opened. Configure and click Start.";
 	}
