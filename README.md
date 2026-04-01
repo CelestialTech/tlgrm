@@ -4,7 +4,7 @@ A custom fork of [Telegram Desktop](https://github.com/telegramdesktop/tdesktop)
 
 ## Features
 
-- **200+ MCP Tools** for interacting with Telegram data
+- **330+ MCP Tools** for interacting with Telegram data
 - **Direct local database access** - instant message reads without API rate limits
 - **Privacy controls** - manage who can see your data
 - **Message management** - send, edit, delete, forward, pin messages
@@ -123,6 +123,21 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 ### Archive & Analytics (17 tools)
 Tools for archiving chats, exporting data, and getting statistics about your messaging patterns.
 
+#### Export Resume (Auto)
+
+When `export_chat` is called for a channel with a previous interrupted export, Tlgrm automatically:
+
+1. Detects the existing export directory and downloaded files
+2. Removes truncated files (interrupted downloads leave files at exact multiples of 128KB)
+3. Scans channel messages via API to match files on disk using three strategies:
+   - Exact filename match
+   - NFC-normalized filename match (handles macOS HFS+ vs API encoding differences)
+   - File size match via `QMultiMap` (fallback for renamed files)
+4. Resumes the export from the detected position, reusing the same directory
+5. Shows accurate progress: `X / total` where X starts at the resume point
+
+Truncated file detection works for all attachment types: PDF, JPG, PNG, MP4, AAC, MP3, etc. PDFs get additional validation via `%%EOF` marker check.
+
 ### And 150+ More
 Including business features, wallet integration, star gifts, and more. See [CLAUDE.md](CLAUDE.md) for the complete list.
 
@@ -173,8 +188,9 @@ tdesktop/
 ├── Telegram/
 │   ├── SourceFiles/
 │   │   ├── mcp/                    # MCP server implementation
-│   │   │   ├── mcp_server.h        # Server header (200+ tool declarations)
+│   │   │   ├── mcp_server.h        # Server header (330+ tool declarations)
 │   │   │   ├── mcp_server_complete.cpp  # Tool implementations
+│   │   │   ├── mcp_archive_tools.cpp   # Export/archive with auto-resume
 │   │   │   ├── mcp_bridge.h/cpp    # IPC bridge (optional)
 │   │   │   ├── mcp_helpers.h/cpp   # Helper functions
 │   │   │   └── cache_manager.h/cpp # LRU cache

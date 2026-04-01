@@ -7,7 +7,7 @@ This is a **custom fork of Telegram Desktop** with integrated **Model Context Pr
 **Base Version:** Telegram Desktop 6.3 (commit aadc81279a)
 **Custom Additions:** MCP server integration for AI assistant access to Telegram data
 **Target Platform:** macOS (Apple Silicon + Intel)
-**Total MCP Tools:** 200+ (see Tool Categories below)
+**Total MCP Tools:** 330+ (see Tool Categories below)
 
 ---
 
@@ -526,7 +526,7 @@ print("✓ MCP integration working")
 | Category | Tools | Status |
 |----------|-------|--------|
 | Core Messaging | 6 | Implemented |
-| Archive & Export | 9 | Implemented |
+| Archive & Export | 10 | Implemented |
 | Deleted Account Archiving | 7 | Implemented |
 | Analytics | 8 | Implemented |
 | Semantic Search | 5 | Stub |
@@ -596,11 +596,12 @@ print("✓ MCP integration working")
 | `unblock_user` | Unblock a user | `blockedPeers().unblock()` |
 | `update_auto_delete_period` | Set default auto-delete | `selfDestruct().updateDefaultHistoryTTL()` |
 
-### Archive & Export Tools (9 tools) - IMPLEMENTED
+### Archive & Export Tools (10 tools) - IMPLEMENTED
 | Tool | Description |
 |------|-------------|
 | `archive_chat` | Archive a chat to local database |
-| `export_chat` | Export chat to JSON/HTML/TXT (auto-resumes interrupted exports) |
+| `export_chat` | Export chat to JSON/HTML (auto-resumes interrupted exports) |
+| `get_export_status` | Get status of ongoing export or resume scan |
 | `list_archived_chats` | List all archived chats |
 | `get_archive_stats` | Get archive statistics |
 | `configure_ephemeral_capture` | Configure disappearing message capture |
@@ -608,6 +609,27 @@ print("✓ MCP integration working")
 | `get_ephemeral_messages` | Retrieve captured ephemeral messages |
 | `search_archive` | Search archived messages |
 | `purge_archive` | Purge old archive data |
+
+**Export Resume Architecture** (`mcp_archive_tools.cpp`):
+
+When `export_chat` is called and a previous interrupted export exists (files on disk, no HTML):
+
+1. **Truncated file cleanup**: Scans ALL files in `files/` for interrupted downloads. The export system downloads in 128KB chunks (`kFileChunkSize` in `export_api_wrap.cpp`), so truncated files have sizes that are exact multiples of 131072 bytes. PDFs get additional `%%EOF` validation. Works for all attachment types (PDF, JPG, MP4, AAC, MP3, etc.).
+
+2. **Async resume detection** (`startResumeDetection`/`fetchNextDocumentBatch`/`processDocumentBatch`):
+   - Fetches channel messages newest-to-oldest via `MTPmessages_GetHistory` in batches of 100
+   - Three-strategy matching: exact filename, NFC-normalized filename, file size via `QMultiMap`
+   - Early termination: stops 3 batches after first match (`batchOfFirstMatch + 3`)
+   - FLOOD_WAIT handling with automatic retry
+   - Tracks `highestMatchedId`, `lowestMatchedId`, and progress counters
+
+3. **Resume execution**: Passes `resumeFromId`, `skipCount`, and `exportDirPath` to `Export::Manager::startAutoExport`. The export controller sets `_messagesWritten = skipCount` so the progress bar starts at the correct position (e.g., `1154 / 2502`).
+
+4. **Directory reuse**: `NormalizePath()` in `export_output_abstract.cpp` checks `settings.resumeExportDir` and reuses the existing directory instead of creating a new timestamped one.
+
+5. **Completion stats**: `setFinishedState()` in `export_controller.cpp` counts actual files on disk (across `files/`, `photos/`, `video_files/`, `stickers/`, etc.) instead of only the current run's download count.
+
+**Key files**: `mcp_archive_tools.cpp` (resume detection, truncated file cleanup), `export_controller.cpp` (progress tracking, completion stats), `export_api_wrap.cpp` (message fetching with `largestIdPlusOne`), `export_output_abstract.cpp` (directory reuse), `export_settings.h` (`singlePeerResumeFromId`, `singlePeerResumeSkipCount`, `resumeExportDir`).
 
 ### Deleted Account Archiving Tools (7 tools) - IMPLEMENTED
 | Tool | Description |
