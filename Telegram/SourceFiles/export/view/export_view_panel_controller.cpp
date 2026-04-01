@@ -226,7 +226,19 @@ void PanelController::createPanel() {
 	}, _panel->lifetime());
 	_panelCloseEvents.fire(_panel->closeEvents());
 
-	showSettings();
+	if (_settings->singlePeerResumeFromId > 0
+		&& _settings->onlySinglePeer()
+		&& !_settings->resumeExportDir.isEmpty()
+		&& QDir(_settings->resumeExportDir).exists()) {
+		qWarning() << "[Export] Interrupted export detected, auto-resuming:"
+			<< "msgId=" << _settings->singlePeerResumeFromId
+			<< "written=" << _settings->singlePeerResumeSkipCount
+			<< "dir=" << _settings->resumeExportDir;
+		showProgress();
+		_process->startExport(*_settings, PrepareEnvironment(_session));
+	} else {
+		showSettings();
+	}
 }
 
 void PanelController::showSettings() {
@@ -363,7 +375,7 @@ void PanelController::showProgress() {
 	_settings->availableAt = 0;
 	ClearSuggestStart(_session);
 
-	_panel->setTitle(tr::lng_export_progress_title());
+	_panel->setTitle(rpl::single(u"Exporting"_q));
 
 	auto progress = base::make_unique_q<ProgressWidget>(
 		_panel.get(),
@@ -465,10 +477,25 @@ void PanelController::updateState(State &&state) {
 	}
 	_state = std::move(state);
 	if (const auto apiError = std::get_if<ApiErrorState>(&_state)) {
+		if (apiError->resumeMessageId > 0) {
+			_settings->singlePeerResumeFromId = apiError->resumeMessageId;
+			_settings->singlePeerResumeSkipCount = apiError->messagesWritten;
+			_settings->resumeExportDir = apiError->exportPath;
+			qWarning() << "[Export] Persisting resume state on error:"
+				<< "msgId=" << apiError->resumeMessageId
+				<< "written=" << apiError->messagesWritten
+				<< "dir=" << apiError->exportPath;
+			saveSettings();
+		}
 		showError(*apiError);
 	} else if (const auto error = std::get_if<OutputErrorState>(&_state)) {
 		showError(*error);
 	} else if (v::is<FinishedState>(_state)) {
+		_settings->singlePeerResumeFromId = 0;
+		_settings->singlePeerResumeSkipCount = 0;
+		_settings->resumeExportDir.clear();
+		_settings->path.clear();
+		saveSettings();
 		_panel->setTitle(tr::lng_export_title());
 		_panel->setHideOnDeactivate(false);
 	} else if (v::is<CancelledState>(_state)) {
