@@ -6564,7 +6564,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_passport_app_out_of_date" = "Sorry, your Telegram app is out of date and can't handle this request. Please update Telegram.";
 
 "lng_export_title" = "Export Your Data";
-"lng_export_progress_title" = "Exporting your data";
+"lng_export_progress_title" = "Exporting";
 "lng_export_option_info" = "Account information";
 "lng_export_option_info_about" = "Your chosen display name, username, phone number and profile photos.";
 "lng_export_option_contacts" = "Contacts list";
