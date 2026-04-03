@@ -214,11 +214,11 @@ void PanelController::ensurePanel() {
 	_panel = base::make_unique_q<Ui::SeparatePanel>(Ui::SeparatePanelArgs{
 		.onAllSpaces = true,
 	});
-	_panel->setTitle((singleTopic
-		? tr::lng_export_header_topic
+	_panel->setTitle(rpl::single(singleTopic
+		? u"Export Topic"_q
 		: singlePeer
-		? tr::lng_export_header_chats
-		: tr::lng_export_title)());
+		? u"Export Chat"_q
+		: u"Export"_q));
 	_panel->setInnerSize(singlePeer
 		? st::exportSinglePeerPanelSize
 		: st::exportPanelSize);
@@ -497,7 +497,7 @@ void PanelController::updateState(State &&state) {
 		_settings->singlePeerResumeSkipCount = 0;
 		_settings->resumeExportDir.clear();
 		saveSettings();
-		_panel->setTitle(tr::lng_export_title());
+		_panel->setTitle(rpl::single(u"Export Complete"_q));
 		_panel->setHideOnDeactivate(false);
 	} else if (const auto cancelled = std::get_if<CancelledState>(&_state)) {
 		// Persist resume state so cancelled exports can be resumed
