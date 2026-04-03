@@ -17,6 +17,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 | **Privacy & security** | Navigate through nested settings menus, one option at a time | Read and write all privacy settings in one call: last seen, profile photo, phone number, forwards, birthday, bio. List all active sessions with device info and IP addresses, terminate any session, manage block lists — all scriptable |
 | **Message operations** | Right-click context menus, one message at a time | Programmatic edit, delete, forward, pin, unpin, and react across any chat. Batchable from scripts — process hundreds of messages in a loop |
 | **Data access speed** | N/A | Direct in-process reads from the local database. Zero network overhead for reads. 20-100x faster than Telegram Bot API for equivalent operations |
+| **AI/ML processing** | None | Optional Python MCP server adds semantic search (find messages by meaning), intent classification, topic extraction, and conversation summarization — GPU-accelerated on Apple Silicon |
 
 ### Use cases
 
@@ -84,42 +85,48 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 - **330+ programmatic tools** accessible via JSON-RPC over IPC socket or stdio
 - **Direct database reads** — 20-100x faster than Bot API, zero network overhead
 - **Works with any client** — shell scripts, Python bots, AI assistants (Claude, local LLMs), cron jobs, custom tools
+- **Python MCP server** — optional companion with semantic search, intent classification, topic extraction, and conversation summarization (Apple Silicon GPU accelerated)
 
 ---
 
 ## Architecture
 
 ```
-              ┌──────────────────────────────────────┐
-              │  Scripts / Bots / AI / Any MCP Client │
-              └──────────────────┬───────────────────┘
-                                │ JSON-RPC 2.0
-                    ┌───────────┴───────────┐
-                    │                       │
-              ┌─────▼─────┐          ┌──────▼──────┐
-              │  --mcp    │          │ IPC Bridge  │
-              │  (stdio)  │          │ (Unix sock) │
-              └─────┬─────┘          └──────┬──────┘
-                    │                       │
-              ┌─────▼───────────────────────▼─────┐
-              │       C++ MCP Server (330+)       │
-              │  ┌─────────┐  ┌───────────────┐   │
-              │  │Messaging│  │Export & Archive│   │
-              │  │Analytics│  │Privacy/Security│   │
-              │  └─────────┘  └───────────────┘   │
-              └───────────────┬───────────────────┘
-                              │ Direct Access
-              ┌───────────────▼───────────────────┐
-              │        Telegram Desktop           │
-              │  • Local DB  • MTProto API        │
-              │  • Session   • Media Files        │
-              └───────────────────────────────────┘
+                ┌──────────────────────────────────────┐
+                │  Scripts / Bots / AI / Any MCP Client │
+                └──────────────────┬───────────────────┘
+                                   │ JSON-RPC 2.0
+            ┌──────────────────────┼──────────────────────┐
+            │                      │                      │
+      ┌─────▼─────┐        ┌──────▼──────┐       ┌───────▼───────┐
+      │  --mcp    │        │ IPC Bridge  │       │ Python MCP    │
+      │  (stdio)  │        │ (Unix sock) │       │ (AI/ML layer) │
+      └─────┬─────┘        └──────┬──────┘       └───────┬───────┘
+            │                     │                      │ IPC
+            │                     │               ┌──────▼──────┐
+            │                     │               │ Semantic     │
+            │                     │               │ search, NLP  │
+            │                     │               │ Apple Silicon│
+      ┌─────▼─────────────────────▼─────┐         └──────┬──────┘
+      │       C++ MCP Server (330+)     │◄───────────────┘
+      │  ┌─────────┐  ┌───────────────┐ │
+      │  │Messaging│  │Export & Archive│ │
+      │  │Analytics│  │Privacy/Security│ │
+      │  └─────────┘  └───────────────┘ │
+      └───────────────┬─────────────────┘
+                      │ Direct Access
+      ┌───────────────▼───────────────────┐
+      │        Telegram Desktop           │
+      │  • Local DB  • MTProto API        │
+      │  • Session   • Media Files        │
+      └───────────────────────────────────┘
 ```
 
 ### How It Works
 
 1. **Embedded C++ MCP server** runs inside the Telegram Desktop process with direct memory access to all data
 2. **IPC bridge** (`/tmp/tdesktop_mcp.sock`) — always on, any local process can connect and call tools
+3. **Python MCP server** (optional) — connects to C++ server via IPC, adds semantic search, intent classification, topic extraction, conversation summarization with Apple Silicon GPU acceleration
 3. **Stdio transport** (`--mcp` flag) — for Claude Desktop or other MCP clients that use stdin/stdout
 4. **Local reads** hit the database directly (no network, no rate limits)
 5. **Writes and exports** use the MTProto API through tdesktop's existing connection
