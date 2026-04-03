@@ -32,32 +32,26 @@ A comprehensive **Model Context Protocol (MCP)** integration for Telegram, featu
 
 ### What Makes This Different
 
-This project provides **two complementary MCP components** that work together:
+A custom Telegram Desktop fork with an embedded C++ MCP server providing direct access to all Telegram functionality:
 
-#### 1. **C++ MCP Server** (Fast Native Access)
-- ⚡ **10-100x faster** than API-based solutions
-- 💾 **Direct SQLite database access** - instant message retrieval
-- 🚫 **No rate limits** - unlimited local queries
-- 📦 **Single binary** - embedded in Telegram Desktop
-- 🔓 **Full MTProto access** - same capabilities as Telegram Desktop
-
-#### 2. **Python MCP Server** (AI/ML Intelligence)
-- 🧠 **Semantic search** - find messages by meaning, not keywords
-- 🎯 **Intent classification** - understand what users want
-- 📊 **Topic extraction** - identify conversation themes
-- 💬 **Conversation summarization** - AI-powered summaries
-- 🔌 **IPC bridge** - connects to C++ server for fast data access
-- 🍎 **Apple Silicon optimized** - MPS GPU acceleration
+- **330+ MCP tools** for messaging, export, archiving, analytics, privacy, and security
+- **Direct in-process access** to tdesktop data structures and MTProto API
+- **No rate limits** on local database reads (instant message retrieval)
+- **Gradual export system** that bypasses takeout sessions with automatic resume
+- **Deleted account archiving** with name detection and media preservation
+- **Always-on IPC bridge** at `/tmp/tdesktop_mcp.sock` for external tool access
+- **Stdio transport** for Claude Desktop integration (`--mcp` flag)
 
 ### Key Features
 
 - **Direct Database Access**: Read messages instantly from local SQLite database (no API calls)
 - **Native Integration**: MCP server runs within Telegram Desktop process
-- **AI/ML Intelligence**: Semantic search, intent classification, topic extraction via Python
-- **Complementary Design**: C++ handles speed, Python handles AI understanding
-- **Full Protocol Support**: JSON-RPC 2.0 over stdio transport
-- **Production Ready**: Both C++ and Python components deployable
-- **Unified Build System**: Single Makefile for both components
+- **330+ MCP Tools**: Messaging, export, archiving, analytics, privacy, security, and more
+- **Gradual Export with Resume**: Export any chat/channel to HTML/JSON with automatic resume on interruption
+- **Deleted Account Archiving**: Detect and archive messages from deleted accounts before they disappear
+- **IPC Bridge**: Always-on Unix socket at `/tmp/tdesktop_mcp.sock` for external tool access
+- **Full Protocol Support**: JSON-RPC 2.0 over stdio and IPC transports
+- **Production Ready**: Real Telegram API integration, not stubs
 
 ---
 
@@ -67,57 +61,49 @@ This project provides **two complementary MCP components** that work together:
 ┌─────────────────────────────────────────────────────────┐
 │                   Claude / AI Model                      │
 └───────────────────────┬─────────────────────────────────┘
-                        │ MCP Protocol (JSON-RPC 2.0)
-                        │
-        ┌───────────────┴──────────────┐
-        │                              │
-┌───────▼──────────┐          ┌───────▼────────────┐
-│  C++ MCP Server  │          │ Python MCP Server  │
-│  (Fast Access)   │          │ (AI/ML Layer)      │
-│                  │◄────IPC──┤                    │
-│  Embedded in     │          │ Semantic search    │
-│  Telegram        │          │ Intent classify    │
-│  Desktop         │          │ Topic extraction   │
-└───────┬──────────┘          └────────┬───────────┘
-        │ Direct Access                │
-┌───────▼──────────┐          ┌────────▼───────────┐
-│  Telegram Data   │          │  AI Models & VecDB │
-│  • SQLite DB     │          │  • ChromaDB        │
-│  • Session Data  │          │  • Transformers    │
-│  • Media Files   │          │  • Embeddings      │
-│  • MTProto API   │          │  • Apple Silicon   │
-└──────────────────┘          └────────────────────┘
+                     ┌──────────────────────┐
+                     │   Claude Desktop /   │
+                     │   External Tools     │
+                     └──────────┬───────────┘
+                                │ JSON-RPC 2.0
+                    ┌───────────┴───────────┐
+                    │                       │
+              ┌─────▼─────┐          ┌──────▼──────┐
+              │  --mcp    │          │ IPC Bridge  │
+              │  (stdio)  │          │ (Unix sock) │
+              └─────┬─────┘          └──────┬──────┘
+                    │                       │
+              ┌─────▼───────────────────────▼─────┐
+              │       C++ MCP Server (330+)       │
+              │  ┌─────────┐  ┌───────────────┐   │
+              │  │Messaging│  │Export & Archive│   │
+              │  │Analytics│  │Privacy/Security│   │
+              │  └─────────┘  └───────────────┘   │
+              └───────────────┬───────────────────┘
+                              │ Direct Access
+              ┌───────────────▼───────────────────┐
+              │        Telegram Desktop           │
+              │  • Local DB  • MTProto API        │
+              │  • Session   • Media Files        │
+              └───────────────────────────────────┘
 ```
 
 ### How It Works
 
-1. **C++ Server**: Embedded in Telegram Desktop, provides fast database access
-2. **Python Server**: Runs separately, adds AI/ML intelligence to messages
-3. **IPC Communication**: Unix socket (`/tmp/telegram_mcp.sock`) connects both
-4. **Complementary**: C++ fetches data fast, Python analyzes with AI
-5. **Claude Desktop**: Can connect to either or both servers via MCP protocol
-6. **Unified Management**: Single `make` command controls both components
+1. **Embedded C++ MCP server** runs inside the Telegram Desktop process
+2. **IPC bridge** (`/tmp/tdesktop_mcp.sock`) accepts connections from external tools (always on)
+3. **Stdio transport** (`--mcp` flag) for direct Claude Desktop integration
+4. **Direct memory access** to all tdesktop data structures and APIs
+5. **No rate limits** on local database reads; MTProto API for writes/exports
 
----
+### Performance
 
-## Performance
-
-### C++ vs Python (Bot API)
-
-| Operation | Python (Bot API) | **C++ (Direct DB)** | Speedup |
-|-----------|-----------------|---------------------|---------|
+| Operation | Bot API | **Tlgrm MCP** | Speedup |
+|-----------|---------|---------------|---------|
 | Read 100 messages | 200-500ms | **5-10ms** | **20-100x** |
 | Search messages | 300-800ms | **10-20ms** | **15-80x** |
 | List chats | 100-200ms | **2-5ms** | **20-100x** |
-| Rate limits | 30 msg/sec | **Unlimited** | **∞** |
-| Network required | Yes | **No (local)** | N/A |
-
-### Why So Fast?
-
-1. **No Network Calls**: Direct SQLite access to local database
-2. **No Serialization Overhead**: Native C++ to C++ access within same process
-3. **No Rate Limits**: All data already synced locally
-4. **Optimized Queries**: Direct access to tdesktop's data structures
+| Rate limits | 30 msg/sec | **Unlimited** | N/A |
 
 ---
 
@@ -994,48 +980,39 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system architecture details.
 
 ## MCP Tools & Features
 
-### Available Tools
+### Available Tools (330+)
 
-Both C++ and Python implementations expose these MCP tools:
+The C++ MCP server exposes 330+ tools with real Telegram API integration:
 
-| Tool | Parameters | Description | Status |
-|------|------------|-------------|--------|
-| `list_chats()` | - | Get all accessible chats | ✅ Implemented (stub) |
-| `get_chat_info(chat_id)` | `chat_id: string` | Detailed chat information | ✅ Implemented (stub) |
-| `read_messages(chat_id, limit)` | `chat_id: string`<br>`limit: int = 20` | Fetch message history | ✅ Implemented (stub) |
-| `send_message(chat_id, text)` | `chat_id: string`<br>`text: string` | Send message to chat | ✅ Implemented (stub) |
-| `get_user_info(user_id)` | `user_id: string` | User details | ✅ Implemented (stub) |
-| `get_chat_members(chat_id)` | `chat_id: string` | List group/channel members | ✅ Implemented (stub) |
-| `search_messages(chat_id, query)` | `chat_id: string`<br>`query: string` | Search messages | ✅ Implemented (stub) |
+| Category | Tools | Status |
+|----------|-------|--------|
+| Core Messaging | `list_chats`, `get_chat_info`, `read_messages`, `send_message`, `search_messages`, `get_user_info` | ✅ Implemented |
+| Message Operations | `edit_message`, `delete_message`, `forward_message`, `pin_message`, `unpin_message`, `add_reaction`, `rename_chat` | ✅ Implemented |
+| Export & Archive | `export_chat`, `get_export_status`, `archive_chat`, `list_archived_chats`, `get_archive_stats`, `search_archive`, `purge_archive` | ✅ Implemented |
+| Deleted Account Archiving | `list_deleted_accounts`, `archive_deleted_accounts`, `get_deleted_archive_status`, `pause_deleted_archive`, `resume_deleted_archive`, `cancel_deleted_archive`, `list_deleted_channels` | ✅ Implemented |
+| Profile Settings | `get_profile_settings`, `update_profile_bio` | ✅ Implemented |
+| Privacy Settings | `get_privacy_settings`, `update_last_seen_privacy`, `update_profile_photo_privacy`, `update_phone_number_privacy`, `update_forwards_privacy`, `update_birthday_privacy`, `update_about_privacy`, `get_blocked_users` | ✅ Implemented |
+| Security | `get_security_settings`, `get_active_sessions`, `terminate_session`, `block_user`, `unblock_user`, `update_auto_delete_period` | ✅ Implemented |
+| Analytics | `get_message_stats`, `get_user_activity`, `get_chat_activity`, `get_time_series`, `get_top_users`, `get_top_words`, `export_analytics`, `get_trends` | ✅ Implemented |
+| System | `get_cache_stats`, `get_server_info`, `get_audit_log`, `health_check` | ✅ Implemented |
+| Premium/Business/Wallet/Stars | 130+ tools | Stub |
 
-**Note:** Currently returns stub data. Connecting to real tdesktop data is next phase.
-See [docs/IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md) for complete status.
-
-### MCP Resources
-
-URI-based access to Telegram data:
-
-- `telegram://chats` - List of all chats
-- `telegram://messages/{chat_id}` - Message history for specific chat
-- `telegram://chat/{chat_id}/info` - Chat information
-
-### MCP Prompts
-
-Pre-configured prompt templates:
-
-- **`summarize_chat(chat_id, limit)`** - "Analyze the last {limit} messages in chat {chat_id} and provide a summary"
+**Export features**: `export_chat` supports HTML and JSON formats, auto-detects and resumes interrupted exports, reuses existing directories, tracks progress with accurate message counts, and works for channels, groups, and private chats.
 
 ### Example Usage with Claude
 
 ```
-You: "Claude, list my Telegram chats"
-Claude: Uses list_chats() tool → Returns chat list
+You: "Export the WSJ channel to HTML"
+Claude: Uses export_chat(chat_id=562951444505165, format="html")
+→ Auto-detects previous export, resumes from message #416, shows progress panel
 
-You: "Read the last 10 messages from 'Family' chat"
-Claude: Uses read_messages() tool → Returns messages
+You: "List all chats with deleted accounts"
+Claude: Uses list_deleted_accounts()
+→ Scans all chats, returns deleted account peers with message previews
 
-You: "Send a message to Alice saying 'Hello!'"
-Claude: Uses send_message() tool → Sends message
+You: "Archive messages from deleted account 768828198"
+Claude: Uses archive_deleted_accounts(peer_id=768828198)
+→ Forwards all messages to an archive group, detects peer name
 ```
 
 ---
@@ -1587,55 +1564,39 @@ cmake --build . --config Release
 ### Phase 1: Core Functionality ✅ COMPLETE
 
 - [x] C++ MCP server embedded in tdesktop
-- [x] JSON-RPC protocol implementation
-- [x] Stdio transport
-- [x] Basic tools (list_chats, read_messages, send_message)
-- [x] Python fallback implementation
+- [x] JSON-RPC 2.0 protocol implementation
+- [x] Stdio transport (for Claude Desktop)
+- [x] IPC bridge transport (Unix socket for external tools)
+- [x] 330+ tool registrations
 - [x] Patch system for updates
-- [x] Comprehensive documentation
 
-**Status:** Production-ready for MCP protocol, stub data
+### Phase 2: Data Integration ✅ COMPLETE
 
----
+- [x] Connect MCP server to tdesktop session
+- [x] Real message retrieval from local database
+- [x] Real message sending via MTProto
+- [x] User/chat/channel info from tdesktop data structures
+- [x] Privacy, security, and profile settings
+- [x] Message search (local database)
+- [x] 54+ tools with real API integration
 
-### Phase 2: Data Integration 🚧 IN PROGRESS
+### Phase 3: Export & Archiving ✅ COMPLETE
 
-- [ ] Connect MCP server to tdesktop session
-- [ ] Real message retrieval from SQLite
-- [ ] Real message sending via MTProto
-- [ ] User/chat info from tdesktop data structures
-- [ ] Chat member listing
-- [ ] Message search (local database)
+- [x] Gradual export system (bypasses takeout sessions)
+- [x] HTML and JSON export formats
+- [x] Auto-resume interrupted exports
+- [x] Deleted account detection and archiving
+- [x] Truncated file cleanup on resume
+- [x] Progress tracking with accurate message counts
+- [x] Topic export support
 
-**Estimated Effort:** 8-16 hours
-**Complexity:** Medium (requires understanding tdesktop data layer)
-
----
-
-### Phase 3: Advanced Features 📋 PLANNED
+### Phase 4: Advanced Features 📋 PLANNED
 
 - [ ] Voice transcription (Whisper.cpp integration)
 - [ ] Semantic search (FAISS vector index)
-- [ ] Media processing (OCR with Tesseract)
-- [ ] Document text extraction
-- [ ] Image analysis
-- [ ] Real-time notifications (SSE transport)
 - [ ] HTTP transport support
-
-**Estimated Effort:** 40-60 hours
-**Complexity:** High (third-party library integration)
-
----
-
-### Phase 4: Production Hardening 🔮 FUTURE
-
-- [ ] Comprehensive test suite
-- [ ] Performance profiling and optimization
-- [ ] Security audit
-- [ ] CI/CD pipeline
-- [ ] Auto-update mechanism
-- [ ] Crash reporting
-- [ ] User documentation site
+- [ ] Real-time notifications (SSE)
+- [ ] Remaining 130+ stub tool implementations
 
 ---
 
@@ -1643,10 +1604,10 @@ cmake --build . --config Release
 
 ### Current Security Model
 
-- **No Network Exposure**: MCP server only accessible via stdio (local process)
-- **No Authentication Required**: Trusts calling process (Claude Desktop)
+- **No Network Exposure**: MCP server accessible via stdio (Claude Desktop) and local Unix socket (`/tmp/tdesktop_mcp.sock`)
+- **No Authentication Required**: Trusts calling process
 - **Session Isolation**: Each Telegram session is separate
-- **API Credentials**: Stored securely in compiled binary and macOS Keychain
+- **tdata Encryption**: Session data encrypted with local key (no macOS Keychain)
 - **Data Privacy**: All data stays local (no external API calls)
 
 ### Future Security Enhancements (if HTTP transport added)
@@ -1749,18 +1710,14 @@ When reporting issues, please include:
 
 ## Project Status
 
-**Version**: 1.0.0
-**Base**: Telegram Desktop 6.3 (commit aadc81279a)
-**Last Updated**: 2025-11-16
-**Platform**: macOS (Apple Silicon + Intel)
-**Status**: ✅ Production-ready MCP protocol, 🚧 Data integration in progress
+**Version**: 6.9.5
+**Base**: Telegram Desktop 6.5.1
+**Last Updated**: 2026-04-02
+**Platform**: macOS (Apple Silicon)
+**MCP Tools**: 330+ registered (54+ fully implemented)
 
 **Build Status**: ✅ Compiles successfully
-**Test Status**: ✅ MCP protocol working
-**Documentation**: ✅ Complete
-
----
-
-Built with ❤️ for the AI-assisted future
-
----
+**MCP Protocol**: ✅ Fully working (stdio + IPC)
+**Data Integration**: ✅ Real Telegram API
+**Export System**: ✅ Gradual export with resume
+**Deleted Account Archiving**: ✅ Fully working
