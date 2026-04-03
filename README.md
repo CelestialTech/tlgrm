@@ -1,7 +1,5 @@
 # Tlgrm: Telegram Desktop with Data Export, Archiving & Programmatic Access
 
-<img width="2912" height="1632" alt="image" src="https://github.com/user-attachments/assets/e9fe3bfe-0f47-409c-a91f-acacc865a0ee" />
-
 A custom fork of Telegram Desktop that gives you full control over your data. Export privacy-restricted channels, archive messages from deleted accounts, and access everything programmatically through a built-in [MCP](https://modelcontextprotocol.io/) server — from scripts, local bots, AI assistants, or any tool that speaks JSON-RPC.
 
 ### Why Tlgrm over stock Telegram Desktop
