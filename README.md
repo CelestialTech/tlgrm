@@ -1,14 +1,59 @@
-# Telegram MCP: Complete AI Integration
+# Tlgrm: Telegram Desktop with Data Export, Archiving & Programmatic Access
 
 <img width="2912" height="1632" alt="image" src="https://github.com/user-attachments/assets/e9fe3bfe-0f47-409c-a91f-acacc865a0ee" />
 
-A comprehensive **Model Context Protocol (MCP)** integration for Telegram, featuring a **high-performance C++ MCP server** embedded directly into a modified Telegram Desktop with **complementary Python AI/ML capabilities**.
+A custom fork of Telegram Desktop that gives you full control over your data. Export privacy-restricted channels, archive messages from deleted accounts, and access everything programmatically through a built-in [MCP](https://modelcontextprotocol.io/) server — from scripts, local bots, AI assistants, or any tool that speaks JSON-RPC.
+
+### Why Tlgrm over stock Telegram Desktop
+
+| | Telegram Desktop | Tlgrm |
+|---|---|---|
+| **Export restricted content** | Channels with "saving content is restricted" block all export — takeout, copy, forward all disabled | Reads directly from local database, bypassing client-side forwarding restrictions. Export full channel histories including media, documents, and messages that stock Telegram refuses to touch |
+| **Export reliability** | Takeout-only: 24-hour wait, no resume capability, any crash or network drop means starting over from zero | Gradual export: no takeout wait, auto-detects interrupted exports on disk, counts already-exported messages, resumes from exact position. Reuses existing directory — nothing is re-downloaded |
+| **Deleted account recovery** | When someone deletes their account, all messages in your private chats vanish instantly — no warning, no backup, no way to recover | Scans all chats for deleted accounts, recovers the person's real name from conversation patterns (greetings, email signatures, introductions), archives every message with full media (photos, videos, documents) to a dedicated group |
+| **Disappearing messages** | Self-destructing messages vanish on schedule with no trace | Configurable capture of disappearing messages before they self-destruct — preserves content that would otherwise be lost |
+| **Programmatic access** | Zero — all interaction is manual through the GUI | Always-on IPC socket (`/tmp/tdesktop_mcp.sock`) exposes 330+ tools via JSON-RPC. Any process can connect: shell scripts, Python bots, Node.js services, cron jobs, AI assistants, monitoring dashboards |
+| **Analytics** | None — you can scroll through messages manually | Per-chat and per-user statistics: message volume over time, activity heatmaps, word frequency analysis, top contributors, trending topics. All queryable programmatically |
+| **Privacy & security** | Navigate through nested settings menus, one option at a time | Read and write all privacy settings in one call: last seen, profile photo, phone number, forwards, birthday, bio. List all active sessions with device info and IP addresses, terminate any session, manage block lists — all scriptable |
+| **Message operations** | Right-click context menus, one message at a time | Programmatic edit, delete, forward, pin, unpin, and react across any chat. Batchable from scripts — process hundreds of messages in a loop |
+| **Data access speed** | N/A | Direct in-process reads from the local database. Zero network overhead for reads. 20-100x faster than Telegram Bot API for equivalent operations |
+
+### Use cases
+
+#### Data preservation and export
+
+**Export channels with forwarding restrictions** — Many news channels, paid channels, and corporate groups disable content saving. Stock Telegram enforces this at the client level — you can't copy text, forward messages, or export even via takeout. Tlgrm reads from the locally synced database where these client-side restrictions don't apply. You see the content in your app — now you can export it too. Full history, all media, HTML or JSON format.
+
+**Resume interrupted exports** — You're exporting a channel with 5,000 messages and 800 file attachments. Three hours in, your laptop goes to sleep, the network drops, or the app crashes. With stock Telegram, you start over. Tlgrm scans the export directory on disk, finds existing HTML files, counts how many messages were already written, and resumes from exactly where it stopped. If file downloads were interrupted mid-transfer, it detects truncated files (128KB-aligned, missing PDF EOF markers) and re-downloads only those.
+
+**Archive messages from deleted accounts** — Someone you've been chatting with for years deletes their Telegram account. Without warning, every message they ever sent you disappears. Tlgrm can scan your entire chat list for deleted accounts, detect who the person was by analyzing message patterns (how you addressed them, greeting patterns, email signatures in their messages), and forward every message — text, photos, videos, voice messages, documents — to an archive group. The archive group is auto-named with the detected person's name and their peer ID.
+
+**Capture disappearing messages** — Channels and chats with auto-delete timers cause messages to vanish on schedule. Tlgrm can intercept and preserve this content before the timer expires.
+
+#### Automation and scripting
+
+**Build local bots and tools** — The IPC socket at `/tmp/tdesktop_mcp.sock` accepts JSON-RPC connections from any local process. No Telegram Bot API token needed, no rate limits on reads, no bot registration. You operate as your own account with full access to your data. Examples:
+- A Python script that exports a list of channels every night via cron
+- A monitoring daemon that watches specific chats and sends alerts
+- A dashboard that aggregates message statistics across your groups
+- A backup tool that incrementally archives important chats
+
+**Integrate with AI assistants** — The MCP server speaks the [Model Context Protocol](https://modelcontextprotocol.io/), so any MCP-compatible tool can use your Telegram as a data source. Claude Desktop can connect directly via stdio (`--mcp` flag). Local LLMs, custom agents, or any tool that implements the MCP client spec can connect via the IPC socket. The AI is one possible client — the interface is general-purpose.
+
+**Automate account management** — Script your privacy settings: tighten permissions before a trip, audit active sessions from all devices, bulk-manage your block list, set auto-delete periods. Run it on a schedule or trigger it from a workflow.
+
+#### Security and privacy
+
+**Audit active sessions** — List every device logged into your account with IP addresses, device names, app versions, and last active timestamps. Identify sessions you don't recognize. Terminate any session with a single command. No need to navigate through settings menus.
+
+**Manage privacy programmatically** — Read your current privacy configuration for all categories (last seen, profile photo, phone number, forwarded messages, birthday, bio) and change any of them. Set different rules for different contexts — contacts only, close friends, or nobody.
+
+**Monitor and control** — Check auto-delete periods across chats, review blocked users, verify that your security settings match your expectations. Scriptable for regular audits.
 
 [![MCP](https://img.shields.io/badge/MCP-1.0-green.svg)](https://modelcontextprotocol.io/)
 [![C++20](https://img.shields.io/badge/C++-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
-[![Base](https://img.shields.io/badge/base-tdesktop%206.3-blue.svg)](https://github.com/telegramdesktop/tdesktop)
+[![Base](https://img.shields.io/badge/base-tdesktop%206.5.1-blue.svg)](https://github.com/telegramdesktop/tdesktop)
 
 ---
 
@@ -30,41 +75,24 @@ A comprehensive **Model Context Protocol (MCP)** integration for Telegram, featu
 
 ## Overview
 
-### What Makes This Different
+### Key capabilities
 
-A custom Telegram Desktop fork with an embedded C++ MCP server providing direct access to all Telegram functionality:
-
-- **330+ MCP tools** for messaging, export, archiving, analytics, privacy, and security
-- **Direct in-process access** to tdesktop data structures and MTProto API
-- **No rate limits** on local database reads (instant message retrieval)
-- **Gradual export system** that bypasses takeout sessions with automatic resume
-- **Deleted account archiving** with name detection and media preservation
-- **Always-on IPC bridge** at `/tmp/tdesktop_mcp.sock` for external tool access
-- **Stdio transport** for Claude Desktop integration (`--mcp` flag)
-
-### Key Features
-
-- **Direct Database Access**: Read messages instantly from local SQLite database (no API calls)
-- **Native Integration**: MCP server runs within Telegram Desktop process
-- **330+ MCP Tools**: Messaging, export, archiving, analytics, privacy, security, and more
-- **Gradual Export with Resume**: Export any chat/channel to HTML/JSON with automatic resume on interruption
-- **Deleted Account Archiving**: Detect and archive messages from deleted accounts before they disappear
-- **IPC Bridge**: Always-on Unix socket at `/tmp/tdesktop_mcp.sock` for external tool access
-- **Full Protocol Support**: JSON-RPC 2.0 over stdio and IPC transports
-- **Production Ready**: Real Telegram API integration, not stubs
+- **Export any channel** including privacy-restricted ones where stock Telegram blocks saving, copying, and forwarding
+- **Resume interrupted exports** — auto-detects previous exports on disk and continues from exact position
+- **Archive deleted account messages** — scan, detect, and preserve messages before they vanish, with automatic name recovery
+- **Capture disappearing messages** before self-destruct timers expire
+- **330+ programmatic tools** accessible via JSON-RPC over IPC socket or stdio
+- **Direct database reads** — 20-100x faster than Bot API, zero network overhead
+- **Works with any client** — shell scripts, Python bots, AI assistants (Claude, local LLMs), cron jobs, custom tools
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   Claude / AI Model                      │
-└───────────────────────┬─────────────────────────────────┘
-                     ┌──────────────────────┐
-                     │   Claude Desktop /   │
-                     │   External Tools     │
-                     └──────────┬───────────┘
+              ┌──────────────────────────────────────┐
+              │  Scripts / Bots / AI / Any MCP Client │
+              └──────────────────┬───────────────────┘
                                 │ JSON-RPC 2.0
                     ┌───────────┴───────────┐
                     │                       │
@@ -90,11 +118,11 @@ A custom Telegram Desktop fork with an embedded C++ MCP server providing direct 
 
 ### How It Works
 
-1. **Embedded C++ MCP server** runs inside the Telegram Desktop process
-2. **IPC bridge** (`/tmp/tdesktop_mcp.sock`) accepts connections from external tools (always on)
-3. **Stdio transport** (`--mcp` flag) for direct Claude Desktop integration
-4. **Direct memory access** to all tdesktop data structures and APIs
-5. **No rate limits** on local database reads; MTProto API for writes/exports
+1. **Embedded C++ MCP server** runs inside the Telegram Desktop process with direct memory access to all data
+2. **IPC bridge** (`/tmp/tdesktop_mcp.sock`) — always on, any local process can connect and call tools
+3. **Stdio transport** (`--mcp` flag) — for Claude Desktop or other MCP clients that use stdin/stdout
+4. **Local reads** hit the database directly (no network, no rate limits)
+5. **Writes and exports** use the MTProto API through tdesktop's existing connection
 
 ### Performance
 
