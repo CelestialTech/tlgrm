@@ -1,4 +1,4 @@
-# Tlgrm: Telegram Desktop Supercharged
+# Tlgrm: Telegram Desktop Rewired
 
 ![Tlgrm](docs/assets/tlgrm-main.png)
 
