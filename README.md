@@ -1,4 +1,4 @@
-# Tlgrm: Telegram Desktop with Data Export, Archiving & Programmatic Access
+# Tlgrm: Telegram Desktop Supercharged
 
 ![Tlgrm](docs/assets/tlgrm-main.png)
 
