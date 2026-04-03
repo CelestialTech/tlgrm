@@ -2955,6 +2955,10 @@ void Account::writeExportSettings(const Export::Settings &settings) {
 		&& settings.path == check.path
 		&& settings.format == check.format
 		&& settings.availableAt == check.availableAt
+		&& settings.singlePeerResumeFromId == check.singlePeerResumeFromId
+		&& settings.singlePeerResumeSkipCount == check.singlePeerResumeSkipCount
+		&& settings.resumeExportDir == check.resumeExportDir
+		&& settings.gradualMode == check.gradualMode
 		&& !settings.onlySinglePeer()) {
 		if (_exportSettingsKey) {
 			ClearKey(_exportSettingsKey, _basePath);
@@ -2967,9 +2971,13 @@ void Account::writeExportSettings(const Export::Settings &settings) {
 		_exportSettingsKey = GenerateKey(_basePath);
 		writeMapQueued();
 	}
-	quint32 size = sizeof(quint32) * 6
-		+ Serialize::stringSize(settings.path)
-		+ sizeof(qint32) * 2 + sizeof(quint64);
+	quint32 size = sizeof(quint32) * 6           // types, fullChats, mediaTypes, mediaSizeLimit, format, availableAt
+		+ Serialize::stringSize(settings.path)     // path
+		+ sizeof(qint32) + sizeof(quint64) * 2     // singlePeer worst case (type + id + hash)
+		+ sizeof(qint32) * 2                       // singlePeerFrom, singlePeerTill
+		+ sizeof(qint32) * 2                       // singlePeerResumeFromId, singlePeerResumeSkipCount
+		+ Serialize::stringSize(settings.resumeExportDir)  // resumeExportDir
+		+ sizeof(qint32);                          // gradualMode
 	EncryptedDescriptor data(size);
 	data.stream
 		<< quint32(settings.types)
@@ -3002,6 +3010,10 @@ void Account::writeExportSettings(const Export::Settings &settings) {
 	});
 	data.stream << qint32(settings.singlePeerFrom);
 	data.stream << qint32(settings.singlePeerTill);
+	data.stream << qint32(settings.singlePeerResumeFromId);
+	data.stream << qint32(settings.singlePeerResumeSkipCount);
+	data.stream << settings.resumeExportDir;
+	data.stream << qint32(settings.gradualMode ? 1 : 0);
 
 	FileWriteDescriptor file(_exportSettingsKey, _basePath);
 	file.writeEncrypted(data, _localKey);
@@ -3058,6 +3070,18 @@ Export::Settings Account::readExportSettings() {
 	if (!file.stream.atEnd()) {
 		file.stream >> singlePeerFrom >> singlePeerTill;
 	}
+	qint32 singlePeerResumeFromId = 0, singlePeerResumeSkipCount = 0;
+	QString resumeExportDir;
+	if (!file.stream.atEnd()) {
+		file.stream >> singlePeerResumeFromId >> singlePeerResumeSkipCount;
+	}
+	if (!file.stream.atEnd()) {
+		file.stream >> resumeExportDir;
+	}
+	qint32 gradualModeInt = 0;
+	if (!file.stream.atEnd()) {
+		file.stream >> gradualModeInt;
+	}
 	auto result = Export::Settings();
 	result.types = Export::Settings::Types::from_raw(types);
 	result.fullChats = Export::Settings::Types::from_raw(fullChats);
@@ -3098,6 +3122,10 @@ Export::Settings Account::readExportSettings() {
 	}();
 	result.singlePeerFrom = singlePeerFrom;
 	result.singlePeerTill = singlePeerTill;
+	result.singlePeerResumeFromId = singlePeerResumeFromId;
+	result.singlePeerResumeSkipCount = singlePeerResumeSkipCount;
+	result.resumeExportDir = resumeExportDir;
+	result.gradualMode = (gradualModeInt != 0);
 	return (file.stream.status() == QDataStream::Ok && result.validate())
 		? result
 		: Export::Settings();

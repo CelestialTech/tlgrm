@@ -19,6 +19,7 @@ class Session;
 
 namespace Export {
 
+struct Settings;
 class Controller;
 
 namespace View {
@@ -38,9 +39,7 @@ public:
 	// Shows progress panel immediately.
 	void startAutoExport(
 		not_null<PeerData*> peer,
-		int32 resumeFromId = 0,
-		int32 skipCount = 0,
-		const QString &resumeExportDir = QString());
+		const Settings &settings);
 	void startTopic(
 		not_null<PeerData*> peer,
 		MsgId topicRootId,

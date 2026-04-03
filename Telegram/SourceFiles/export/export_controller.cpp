@@ -22,7 +22,13 @@ const auto kNullStateCallback = [](ProcessingState&) {};
 
 Settings NormalizeSettings(const Settings &settings) {
 	if (!settings.onlySinglePeer()) {
-		return base::duplicate(settings);
+		auto result = base::duplicate(settings);
+		// Clear single-peer resume fields to prevent them leaking
+		// into multi-dialog exports (they are per-dialog, not global).
+		result.singlePeerResumeFromId = 0;
+		result.singlePeerResumeSkipCount = 0;
+		result.resumeExportDir.clear();
+		return result;
 	}
 	auto result = base::duplicate(settings);
 	result.types = result.fullChats = Settings::Type::AnyChatsMask;
@@ -429,7 +435,12 @@ void ControllerObject::fillSubstepsInSteps(const ApiWrap::StartInfo &info) {
 
 void ControllerObject::cancelExportFast() {
 	_api.cancelExportFast();
-	setState(CancelledState());
+	auto cancelled = CancelledState();
+	const auto progress = _api.currentResumeProgress();
+	cancelled.resumeMessageId = progress.lastMessageId;
+	cancelled.messagesWritten = _messagesWritten;
+	cancelled.exportPath = _settings.path;
+	setState(std::move(cancelled));
 }
 
 void ControllerObject::exportNext() {
@@ -643,6 +654,14 @@ void ControllerObject::exportNextDialog() {
 				_settings.singlePeerResumeFromId = result.list.back().id;
 			}
 			_messagesWritten += result.list.size();
+			// Update total from live API count (initial estimate can be stale)
+			if (result.serverCount > 0) {
+				const auto adjusted = result.serverCount
+					+ _messagesSkipped;
+				if (adjusted > _messagesCount) {
+					_messagesCount = adjusted;
+				}
+			}
 			_settings.singlePeerResumeSkipCount = _messagesWritten;
 			_settings.resumeExportDir = _settings.path;
 			setState(stateDialogs(DownloadProgress()));
@@ -783,8 +802,10 @@ void ControllerObject::fillMessagesState(
 		: (dialog->type == Data::DialogInfo::Type::VerifyCodes)
 		? ProcessingState::EntityType::VerifyCodes
 		: ProcessingState::EntityType::Chat;
-	result.itemIndex = _messagesWritten + progress.itemIndex;
-	result.itemCount = std::max(_messagesCount, result.itemIndex);
+	result.itemIndex = std::min(
+		_messagesWritten + progress.itemIndex,
+		_messagesCount);
+	result.itemCount = std::max(_messagesCount, _messagesWritten);
 	result.itemSkipped = _messagesSkipped;
 	result.bytesRandomId = progress.randomId;
 	if (!progress.path.isEmpty()) {
@@ -830,7 +851,16 @@ void ControllerObject::exportTopic() {
 			if (ioCatchError(_writer->writeDialogSlice(slice))) {
 				return false;
 			}
+			if (!slice.list.empty()) {
+				_settings.singlePeerResumeFromId = slice.list.back().id;
+			}
 			_messagesWritten += slice.list.size();
+			if (slice.serverCount > 0
+				&& slice.serverCount > _messagesCount) {
+				_messagesCount = slice.serverCount;
+			}
+			_settings.singlePeerResumeSkipCount = _messagesWritten;
+			_settings.resumeExportDir = _settings.path;
 			setState(stateTopic(DownloadProgress()));
 			return true;
 		},
@@ -854,8 +884,10 @@ ProcessingState ControllerObject::stateTopic(
 		result.entityName = _topicTitle;
 		result.entityIndex = 0;
 		result.entityCount = 1;
-		result.itemIndex = _messagesWritten + progress.itemIndex;
-		result.itemCount = std::max(_messagesCount, result.itemIndex);
+		result.itemIndex = std::min(
+			_messagesWritten + progress.itemIndex,
+			_messagesCount);
+		result.itemCount = std::max(_messagesCount, _messagesWritten);
 		result.bytesRandomId = progress.randomId;
 		if (!progress.path.isEmpty()) {
 			const auto last = progress.path.lastIndexOf('/');
@@ -877,12 +909,12 @@ void ControllerObject::setFinishedState() {
 		const QDir dir(_settings.path);
 		int diskFiles = 0;
 		int64 diskBytes = 0;
-		const auto subdirs = QStringList()
-			<< "files" << "photos" << "video_files"
-			<< "voice_messages" << "stickers" << "round_video_messages";
+		// Scan all subdirectories dynamically instead of hardcoding names,
+		// so we catch any media directories the writer creates.
+		const auto subdirs = dir.entryList(
+			QDir::Dirs | QDir::NoDotAndDotDot);
 		for (const auto &sub : subdirs) {
 			const QDir subDir(dir.absoluteFilePath(sub));
-			if (!subDir.exists()) continue;
 			for (const auto &fi : subDir.entryInfoList(QDir::Files)) {
 				++diskFiles;
 				diskBytes += fi.size();

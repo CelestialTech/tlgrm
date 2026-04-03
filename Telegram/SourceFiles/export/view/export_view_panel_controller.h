@@ -64,6 +64,7 @@ public:
 private:
 	void fillParams(const PasswordCheckState &state);
 	void stopExport();
+	void ensurePanel();
 	void createPanel();
 	void updateState(State &&state);
 	void showSettings();

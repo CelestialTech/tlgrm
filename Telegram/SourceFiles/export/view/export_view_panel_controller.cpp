@@ -205,7 +205,10 @@ void PanelController::activatePanel() {
 	}
 }
 
-void PanelController::createPanel() {
+void PanelController::ensurePanel() {
+	if (_panel) {
+		return;
+	}
 	const auto singlePeer = _settings->onlySinglePeer();
 	const auto singleTopic = _settings->onlySingleTopic();
 	_panel = base::make_unique_q<Ui::SeparatePanel>(Ui::SeparatePanelArgs{
@@ -225,20 +228,11 @@ void PanelController::createPanel() {
 		_panel->hideGetDuration();
 	}, _panel->lifetime());
 	_panelCloseEvents.fire(_panel->closeEvents());
+}
 
-	if (_settings->singlePeerResumeFromId > 0
-		&& _settings->onlySinglePeer()
-		&& !_settings->resumeExportDir.isEmpty()
-		&& QDir(_settings->resumeExportDir).exists()) {
-		qWarning() << "[Export] Interrupted export detected, auto-resuming:"
-			<< "msgId=" << _settings->singlePeerResumeFromId
-			<< "written=" << _settings->singlePeerResumeSkipCount
-			<< "dir=" << _settings->resumeExportDir;
-		showProgress();
-		_process->startExport(*_settings, PrepareEnvironment(_session));
-	} else {
-		showSettings();
-	}
+void PanelController::createPanel() {
+	ensurePanel();
+	showSettings();
 }
 
 void PanelController::showSettings() {
@@ -287,7 +281,7 @@ void PanelController::showSettings() {
 
 void PanelController::startExportNow(const Settings &settings) {
 	*_settings = settings;
-	createPanel();
+	ensurePanel();
 	showProgress();
 	_process->startExport(*_settings, PrepareEnvironment(_session));
 }
@@ -405,6 +399,7 @@ void PanelController::showProgress() {
 
 	_panel->showInner(std::move(progress));
 	_panel->setHideOnDeactivate(true);
+	_panel->showAndActivate();
 }
 
 void PanelController::stopWithConfirmation(Fn<void()> callback) {
@@ -481,7 +476,7 @@ void PanelController::updateState(State &&state) {
 			_settings->singlePeerResumeFromId = apiError->resumeMessageId;
 			_settings->singlePeerResumeSkipCount = apiError->messagesWritten;
 			_settings->resumeExportDir = apiError->exportPath;
-			qWarning() << "[Export] Persisting resume state on error:"
+			qWarning() << "[Export] Persisting resume state on API error:"
 				<< "msgId=" << apiError->resumeMessageId
 				<< "written=" << apiError->messagesWritten
 				<< "dir=" << apiError->exportPath;
@@ -489,16 +484,32 @@ void PanelController::updateState(State &&state) {
 		}
 		showError(*apiError);
 	} else if (const auto error = std::get_if<OutputErrorState>(&_state)) {
+		// Persist resume state on I/O errors too
+		if (_settings->singlePeerResumeFromId > 0) {
+			qWarning() << "[Export] Persisting resume state on IO error:"
+				<< "msgId=" << _settings->singlePeerResumeFromId
+				<< "written=" << _settings->singlePeerResumeSkipCount;
+			saveSettings();
+		}
 		showError(*error);
 	} else if (v::is<FinishedState>(_state)) {
 		_settings->singlePeerResumeFromId = 0;
 		_settings->singlePeerResumeSkipCount = 0;
 		_settings->resumeExportDir.clear();
-		_settings->path.clear();
 		saveSettings();
 		_panel->setTitle(tr::lng_export_title());
 		_panel->setHideOnDeactivate(false);
-	} else if (v::is<CancelledState>(_state)) {
+	} else if (const auto cancelled = std::get_if<CancelledState>(&_state)) {
+		// Persist resume state so cancelled exports can be resumed
+		if (cancelled->resumeMessageId > 0) {
+			_settings->singlePeerResumeFromId = cancelled->resumeMessageId;
+			_settings->singlePeerResumeSkipCount = cancelled->messagesWritten;
+			_settings->resumeExportDir = cancelled->exportPath;
+			qWarning() << "[Export] Persisting resume state on cancel:"
+				<< "msgId=" << cancelled->resumeMessageId
+				<< "written=" << cancelled->messagesWritten;
+			saveSettings();
+		}
 		LOG(("Export Info: Stop Panel After Cancel."));
 		stopExport();
 	}

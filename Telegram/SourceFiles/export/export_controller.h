@@ -88,6 +88,9 @@ struct OutputErrorState {
 };
 
 struct CancelledState {
+	int32 resumeMessageId = 0;
+	int messagesWritten = 0;
+	QString exportPath;
 };
 
 struct FinishedState {

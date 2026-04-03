@@ -49,6 +49,11 @@ public:
 	rpl::producer<MTP::Error> errors() const;
 	rpl::producer<Output::Result> ioErrors() const;
 
+	struct ResumeProgress {
+		int32 lastMessageId = 0;
+	};
+	[[nodiscard]] ResumeProgress currentResumeProgress() const;
+
 	struct StartInfo {
 		int userpicsCount = 0;
 		int storiesCount = 0;

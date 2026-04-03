@@ -482,6 +482,16 @@ rpl::producer<Output::Result> ApiWrap::ioErrors() const {
 	return _ioErrors.events();
 }
 
+ApiWrap::ResumeProgress ApiWrap::currentResumeProgress() const {
+	auto result = ResumeProgress();
+	if (_chatProcess) {
+		result.lastMessageId = _chatProcess->largestIdPlusOne - 1;
+	} else if (_topicProcess) {
+		result.lastMessageId = _topicProcess->offsetId;
+	}
+	return result;
+}
+
 void ApiWrap::startExport(
 		const Settings &settings,
 		Output::Stats *stats,
@@ -1585,11 +1595,19 @@ void ApiWrap::messagesCountLoaded(int localSplitIndex, int count) {
 }
 
 void ApiWrap::finishExport(FnMut<void()> done) {
-	const auto guard = gsl::finally([&] { _takeoutId = std::nullopt; });
+	if (isGradualMode()) {
+		// No real takeout session to finish — just call done directly.
+		_takeoutId = std::nullopt;
+		done();
+		return;
+	}
 
 	mainRequest(MTPaccount_FinishTakeoutSession(
 		MTP_flags(MTPaccount_FinishTakeoutSession::Flag::f_success)
-	)).done(std::move(done)).send();
+	)).done([this, done = std::move(done)]() mutable {
+		_takeoutId = std::nullopt;
+		done();
+	}).send();
 }
 
 void ApiWrap::skipFile(uint64 randomId) {
@@ -1604,12 +1622,13 @@ void ApiWrap::skipFile(uint64 randomId) {
 }
 
 void ApiWrap::cancelExportFast() {
-	if (_takeoutId.has_value()) {
+	if (_takeoutId.has_value() && !isGradualMode()) {
 		const auto requestId = mainRequest(MTPaccount_FinishTakeoutSession(
 			MTP_flags(0)
 		)).send();
 		_mtp.request(requestId).detach();
 	}
+	_takeoutId = std::nullopt;
 }
 
 void ApiWrap::requestSinglePeerDialog() {
@@ -1938,12 +1957,18 @@ void ApiWrap::requestMessagesSlice() {
 			if constexpr (MTPDmessages_messages::Is<decltype(data)>()) {
 				_chatProcess->lastSlice = true;
 			}
-			loadMessagesFiles(Data::ParseMessagesSlice(
+			auto slice = Data::ParseMessagesSlice(
 				_chatProcess->context,
 				data.vmessages(),
 				data.vusers(),
 				data.vchats(),
-				_chatProcess->info.relativePath));
+				_chatProcess->info.relativePath);
+			if constexpr (!MTPDmessages_messages::Is<decltype(data)>()) {
+				slice.serverCount = data.vcount().v;
+			} else {
+				slice.serverCount = int(data.vmessages().v.size());
+			}
+			loadMessagesFiles(std::move(slice));
 		});
 	});
 }
@@ -2313,7 +2338,11 @@ void ApiWrap::finishMessagesSlice() {
 		&& (++_chatProcess->localSplitIndex
 			< _chatProcess->info.splits.size())) {
 		_chatProcess->lastSlice = false;
-		_chatProcess->largestIdPlusOne = 1;
+		// Keep largestIdPlusOne from previous split for resume purposes
+		// (reset to 1 only if no messages were processed yet)
+		if (_chatProcess->largestIdPlusOne <= 1) {
+			_chatProcess->largestIdPlusOne = 1;
+		}
 	}
 	if (!_chatProcess->lastSlice) {
 		requestMessagesSlice();

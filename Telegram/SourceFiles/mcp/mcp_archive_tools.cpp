@@ -74,12 +74,9 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 
 	auto peer = _session->data().peerLoaded(peerId);
 	if (!peer) {
-		// Peer not in memory — try creating minimal PeerData
-		// (safe now that we validated the type bits above)
-		peer = _session->data().peer(peerId);
-	}
-	if (!peer) {
-		return toolError("Chat not found: " + QString::number(chatId));
+		return toolError("Chat not loaded in session. "
+			"Open it in Telegram first, or use list_chats to find the correct ID. "
+			"chat_id: " + QString::number(chatId));
 	}
 
 	// Determine resume point
@@ -103,32 +100,81 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 		// Remove partially written files from interrupted export.
 		// The export downloads in 128KB chunks (kFileChunkSize in
 		// export_api_wrap.cpp). Interrupted downloads produce files
-		// whose size is an exact multiple of 128KB. Check ALL files,
-		// not just the newest — multiple interruptions leave multiple
-		// truncated files.
+		// whose size is an exact multiple of 128KB. We validate each
+		// candidate with file-type-specific integrity checks to avoid
+		// false positives (valid files that happen to be 128KB-aligned).
 		constexpr auto kChunk = 128 * 1024; // matches export_api_wrap
 		QStringList toRemove;
 		for (const auto &fn : fileList) {
 			QFileInfo fi(filesDir.absoluteFilePath(fn));
 			const auto sz = fi.size();
-			if (sz <= 0 || sz > 64 * 1024 * 1024) continue;
+			if (sz <= 0) continue;
 			if ((sz % kChunk) != 0) continue;
 
-			// Size is exact multiple of 128KB — highly suspicious.
-			// For PDFs, double-check via missing %%EOF marker.
+			// Size is exact multiple of 128KB — validate per type.
 			bool confirmed = false;
-			if (fn.endsWith(QLatin1String(".pdf"),
-					Qt::CaseInsensitive)) {
+			const auto lower = fn.toLower();
+
+			if (lower.endsWith(QLatin1String(".pdf"))) {
+				// PDF: check for %%EOF marker in last 1024 bytes
 				QFile f(fi.absoluteFilePath());
 				if (f.open(QIODevice::ReadOnly)) {
 					const auto tail = qMin(f.size(), qint64(1024));
 					f.seek(f.size() - tail);
 					confirmed = !f.readAll().contains("%%EOF");
 				}
+			} else if (lower.endsWith(QLatin1String(".jpg"))
+					|| lower.endsWith(QLatin1String(".jpeg"))) {
+				// JPEG: valid files end with FFD9 marker
+				QFile f(fi.absoluteFilePath());
+				if (f.open(QIODevice::ReadOnly)) {
+					f.seek(f.size() - 2);
+					const auto tail = f.read(2);
+					if (tail.size() == 2) {
+						confirmed = !(
+							static_cast<uchar>(tail[0]) == 0xFF
+							&& static_cast<uchar>(tail[1]) == 0xD9);
+					}
+				}
+			} else if (lower.endsWith(QLatin1String(".png"))) {
+				// PNG: valid files end with IEND chunk (00 00 00 00
+				// 49 45 4E 44 AE 42 60 82)
+				QFile f(fi.absoluteFilePath());
+				if (f.open(QIODevice::ReadOnly) && f.size() >= 12) {
+					f.seek(f.size() - 8);
+					const auto tail = f.read(8);
+					confirmed = !tail.contains("IEND");
+				}
+			} else if (lower.endsWith(QLatin1String(".mp4"))
+					|| lower.endsWith(QLatin1String(".mov"))) {
+				// MP4/MOV: check for valid top-level atom at start
+				// (ftyp, moov, mdat, free, wide, skip)
+				QFile f(fi.absoluteFilePath());
+				if (f.open(QIODevice::ReadOnly) && f.size() >= 8) {
+					const auto header = f.read(8);
+					const auto fourcc = header.mid(4, 4);
+					const bool validAtom = (fourcc == "ftyp"
+						|| fourcc == "moov"
+						|| fourcc == "mdat"
+						|| fourcc == "free"
+						|| fourcc == "wide"
+						|| fourcc == "skip");
+					if (validAtom) {
+						// Has valid header but is 128KB-aligned:
+						// only flag if single chunk (very likely
+						// truncated) — multi-chunk MP4s can
+						// legitimately be 128KB-aligned
+						confirmed = (sz == kChunk);
+					} else {
+						confirmed = true; // invalid header = corrupt
+					}
+				}
 			} else {
-				// Non-PDF (jpg, mp4, aac, mp3, etc.): size check
-				// alone is sufficient (P(false positive) < 0.001%)
-				confirmed = true;
+				// Other types (aac, mp3, ogg, webp, etc.):
+				// Only flag single-chunk files (128KB exactly) as
+				// truncated. Multi-chunk files of these types can
+				// legitimately be 128KB-aligned.
+				confirmed = (sz == kChunk);
 			}
 
 			if (confirmed) {
@@ -181,33 +227,37 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 		}
 	}
 
-	// Auto-detect skip count from existing HTML if output_path provided
+	// Auto-detect skip count from existing HTML
 	int32 skipCount = 0;
 	if (args.contains("messages_written")) {
 		skipCount = static_cast<int32>(
 			args["messages_written"].toVariant().toLongLong());
-	} else if (resumeFromId > 0 && args.contains("output_path")) {
+	} else if (resumeFromId > 0) {
 		// Count id="message" occurrences in existing HTML files
-		const QString outPath = args["output_path"].toString();
-		QDir outDir(outPath);
-		const auto htmlFiles = outDir.entryList(
-			QStringList() << "messages*.html",
-			QDir::Files);
-		QRegularExpression msgRx("id=\"message(\\d+)\"");
-		for (const auto &htmlFile : htmlFiles) {
-			QFile f(outDir.absoluteFilePath(htmlFile));
-			if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-				const auto content = f.readAll();
-				auto it = msgRx.globalMatch(content);
-				while (it.hasNext()) {
-					it.next();
-					++skipCount;
+		const QString scanDir = args.contains("output_path")
+			? args["output_path"].toString()
+			: exportDirPath;
+		if (!scanDir.isEmpty()) {
+			QDir outDir(scanDir);
+			const auto htmlFiles = outDir.entryList(
+				QStringList() << "messages*.html",
+				QDir::Files);
+			QRegularExpression msgRx("id=\"message(\\d+)\"");
+			for (const auto &htmlFile : htmlFiles) {
+				QFile f(outDir.absoluteFilePath(htmlFile));
+				if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+					const auto content = QString::fromUtf8(f.readAll());
+					auto it = msgRx.globalMatch(content);
+					while (it.hasNext()) {
+						it.next();
+						++skipCount;
+					}
 				}
 			}
-		}
-		if (skipCount > 0) {
-			qWarning() << "MCP: Auto-detected" << skipCount
-			           << "already-exported messages from HTML files";
+			if (skipCount > 0) {
+				qWarning() << "MCP: Auto-detected" << skipCount
+				           << "already-exported messages from HTML files";
+			}
 		}
 	}
 
@@ -218,9 +268,15 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 		settings.singlePeerResumeFromId = resumeFromId;
 		settings.singlePeerResumeSkipCount = skipCount;
 	}
-	if (args.contains("output_path")) {
-		settings.path = args["output_path"].toString();
-		settings.resumeExportDir = args["output_path"].toString();
+	// Set resumeExportDir from explicit arg or auto-detected path
+	const QString resumeDir = args.contains("output_path")
+		? args["output_path"].toString()
+		: exportDirPath;
+	if (!resumeDir.isEmpty()) {
+		settings.resumeExportDir = resumeDir;
+		QDir parentDir(resumeDir);
+		parentDir.cdUp();
+		settings.path = parentDir.absolutePath();
 	}
 	if (args.contains("format")) {
 		QString fmt = args["format"].toString().toLower();
@@ -230,20 +286,12 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 			settings.format = Export::Output::Format::Html;
 		}
 	}
-	_session->local().writeExportSettings(settings);
-
-	// Use output_path as exportDirPath if provided
-	if (exportDirPath.isEmpty() && args.contains("output_path")) {
-		exportDirPath = args["output_path"].toString();
-	}
-
 	// Open the export UI panel (same as right-click → Export chat history)
-	Core::App().exportManager().startAutoExport(
-		peer, resumeFromId, skipCount, exportDirPath);
+	Core::App().exportManager().startAutoExport(peer, settings);
 
 	qWarning() << "MCP: toolExportChat opened export panel for"
 	           << peer->name() << "resume_from:" << resumeFromId
-	           << "skip:" << skipCount << "dir:" << exportDirPath;
+	           << "skip:" << skipCount << "dir:" << settings.resumeExportDir;
 
 	QJsonObject result;
 	result["success"] = true;
@@ -297,21 +345,26 @@ int32 Server::autoDetectResumeId(
 	QStringList entries = baseDir.entryList(
 		QDir::Dirs | QDir::NoDotAndDotDot, QDir::Time);
 
-	// When peer name is unavailable, collect candidates with files/
-	// but no HTML and pick the most recent (entries sorted by time).
+	QString fallbackDir; // files/ but no HTML — used only if no HTML dir found
 	for (const auto &entry : entries) {
 		if (!entry.startsWith(exactPrefix)) continue;
 
 		QDir exportDir(baseDir.absoluteFilePath(entry));
 
-		// Method 1: Scan messages*.html for message IDs
+		// Method 1: Scan ALL messages*.html for the lowest message ID.
+		// Must scan all files because QDir::Name sorts lexicographically
+		// (messages10.html < messages2.html), so just checking the "last"
+		// file would miss IDs in higher-numbered files.
 		QStringList htmlFiles = exportDir.entryList(
-			QStringList() << "messages*.html", QDir::Files, QDir::Name);
+			QStringList() << "messages*.html", QDir::Files);
 		if (!htmlFiles.isEmpty()) {
-			QFile file(exportDir.absoluteFilePath(htmlFiles.last()));
-			if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-				int32 lowestId = INT32_MAX;
-				QRegularExpression re("id=\"message(\\d+)\"");
+			int32 lowestId = INT32_MAX;
+			QRegularExpression re("id=\"message(\\d+)\"");
+			for (const auto &htmlFile : htmlFiles) {
+				QFile file(exportDir.absoluteFilePath(htmlFile));
+				if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+					continue;
+				}
 				QTextStream stream(&file);
 				while (!stream.atEnd()) {
 					auto match = re.match(stream.readLine());
@@ -320,35 +373,39 @@ int32 Server::autoDetectResumeId(
 						if (id > 0 && id < lowestId) lowestId = id;
 					}
 				}
-				file.close();
-				if (lowestId > 0 && lowestId < INT32_MAX) {
-					qWarning() << "MCP: Auto-detected resume from HTML"
-					           << entry << "- message ID:" << lowestId;
-					if (exportDirOut) {
-						*exportDirOut = exportDir.absolutePath();
-					}
-					return lowestId;
+			}
+			if (lowestId > 0 && lowestId < INT32_MAX) {
+				qWarning() << "MCP: Auto-detected resume from HTML"
+				           << entry << "- message ID:" << lowestId
+				           << "(scanned" << htmlFiles.size() << "files)";
+				if (exportDirOut) {
+					*exportDirOut = exportDir.absolutePath();
 				}
+				return lowestId;
 			}
 		}
 
 		// Method 2: No HTML file (crash before write).
 		// Files/ directory has attachments but no message IDs.
-		// Return -1 so caller can start async API scan.
+		// Save as fallback candidate, keep checking other dirs for HTML.
 		QDir filesDir(exportDir.absoluteFilePath("files"));
-		if (filesDir.exists()) {
+		if (filesDir.exists() && fallbackDir.isEmpty()) {
 			QFileInfoList fileInfos = filesDir.entryInfoList(
 				QDir::Files, QDir::Time | QDir::Reversed);
 			if (!fileInfos.isEmpty()) {
 				qWarning() << "MCP: Found" << fileInfos.size()
 				           << "exported files in" << entry
-				           << "- will scan API for message IDs";
-				if (exportDirOut) {
-					*exportDirOut = exportDir.absolutePath();
-				}
-				return -1;
+				           << "- saving as fallback for API scan";
+				fallbackDir = exportDir.absolutePath();
 			}
 		}
+	}
+	// No HTML found in any directory; use fallback (files/ only) if available
+	if (!fallbackDir.isEmpty()) {
+		if (exportDirOut) {
+			*exportDirOut = fallbackDir;
+		}
+		return -1;
 	}
 	return 0;
 }
@@ -418,8 +475,10 @@ void Server::fetchNextDocumentBatch() {
 		}
 		qWarning() << "MCP: Resume detection failed:" << type;
 		auto *peer = _resumeScan->peer;
+		auto settings = _session->local().readExportSettings();
+		settings.singlePeer = peer->input();
 		_resumeScan.reset();
-		Core::App().exportManager().startAutoExport(peer);
+		Core::App().exportManager().startAutoExport(peer, settings);
 	}).send();
 }
 
@@ -494,10 +553,16 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 					matchMethod = "normalized";
 				}
 			}
-			if (!matched && docSize > 100000
-				&& _resumeScan->diskSizeToName.contains(docSize)) {
-				matched = true;
-				matchMethod = QString("size(%1)").arg(docSize);
+			if (!matched && docSize > 100000) {
+				auto sizeIt = _resumeScan->diskSizeToName.find(docSize);
+				if (sizeIt != _resumeScan->diskSizeToName.end()) {
+					matched = true;
+					matchMethod = QString("size(%1→%2)")
+						.arg(docSize).arg(sizeIt.value());
+					// Consume the match to prevent the same disk file
+					// from matching multiple API documents.
+					_resumeScan->diskSizeToName.erase(sizeIt);
+				}
 			}
 
 			if (matched) {
@@ -616,13 +681,18 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 			           << "batches.";
 		}
 
+		const auto resumeDir = _resumeScan->exportDirPath;
+
 		// Write settings
 		auto settings = _session->local().readExportSettings();
 		settings.singlePeer = peer->input();
 		settings.singlePeerResumeFromId = finalResumeId;
 		settings.singlePeerResumeSkipCount = skipCount;
-		if (args.contains("output_path")) {
-			settings.path = args["output_path"].toString();
+		settings.resumeExportDir = resumeDir;
+		if (!resumeDir.isEmpty()) {
+			QDir parentDir(resumeDir);
+			parentDir.cdUp();
+			settings.path = parentDir.absolutePath();
 		}
 		if (args.contains("format")) {
 			QString fmt = args["format"].toString().toLower();
@@ -632,12 +702,8 @@ void Server::processDocumentBatch(const MTPmessages_Messages &result) {
 				settings.format = Export::Output::Format::Html;
 			}
 		}
-		_session->local().writeExportSettings(settings);
-
-		const auto resumeDir = _resumeScan->exportDirPath;
 		_resumeScan.reset();
-		Core::App().exportManager().startAutoExport(
-			peer, finalResumeId, skipCount, resumeDir);
+		Core::App().exportManager().startAutoExport(peer, settings);
 		return;
 	}
 

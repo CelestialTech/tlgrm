@@ -610,26 +610,32 @@ print("✓ MCP integration working")
 | `search_archive` | Search archived messages |
 | `purge_archive` | Purge old archive data |
 
-**Export Resume Architecture** (`mcp_archive_tools.cpp`):
+**Export Resume Architecture** (`mcp_archive_tools.cpp`, `export_controller.cpp`, `export_manager.cpp`):
 
-When `export_chat` is called and a previous interrupted export exists (files on disk, no HTML):
+When `export_chat` is called, the system auto-detects previous interrupted exports:
 
-1. **Truncated file cleanup**: Scans ALL files in `files/` for interrupted downloads. The export system downloads in 128KB chunks (`kFileChunkSize` in `export_api_wrap.cpp`), so truncated files have sizes that are exact multiples of 131072 bytes. PDFs get additional `%%EOF` validation. Works for all attachment types (PDF, JPG, MP4, AAC, MP3, etc.).
+1. **Auto-detection** (`autoDetectResumeId`): Scans the default download path for directories matching `{Type}-{Name}-{DDMMYYYY-HHMMSS}/`. Prefers directories with `messages*.html` (parses lowest message ID and counts exported messages). Falls back to directories with only `files/` (triggers async API scan). Multiple export directories are checked — HTML-bearing dirs take priority over files-only dirs.
 
-2. **Async resume detection** (`startResumeDetection`/`fetchNextDocumentBatch`/`processDocumentBatch`):
+2. **Truncated file cleanup**: Scans ALL files in `files/` for interrupted downloads. The export system downloads in 128KB chunks (`kFileChunkSize` in `export_api_wrap.cpp`), so truncated files have sizes that are exact multiples of 131072 bytes. PDFs get additional `%%EOF` validation. Works for all attachment types (PDF, JPG, MP4, AAC, MP3, etc.).
+
+3. **Async resume detection** (`startResumeDetection`/`fetchNextDocumentBatch`/`processDocumentBatch`):
+   - Only used when files exist but no HTML (crash before any messages were written)
    - Fetches channel messages newest-to-oldest via `MTPmessages_GetHistory` in batches of 100
    - Three-strategy matching: exact filename, NFC-normalized filename, file size via `QMultiMap`
    - Early termination: stops 3 batches after first match (`batchOfFirstMatch + 3`)
    - FLOOD_WAIT handling with automatic retry
-   - Tracks `highestMatchedId`, `lowestMatchedId`, and progress counters
 
-3. **Resume execution**: Passes `resumeFromId`, `skipCount`, and `exportDirPath` to `Export::Manager::startAutoExport`. The export controller sets `_messagesWritten = skipCount` so the progress bar starts at the correct position (e.g., `1154 / 2502`).
+4. **Resume execution**: `startAutoExport(peer, settings)` takes a complete `Settings` object with `singlePeerResumeFromId`, `singlePeerResumeSkipCount`, and `resumeExportDir` already set. The export controller sets `_messagesWritten = skipCount` so the progress bar starts at the correct position (e.g., `1154 / 2502`). The `resumeExportDir` is also set from auto-detected paths (not only from explicit `output_path` args).
 
-4. **Directory reuse**: `NormalizePath()` in `export_output_abstract.cpp` checks `settings.resumeExportDir` and reuses the existing directory instead of creating a new timestamped one.
+5. **Directory reuse**: `NormalizePath()` in `export_output_abstract.cpp` checks `settings.resumeExportDir` and reuses the existing directory instead of creating a new timestamped one. If the resume dir no longer exists, `startExport()` in the controller clears all resume fields and starts fresh.
 
-5. **Completion stats**: `setFinishedState()` in `export_controller.cpp` counts actual files on disk (across `files/`, `photos/`, `video_files/`, `stickers/`, etc.) instead of only the current run's download count.
+6. **Progress display**: `itemIndex = min(_messagesWritten + progress.itemIndex, _messagesCount)` shows sub-slice progress during file downloads. `itemCount` uses `max(_messagesCount, _messagesWritten)` and updates from live API `serverCount` to handle count drift.
 
-**Key files**: `mcp_archive_tools.cpp` (resume detection, truncated file cleanup), `export_controller.cpp` (progress tracking, completion stats), `export_api_wrap.cpp` (message fetching with `largestIdPlusOne`), `export_output_abstract.cpp` (directory reuse), `export_settings.h` (`singlePeerResumeFromId`, `singlePeerResumeSkipCount`, `resumeExportDir`).
+7. **Cancel/error state persistence**: `CancelledState` carries `resumeMessageId`, `messagesWritten`, and `exportPath` so interrupted exports can be resumed. `OutputErrorState` also persists resume data if a resume ID exists.
+
+8. **Panel visibility (MCP)**: `showAndActivate()` is called after `setHideOnDeactivate(true)` to ensure the panel is visible when triggered via MCP (app window may not be active). Title is hardcoded to "Exporting" to avoid cloud lang pack overrides.
+
+**Key files**: `mcp_archive_tools.cpp` (resume detection, truncated file cleanup, Settings construction), `export_controller.cpp` (progress tracking, cancel state, completion stats), `export_api_wrap.cpp` (message fetching, `currentResumeProgress()`, gradual mode finish), `export_view_panel_controller.cpp` (panel visibility, `ensurePanel()`, `startExportNow()`), `export_manager.cpp` (`startAutoExport` accepts Settings directly), `export_output_abstract.cpp` (directory reuse), `storage_account.cpp` (settings serialization with `gradualMode`), `export_settings.h` (`singlePeerResumeFromId`, `singlePeerResumeSkipCount`, `resumeExportDir`).
 
 ### Deleted Account Archiving Tools (7 tools) - IMPLEMENTED
 | Tool | Description |
