@@ -107,6 +107,7 @@ public:
 	void requestMessages(
 		const Data::DialogInfo &info,
 		FnMut<bool(const Data::DialogInfo &)> start,
+		Fn<void(const Data::MessagesSlice&)> preDownload,
 		Fn<bool(DownloadProgress)> progress,
 		Fn<bool(Data::MessagesSlice&&)> slice,
 		FnMut<void()> done);
@@ -116,6 +117,7 @@ public:
 		MTPInputPeer inputPeer,
 		int32 topicRootId,
 		FnMut<bool(int count)> start,
+		Fn<void(const Data::MessagesSlice&)> preDownload,
 		Fn<bool(DownloadProgress)> progress,
 		Fn<bool(Data::MessagesSlice&&)> slice,
 		FnMut<void()> done);
@@ -335,6 +337,13 @@ private:
 
 	rpl::event_stream<MTP::Error> _errors;
 	rpl::event_stream<Output::Result> _ioErrors;
+
+	// Anti-detection: per-instance request density tracking
+	int _recentRequests = 0;
+	qint64 _windowStartMs = 0;
+
+	// Data safety: per-instance disk space check counter
+	int64 _bytesWrittenSinceCheck = 0;
 
 };
 

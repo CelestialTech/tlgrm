@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include <QtCore/QString>
+#include "export/output/export_output_result.h"
 
 namespace Export {
 namespace Data {
@@ -89,6 +90,10 @@ public:
 		const Data::DialogsInfo &data) = 0;
 	[[nodiscard]] virtual Result writeDialogStart(
 		const Data::DialogInfo &data) = 0;
+	[[nodiscard]] virtual Result writeMessageFragments(
+		const Data::MessagesSlice &data) {
+		return Result::Success();
+	}
 	[[nodiscard]] virtual Result writeDialogSlice(
 		const Data::MessagesSlice &data) = 0;
 	[[nodiscard]] virtual Result writeDialogEnd() = 0;

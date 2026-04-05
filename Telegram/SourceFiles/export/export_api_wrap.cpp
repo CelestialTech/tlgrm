@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/options.h"
 #include "base/random.h"
 #include <QTimer>
+#include <QStorageInfo>
 #include <set>
 #include <deque>
 
@@ -243,6 +244,7 @@ struct ApiWrap::ChatProcess : AbstractMessagesProcess {
 	Data::DialogInfo info;
 
 	FnMut<bool(const Data::DialogInfo &)> start;
+	Fn<void(const Data::MessagesSlice&)> preDownloadSlice;
 
 	int localSplitIndex = 0;
 	int32 largestIdPlusOne = 1;
@@ -255,6 +257,7 @@ struct ApiWrap::TopicProcess : AbstractMessagesProcess {
 	QString relativePath;
 
 	FnMut<bool(int count)> start;
+	Fn<void(const Data::MessagesSlice&)> preDownloadSlice;
 
 	int32 offsetId = 0;
 	int totalCount = 0;
@@ -401,8 +404,38 @@ bool ApiWrap::isGradualMode() const {
 }
 
 void ApiWrap::scheduleGradualDelay(FnMut<void()> callback) {
-	// Add delay between requests to avoid flood detection (1-3 seconds random)
-	const auto delay = base::RandomValue<uint32>() % 2000 + 1000;
+	// Adaptive throttling: track request density and back off proactively
+	// before hitting Telegram's flood detection thresholds.
+	// Uses instance variables (_recentRequests, _windowStartMs) so multiple
+	// simultaneous exports don't cross-contaminate each other's counters.
+	const auto nowMs = QDateTime::currentMSecsSinceEpoch();
+
+	if (_windowStartMs == 0 || (nowMs - _windowStartMs) > 60000) {
+		// Reset window every 60 seconds
+		_windowStartMs = nowMs;
+		_recentRequests = 0;
+	}
+	_recentRequests++;
+
+	// Base delay: 1-3 seconds random
+	auto delay = int(base::RandomValue<uint32>() % 2000 + 1000);
+
+	// Escalate delay as request density increases within the window
+	if (_recentRequests > 30) {
+		// Heavy load: 5-10 seconds (approaching flood territory)
+		delay = int(base::RandomValue<uint32>() % 5000 + 5000);
+	} else if (_recentRequests > 20) {
+		// Moderate load: 3-6 seconds
+		delay = int(base::RandomValue<uint32>() % 3000 + 3000);
+	} else if (_recentRequests > 10) {
+		// Light load: 2-4 seconds
+		delay = int(base::RandomValue<uint32>() % 2000 + 2000);
+	}
+
+	// Add ±15% jitter to avoid periodic patterns
+	const auto jitter = delay / 7;
+	delay += int(base::RandomValue<uint32>() % (jitter * 2 + 1)) - jitter;
+
 	crl::on_main([callback = std::move(callback), delay]() mutable {
 		QTimer::singleShot(delay, std::move(callback));
 	});
@@ -1495,6 +1528,7 @@ void ApiWrap::requestSessions(FnMut<void(Data::SessionsList&&)> done) {
 void ApiWrap::requestMessages(
 		const Data::DialogInfo &info,
 		FnMut<bool(const Data::DialogInfo &)> start,
+		Fn<void(const Data::MessagesSlice&)> preDownload,
 		Fn<bool(DownloadProgress)> progress,
 		Fn<bool(Data::MessagesSlice&&)> slice,
 		FnMut<void()> done) {
@@ -1505,6 +1539,7 @@ void ApiWrap::requestMessages(
 	_chatProcess->context.selfPeerId = peerFromUser(*_selfId);
 	_chatProcess->info = info;
 	_chatProcess->start = std::move(start);
+	_chatProcess->preDownloadSlice = std::move(preDownload);
 	_chatProcess->fileProgress = std::move(progress);
 	_chatProcess->handleSlice = std::move(slice);
 	_chatProcess->done = std::move(done);
@@ -2108,6 +2143,11 @@ void ApiWrap::loadMessagesFiles(Data::MessagesSlice &&slice) {
 	Expects(_chatProcess != nullptr);
 	Expects(!_chatProcess->slice.has_value());
 
+	// Write message fragments before downloading files.
+	if (_chatProcess->preDownloadSlice) {
+		_chatProcess->preDownloadSlice(slice);
+	}
+
 	collectMessagesCustomEmoji(slice);
 
 	if (slice.list.empty()) {
@@ -2280,6 +2320,13 @@ void ApiWrap::loadNextMessageFile() {
 	Expects(_chatProcess != nullptr);
 	Expects(_chatProcess->slice.has_value());
 
+	// Guard against re-entrance from pacing timers: if a file download
+	// is already in progress, wait for it to complete — its done callback
+	// will call loadNextMessageFile again.
+	if (_fileProcess) {
+		return;
+	}
+
 	for (auto &list = _chatProcess->slice->list
 		; _chatProcess->fileIndex < list.size()
 		; ++_chatProcess->fileIndex) {
@@ -2345,7 +2392,18 @@ void ApiWrap::finishMessagesSlice() {
 		}
 	}
 	if (!_chatProcess->lastSlice) {
-		requestMessagesSlice();
+		// Add delay between message batch requests to mimic user scrolling.
+		// Without this, batches fire back-to-back (~50ms apart from network
+		// latency alone), which is trivially detectable as automated export.
+		if (isGradualMode()) {
+			scheduleGradualDelay([this]() {
+				if (_chatProcess) {
+					requestMessagesSlice();
+				}
+			});
+		} else {
+			requestMessagesSlice();
+		}
 	} else {
 		finishMessages();
 	}
@@ -2378,6 +2436,29 @@ void ApiWrap::loadMessageFileDone(const QString &relativePath) {
 	if (relativePath.isEmpty()) {
 		file.skipReason = Data::File::SkipReason::Unavailable;
 	}
+
+	// Pace downloads to mimic a user viewing content after downloading.
+	// A real user would open a photo/video/document and spend time on it.
+	if (isGradualMode() && file.size > 0 && !relativePath.isEmpty()) {
+		const auto sizeMb = double(file.size) / (1024.0 * 1024.0);
+		// Realistic: 1-2s base + 1s per MB. A user views a 5MB photo for
+		// a few seconds, watches part of a 50MB video for 10-30s.
+		auto delayMs = int(1500.0 + sizeMb * 1000.0);
+		delayMs = std::clamp(delayMs, 800, 30000);
+		// ±30% jitter — wide variance mimics unpredictable human attention
+		const auto jitter = delayMs * 3 / 10;
+		delayMs += int(base::RandomValue<uint32>() % (jitter * 2 + 1)) - jitter;
+
+		crl::on_main([this, delayMs]() {
+			QTimer::singleShot(delayMs, [this]() {
+				if (_chatProcess) {
+					loadNextMessageFile();
+				}
+			});
+		});
+		return;
+	}
+
 	loadNextMessageFile();
 }
 
@@ -2458,6 +2539,7 @@ void ApiWrap::requestTopicMessages(
 		MTPInputPeer inputPeer,
 		int32 topicRootId,
 		FnMut<bool(int count)> start,
+		Fn<void(const Data::MessagesSlice&)> preDownload,
 		Fn<bool(DownloadProgress)> progress,
 		Fn<bool(Data::MessagesSlice&&)> slice,
 		FnMut<void()> done) {
@@ -2475,6 +2557,7 @@ void ApiWrap::requestTopicMessages(
 		+ QString::number(topicRootId)
 		+ "/";
 	_topicProcess->start = std::move(start);
+	_topicProcess->preDownloadSlice = std::move(preDownload);
 	_topicProcess->fileProgress = std::move(progress);
 	_topicProcess->handleSlice = std::move(slice);
 	_topicProcess->done = std::move(done);
@@ -2606,6 +2689,11 @@ void ApiWrap::loadTopicMessagesFiles(Data::MessagesSlice &&slice) {
 	Expects(_topicProcess != nullptr);
 	Expects(!_topicProcess->slice.has_value());
 
+	// Write message fragments before downloading files.
+	if (_topicProcess->preDownloadSlice) {
+		_topicProcess->preDownloadSlice(slice);
+	}
+
 	collectMessagesCustomEmoji(slice);
 
 	if (slice.list.empty()) {
@@ -2734,7 +2822,15 @@ void ApiWrap::finishTopicMessagesSlice() {
 		&& _topicProcess->processedCount >= _topicProcess->totalCount;
 
 	if (!_topicProcess->lastSlice && !reachedTotal) {
-		requestTopicMessagesSlice();
+		if (isGradualMode()) {
+			scheduleGradualDelay([this]() {
+				if (_topicProcess) {
+					requestTopicMessagesSlice();
+				}
+			});
+		} else {
+			requestTopicMessagesSlice();
+		}
 	} else {
 		finishTopicMessages();
 	}
@@ -2752,6 +2848,25 @@ void ApiWrap::loadTopicMessageFileOrThumbDone(
 	if (relativePath.isEmpty()) {
 		file.skipReason = Data::File::SkipReason::Unavailable;
 	}
+
+	// File-size-based download pacing (same logic as chat exports)
+	if (isGradualMode() && file.size > 0 && !relativePath.isEmpty()) {
+		const auto sizeMb = double(file.size) / (1024.0 * 1024.0);
+		auto delayMs = int(1500.0 + sizeMb * 1000.0);
+		delayMs = std::clamp(delayMs, 800, 30000);
+		const auto jitter = delayMs * 3 / 10;
+		delayMs += int(base::RandomValue<uint32>() % (jitter * 2 + 1)) - jitter;
+
+		crl::on_main([this, delayMs]() {
+			QTimer::singleShot(delayMs, [this]() {
+				if (_topicProcess) {
+					loadNextTopicMessageFile();
+				}
+			});
+		});
+		return;
+	}
+
 	loadNextTopicMessageFile();
 }
 
@@ -2823,6 +2938,51 @@ bool ApiWrap::processFileLoad(
 		file.skipReason = SkipReason::FileSize;
 		return true;
 	}
+
+	// Check if the file already exists on disk (resume optimization).
+	// Downloads use a .dl_ prefix; completed files have no prefix.
+	// If the final file exists with matching size → skip download.
+	// If a .dl_ temp file exists → delete it (interrupted download).
+	if (!file.suggestedPath.isEmpty()) {
+		const auto finalPath = _settings->path + file.suggestedPath;
+
+		// Remove any leftover .dl_ temp file from a previous crash.
+		const auto lastSlash = file.suggestedPath.lastIndexOf('/');
+		const auto dlPath = _settings->path
+			+ ((lastSlash >= 0)
+				? (file.suggestedPath.left(lastSlash + 1)
+					+ QStringLiteral(".dl_")
+					+ file.suggestedPath.mid(lastSlash + 1))
+				: (QStringLiteral(".dl_") + file.suggestedPath));
+		QFile::remove(dlPath);
+
+		const auto fi = QFileInfo(finalPath);
+		if (fi.exists() && fi.isFile() && fi.size() > 0) {
+			// If expected size is known, require exact match.
+			// Otherwise accept any non-zero completed file.
+			const auto match = (fullSize > 0)
+				? (fi.size() == fullSize)
+				: true;
+			if (match) {
+				file.relativePath = file.suggestedPath;
+				_fileCache->save(file.location, file.relativePath);
+				done(file.relativePath);
+				return true;
+			}
+		}
+	}
+
+	// Skip files with invalid location (e.g., expired file references
+	// on resume). Return true so the caller treats it as "ready" and
+	// continues to the next file without starting an async download.
+	if (file.location.dcId == 0
+		&& file.location.data.type() != mtpc_inputTakeoutFileLocation) {
+		qWarning() << "[Export] Skipping file with invalid location (dcId=0):"
+			<< file.suggestedPath;
+		file.skipReason = SkipReason::Unavailable;
+		return true;
+	}
+
 	loadFile(file, origin, std::move(progress), std::move(done));
 	return false;
 }
@@ -2856,8 +3016,6 @@ void ApiWrap::loadFile(
 		Fn<bool(FileProgress)> progress,
 		FnMut<void(QString)> done) {
 	Expects(_fileProcess == nullptr);
-	Expects(file.location.dcId != 0
-		|| file.location.data.type() == mtpc_inputTakeoutFileLocation);
 
 	_fileProcess = prepareFileProcess(file, origin);
 	_fileProcess->progress = std::move(progress);
@@ -2875,7 +3033,20 @@ void ApiWrap::loadFile(
 
 	loadFilePart();
 
-	Ensures(_fileProcess->requestId != 0);
+	if (!_fileProcess || _fileProcess->requestId == 0) {
+		qWarning() << "[Export] loadFilePart failed to start request for:"
+			<< file.suggestedPath
+			<< "dcId=" << file.location.dcId
+			<< "size=" << file.size;
+		if (_fileProcess) {
+			auto d = std::move(_fileProcess->done);
+			_fileProcess = nullptr;
+			if (d) {
+				d(QString());
+			}
+		}
+		return;
+	}
 }
 
 auto ApiWrap::prepareFileProcess(
@@ -2887,10 +3058,20 @@ auto ApiWrap::prepareFileProcess(
 	const auto relativePath = Output::File::PrepareRelativePath(
 		_settings->path,
 		file.suggestedPath);
+
+	// Write to a .dl_ prefixed temp file so in-progress downloads
+	// are distinguishable from completed files on resume.
+	const auto lastSlash = relativePath.lastIndexOf('/');
+	const auto dlRelativePath = (lastSlash >= 0)
+		? (relativePath.left(lastSlash + 1)
+			+ QStringLiteral(".dl_")
+			+ relativePath.mid(lastSlash + 1))
+		: (QStringLiteral(".dl_") + relativePath);
+
 	auto result = std::make_unique<FileProcess>(
-		_settings->path + relativePath,
+		_settings->path + dlRelativePath,
 		_stats);
-	result->relativePath = relativePath;
+	result->relativePath = relativePath; // final name (no prefix)
 	result->location = file.location;
 	result->size = file.size;
 	result->origin = origin;
@@ -2999,6 +3180,34 @@ void ApiWrap::filePartDone(int64 offset, const MTPupload_File &result) {
 			requests.pop_front();
 		}
 
+		// Periodic disk space check — every ~50 MB of writes.
+		// Prevents silently filling the disk during large exports.
+		// Uses instance variable to avoid cross-export contamination.
+		_bytesWrittenSinceCheck += data.vbytes().v.size();
+		if (_bytesWrittenSinceCheck > 50 * 1024 * 1024) {
+			_bytesWrittenSinceCheck = 0;
+			// Use the export settings path (absolute) not the file's
+			// relative path, so QStorageInfo checks the right filesystem.
+			if (_settings) {
+				const auto storage = QStorageInfo(
+					QFileInfo(_settings->path).absolutePath());
+				if (storage.isValid()) {
+					const auto availMb = storage.bytesAvailable()
+						/ (1024 * 1024);
+					if (availMb < 500) {
+						qWarning() << "[Export] LOW DISK SPACE:"
+							<< availMb << "MB remaining";
+					}
+					if (availMb < 100) {
+						error("Disk space critically low ("
+							+ QString::number(availMb)
+							+ " MB remaining). Export stopped.");
+						return;
+					}
+				}
+			}
+		}
+
 		if (_fileProcess->progress) {
 			_fileProcess->progress(FileProgress{
 				file.size(),
@@ -3015,6 +3224,24 @@ void ApiWrap::filePartDone(int64 offset, const MTPupload_File &result) {
 
 	auto process = base::take(_fileProcess);
 	const auto relativePath = process->relativePath;
+
+	// Rename from .dl_ temp name to final name.
+	const auto lastSlash = relativePath.lastIndexOf('/');
+	const auto dlRelativePath = (lastSlash >= 0)
+		? (relativePath.left(lastSlash + 1)
+			+ QStringLiteral(".dl_")
+			+ relativePath.mid(lastSlash + 1))
+		: (QStringLiteral(".dl_") + relativePath);
+	const auto dlPath = _settings->path + dlRelativePath;
+	const auto finalPath = _settings->path + relativePath;
+	if (QFile::exists(dlPath)) {
+		QFile::remove(finalPath); // remove stale if any
+		if (!QFile::rename(dlPath, finalPath)) {
+			qWarning() << "[Export] Failed to rename"
+				<< dlPath << "->" << finalPath;
+		}
+	}
+
 	_fileCache->save(process->location, relativePath);
 	process->done(process->relativePath);
 }

@@ -35,13 +35,24 @@ void Manager::startAutoExport(
 		return;
 	}
 	auto session = &peer->session();
+	// Use the settings' singlePeer if it has an access hash (from TDF),
+	// otherwise fall back to peer->input() (which may be empty for
+	// unresolved peers created via data().peer(id)).
+	const auto inputPeer = (settings.singlePeer.type() != mtpc_inputPeerEmpty)
+		? settings.singlePeer
+		: peer->input();
+	if (inputPeer.type() == mtpc_inputPeerEmpty) {
+		qWarning() << "Export: startAutoExport failed - no valid inputPeer for"
+			<< peer->name();
+		return;
+	}
 	_controller = std::make_unique<Controller>(
 		&session->mtp(),
-		peer->input());
+		inputPeer);
 	setupPanel(session);
 
 	auto resolved = settings;
-	resolved.singlePeer = peer->input();
+	resolved.singlePeer = inputPeer;
 	View::ResolveSettings(session, resolved);
 	qWarning() << "Export: startAutoExport peer=" << peer->name()
 	           << "resumeFromId=" << resolved.singlePeerResumeFromId

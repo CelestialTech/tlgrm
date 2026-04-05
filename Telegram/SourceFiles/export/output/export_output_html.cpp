@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/utils.h"
 #include "ui/text/format_values.h"
 
+#include <QtCore/QDir>
 #include <QtCore/QSize>
 #include <QtCore/QFile>
 #include <QtCore/QDateTime>
@@ -3466,6 +3467,52 @@ Result HtmlWriter::writeDialogStart(const Data::DialogInfo &data) {
 	_lastMessageInfo = nullptr;
 	_lastMessageIdsPerFile.clear();
 	_dialog = data;
+
+	_fragmentsDir = _settings.path + u"_fragments/"_q;
+	QDir(_fragmentsDir).removeRecursively();
+	QDir().mkpath(_fragmentsDir);
+	_fragmentSequence = 0;
+
+	return Result::Success();
+}
+
+Result HtmlWriter::writeMessageFragments(const Data::MessagesSlice &data) {
+	if (_fragmentsDir.isEmpty() || !_chat) {
+		return Result::Success();
+	}
+
+	const auto noopLinkWrapper = [](int, QByteArray text) {
+		return text;
+	};
+
+	for (const auto &message : data.list) {
+		if (Data::SkipMessageByDate(message, _settings)) {
+			continue;
+		}
+		const auto &[info, content] = _chat->pushMessage(
+			message,
+			nullptr,
+			_dialog,
+			_settings.path,
+			data.peers,
+			_environment.internalLinksDomain,
+			noopLinkWrapper);
+
+		const auto filename = QString::asprintf(
+			"%06d_%d.frag",
+			_fragmentSequence,
+			message.id);
+		++_fragmentSequence;
+
+		QFile file(_fragmentsDir + filename);
+		if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+			file.write(content);
+			file.close();
+		} else {
+			qWarning() << "[Export] Failed to write fragment:"
+				<< filename;
+		}
+	}
 	return Result::Success();
 }
 
@@ -3565,7 +3612,14 @@ Result HtmlWriter::writeDialogEnd() {
 
 	if (const auto closed = base::take(_chat)->close(); !closed) {
 		return closed;
-	} else if (_settings.onlySinglePeer()) {
+	}
+
+	if (!_fragmentsDir.isEmpty()) {
+		QDir(_fragmentsDir).removeRecursively();
+		_fragmentsDir.clear();
+	}
+
+	if (_settings.onlySinglePeer()) {
 		return Result::Success();
 	}
 

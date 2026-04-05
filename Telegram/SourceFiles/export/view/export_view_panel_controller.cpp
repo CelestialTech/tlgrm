@@ -283,6 +283,10 @@ void PanelController::startExportNow(const Settings &settings) {
 	*_settings = settings;
 	ensurePanel();
 	showProgress();
+	// This path is used by MCP auto-start — keep the panel visible
+	// even when the main window takes focus, so it doesn't hide and
+	// trigger app exit when there are no other visible windows.
+	_panel->setHideOnDeactivate(false);
 	_process->startExport(*_settings, PrepareEnvironment(_session));
 }
 
@@ -398,7 +402,7 @@ void PanelController::showProgress() {
 	}, progress->lifetime());
 
 	_panel->showInner(std::move(progress));
-	_panel->setHideOnDeactivate(true);
+	_panel->setHideOnDeactivate(false);
 	_panel->showAndActivate();
 }
 
@@ -484,11 +488,14 @@ void PanelController::updateState(State &&state) {
 		}
 		showError(*apiError);
 	} else if (const auto error = std::get_if<OutputErrorState>(&_state)) {
-		// Persist resume state on I/O errors too
-		if (_settings->singlePeerResumeFromId > 0) {
+		if (error->resumeMessageId > 0) {
+			_settings->singlePeerResumeFromId = error->resumeMessageId;
+			_settings->singlePeerResumeSkipCount = error->messagesWritten;
+			_settings->resumeExportDir = error->exportPath;
 			qWarning() << "[Export] Persisting resume state on IO error:"
-				<< "msgId=" << _settings->singlePeerResumeFromId
-				<< "written=" << _settings->singlePeerResumeSkipCount;
+				<< "msgId=" << error->resumeMessageId
+				<< "written=" << error->messagesWritten
+				<< "dir=" << error->exportPath;
 			saveSettings();
 		}
 		showError(*error);

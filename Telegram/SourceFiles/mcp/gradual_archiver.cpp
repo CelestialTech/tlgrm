@@ -402,6 +402,25 @@ void GradualArchiver::scheduleNextBatch() {
 int GradualArchiver::calculateNextDelay() {
 	int baseDelay = _rng.bounded(_config.minDelayMs, _config.maxDelayMs);
 
+	// Weekend/weekday activity profiles — people browse more casually
+	// on weekends, with longer gaps between actions.
+	const auto dayOfWeek = QDate::currentDate().dayOfWeek();
+	const bool isWeekend = (dayOfWeek == 6 || dayOfWeek == 7);
+	if (isWeekend) {
+		// 30-50% longer delays on weekends
+		baseDelay = baseDelay * (130 + _rng.bounded(0, 21)) / 100;
+	}
+
+	// Time-of-day shaping — slower during late night / early morning
+	const auto hour = QTime::currentTime().hour();
+	if (hour >= 0 && hour < 7) {
+		// Very slow at night (2-3x delay) — most people are sleeping
+		baseDelay = baseDelay * (200 + _rng.bounded(0, 101)) / 100;
+	} else if (hour >= 23) {
+		// Winding down, 50% slower
+		baseDelay = baseDelay * 150 / 100;
+	}
+
 	// Add burst pause
 	if (_consecutiveBatches >= _config.batchesBeforePause) {
 		_consecutiveBatches = 0;
@@ -412,6 +431,20 @@ int GradualArchiver::calculateNextDelay() {
 	if (_status.batchesCompleted > 0 &&
 		_status.batchesCompleted % _config.batchesBeforeLongPause == 0) {
 		baseDelay = _config.longPauseMs + _rng.bounded(0, 60000);
+	}
+
+	// Adaptive backoff: if we're approaching hourly limit, slow down
+	// proactively instead of slamming into the limit and stopping.
+	if (_config.maxMessagesPerHour > 0) {
+		const auto usedRatio = double(_status.messagesArchivedThisHour)
+			/ double(_config.maxMessagesPerHour);
+		if (usedRatio > 0.8) {
+			// Over 80% of hourly budget — double delays
+			baseDelay *= 2;
+		} else if (usedRatio > 0.6) {
+			// Over 60% — 50% slower
+			baseDelay = baseDelay * 3 / 2;
+		}
 	}
 
 	// Add some jitter (±20%)

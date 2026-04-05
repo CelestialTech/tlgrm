@@ -121,6 +121,12 @@ Result HtmlAndJsonWriter::writeDialogStart(const Data::DialogInfo &data) {
 	});
 }
 
+Result HtmlAndJsonWriter::writeMessageFragments(const Data::MessagesSlice &data) {
+	return invoke([&](WriterPtr w) {
+		return w->writeMessageFragments(data);
+	});
+}
+
 Result HtmlAndJsonWriter::writeDialogSlice(const Data::MessagesSlice &data) {
 	return invoke([&](WriterPtr w) {
 		return w->writeDialogSlice(data);

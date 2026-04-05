@@ -590,6 +590,344 @@ void Server::initializeSessionComponents() {
 	fflush(stderr);
 
 	qInfo() << "MCP: Session set, live data access enabled";
+
+	// Auto-resume interrupted exports once the main window is ready.
+	tryAutoResumeExport();
+}
+
+void Server::tryAutoResumeExport() {
+	// Gate: wait for the main window to exist before opening an export
+	// panel.  Without a main window the panel becomes the only window
+	// and the app exits when it closes.
+	//
+	// Uses a 200ms polling timer that self-destructs once the window
+	// is ready (or after ~30s max).  This is a lightweight promise:
+	// "when activeWindow() != nullptr, run the resume logic once."
+	auto self = QPointer<Server>(this);
+	auto *timer = new QTimer(this);
+	auto *tries = new int(0);
+	connect(timer, &QTimer::timeout, this, [self, timer, tries]() {
+		if (!self || !self->_session) {
+			timer->stop();
+			timer->deleteLater();
+			delete tries;
+			return;
+		}
+		if (++(*tries) > 150) { // 150 × 200ms = 30s max
+			qWarning() << "[MCP] Auto-resume: gave up waiting for main window";
+			timer->stop();
+			timer->deleteLater();
+			delete tries;
+			return;
+		}
+		if (!Core::App().activeWindow()) return; // not ready yet
+		if (Core::App().exportManager().inProgress()) {
+			timer->stop();
+			timer->deleteLater();
+			delete tries;
+			return;
+		}
+
+		// --- Window is ready.  Stop polling and run resume. ---
+		timer->stop();
+		timer->deleteLater();
+		delete tries;
+
+		// --- Primary: TDF binary storage ---
+		auto settings = self->_session->local().readExportSettings();
+		settings.gradualMode = true;
+		if (settings.singlePeerResumeFromId > 0
+			&& !settings.resumeExportDir.isEmpty()) {
+
+			if (!QDir(settings.resumeExportDir).exists()) {
+				qInfo() << "[MCP] Resume dir gone, skipping TDF auto-resume:"
+					<< settings.resumeExportDir;
+			} else {
+				const auto peerId = settings.singlePeer.match(
+					[](const MTPDinputPeerUser &data) {
+						return peerFromUser(data.vuser_id().v);
+					}, [](const MTPDinputPeerUserFromMessage &data) {
+						return peerFromUser(data.vuser_id().v);
+					}, [](const MTPDinputPeerChat &data) {
+						return peerFromChat(data.vchat_id().v);
+					}, [](const MTPDinputPeerChannel &data) {
+						return peerFromChannel(data.vchannel_id().v);
+					}, [](const MTPDinputPeerChannelFromMessage &data) {
+						return peerFromChannel(data.vchannel_id().v);
+					}, [self](const MTPDinputPeerSelf &) {
+						return self->_session->userPeerId();
+					}, [](const MTPDinputPeerEmpty &) {
+						return PeerId(0);
+					});
+				if (peerId) {
+					const auto peer = self->_session->data().peer(peerId);
+					qInfo() << "[MCP] Auto-resuming export (TDF) for peer"
+						<< peer->name() << "from message"
+						<< settings.singlePeerResumeFromId
+						<< "(" << settings.singlePeerResumeSkipCount
+						<< "messages done)";
+					Core::App().exportManager().startAutoExport(
+						peer, settings);
+					return;
+				}
+			}
+		}
+
+		// --- Secondary: scan export dirs for resume_state.json ---
+		const auto basePath = File::DefaultDownloadPath(
+			gsl::make_not_null(self->_session));
+		QDir baseDir(basePath);
+		if (!baseDir.exists()) return;
+
+		QDateTime bestTime;
+		QJsonObject bestJson;
+
+		const auto subdirs = baseDir.entryList(
+			QDir::Dirs | QDir::NoDotAndDotDot);
+		for (const auto &sub : subdirs) {
+			const auto jsonPath = baseDir.absoluteFilePath(
+				sub + QStringLiteral("/resume_state.json"));
+			QFile f(jsonPath);
+			if (!f.open(QIODevice::ReadOnly)) continue;
+
+			QJsonParseError err;
+			const auto doc = QJsonDocument::fromJson(f.readAll(), &err);
+			f.close();
+			if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+				continue;
+			}
+			const auto obj = doc.object();
+
+			if (!obj.contains(QStringLiteral("last_message_id"))
+				|| !obj.contains(QStringLiteral("messages_written"))
+				|| !obj.contains(QStringLiteral("messages_total"))
+				|| !obj.contains(QStringLiteral("peer_id"))) {
+				continue;
+			}
+
+			const auto written = obj[QStringLiteral("messages_written")].toInt();
+			const auto total = obj[QStringLiteral("messages_total")].toInt();
+			if (total <= 0 || written >= total) continue;
+
+			const auto updatedStr = obj[QStringLiteral("updated_at")].toString();
+			const auto updatedAt = QDateTime::fromString(
+				updatedStr, Qt::ISODate);
+			if (updatedAt.isValid()
+				&& (!bestTime.isValid() || updatedAt > bestTime)) {
+				bestTime = updatedAt;
+				bestJson = obj;
+			}
+		}
+
+		// --- Fragment-based fallback ---
+		if (bestJson.isEmpty()) {
+			QString bestFragDir;
+			int32 bestFragMsgId = 0;
+			int32 bestFragCount = 0;
+			PeerData *bestFragPeer = nullptr;
+			QDateTime bestFragTime;
+
+			for (const auto &sub : subdirs) {
+				QDir fragDir(baseDir.absoluteFilePath(
+					sub + QStringLiteral("/_fragments")));
+				if (!fragDir.exists()) continue;
+
+				const auto frags = fragDir.entryList(
+					QStringList() << QStringLiteral("*.frag"),
+					QDir::Files,
+					QDir::Name);
+				if (frags.isEmpty()) continue;
+
+				const auto lastFrag = frags.last();
+				const auto fragBase = lastFrag.chopped(5);
+				const auto uPos = fragBase.indexOf('_');
+				if (uPos < 0) continue;
+
+				bool okId = false;
+				const auto msgId = fragBase.mid(uPos + 1).toInt(&okId);
+				if (!okId || msgId <= 0) continue;
+
+				const auto firstDash = sub.indexOf('-');
+				if (firstDash < 0) continue;
+				const auto typeStr = sub.left(firstDash);
+
+				static const QRegularExpression dateRe(
+					QStringLiteral("-(\\d{8})-(\\d{6})$"));
+				const auto dateMatch = dateRe.match(sub);
+				if (!dateMatch.hasMatch()) continue;
+
+				const auto nameStr = sub.mid(
+					firstDash + 1,
+					dateMatch.capturedStart() - firstDash - 1);
+
+				const auto dirTime = QDateTime(
+					QDate::fromString(
+						dateMatch.captured(1),
+						QStringLiteral("ddMMyyyy")),
+					QTime::fromString(
+						dateMatch.captured(2),
+						QStringLiteral("HHmmss")));
+
+				PeerData *matchedPeer = nullptr;
+				auto chatsList = self->_session->data().chatsList();
+				if (chatsList) {
+					auto indexed = chatsList->indexed();
+					if (indexed) {
+						for (const auto &row : *indexed) {
+							if (!row) continue;
+							auto thread = row->thread();
+							if (!thread) continue;
+							auto peer = thread->peer();
+							if (!peer) continue;
+
+							QString expectedType;
+							if (peer->isChannel()) {
+								expectedType = peer->asChannel()->isBroadcast()
+									? QStringLiteral("Channel")
+									: QStringLiteral("Group");
+							} else if (peer->isChat()) {
+								expectedType = QStringLiteral("Group");
+							} else {
+								expectedType = QStringLiteral("Chat");
+							}
+							if (typeStr != expectedType) continue;
+
+							auto safeName = peer->name();
+							safeName.replace(
+								QRegularExpression(
+									QStringLiteral("[<>:\"/\\\\|?*\\x00-\\x1f]")),
+								QStringLiteral("_"));
+							safeName.replace(' ', '_');
+							while (safeName.startsWith('.')
+								|| safeName.startsWith('_')) {
+								safeName = safeName.mid(1);
+							}
+							while (safeName.endsWith('.')
+								|| safeName.endsWith('_')) {
+								safeName.chop(1);
+							}
+							if (safeName.length() > 50) {
+								safeName = safeName.left(50);
+							}
+							if (safeName.isEmpty()) {
+								safeName = QStringLiteral("Unknown");
+							}
+
+							if (safeName == nameStr) {
+								matchedPeer = peer;
+								break;
+							}
+						}
+					}
+				}
+				if (!matchedPeer) continue;
+
+				if (dirTime.isValid()
+					&& (!bestFragTime.isValid()
+						|| dirTime > bestFragTime)) {
+					bestFragTime = dirTime;
+					bestFragDir = baseDir.absoluteFilePath(sub);
+					bestFragMsgId = msgId;
+					bestFragCount = static_cast<int32>(frags.size());
+					bestFragPeer = matchedPeer;
+				}
+			}
+
+			if (bestFragPeer && bestFragMsgId > 0) {
+				auto rs = self->_session->local().readExportSettings();
+				rs.gradualMode = true;
+				rs.singlePeer = bestFragPeer->input();
+				rs.singlePeerResumeFromId = bestFragMsgId;
+				rs.singlePeerResumeSkipCount = bestFragCount;
+				rs.resumeExportDir = bestFragDir;
+
+				QDir parentDir(bestFragDir);
+				parentDir.cdUp();
+				rs.path = parentDir.absolutePath();
+
+				qInfo() << "[MCP] Auto-resuming export (fragments)"
+					<< "for peer" << bestFragPeer->name()
+					<< "from message" << bestFragMsgId
+					<< "(" << bestFragCount << "messages done)";
+
+				Core::App().exportManager().startAutoExport(
+					bestFragPeer, rs);
+			}
+			return;
+		}
+
+		// --- Resume from JSON ---
+		const auto peerIdStr = bestJson[QStringLiteral("peer_id")].toString();
+		bool ok = false;
+		const auto rawId = peerIdStr.toULongLong(&ok);
+		if (!ok || rawId == 0) return;
+
+		const auto peerId = PeerId(PeerIdHelper(rawId));
+		const auto peer = self->_session->data().peer(peerId);
+
+		auto rs = self->_session->local().readExportSettings();
+		rs.gradualMode = true;
+
+		// Reconstruct MTPInputPeer from the JSON's serialized fields.
+		// TDF settings may point to a different peer (the last export),
+		// so we must use the JSON data for the correct peer + access hash.
+		const auto inputType = bestJson[QStringLiteral("input_peer_type")].toString();
+		const auto inputId = bestJson[QStringLiteral("input_peer_id")].toString().toULongLong();
+		const auto inputHash = bestJson[QStringLiteral("input_peer_hash")].toString().toLongLong();
+		if (inputType == QStringLiteral("channel") && inputId > 0) {
+			rs.singlePeer = MTP_inputPeerChannel(
+				MTP_long(inputId), MTP_long(inputHash));
+		} else if (inputType == QStringLiteral("user") && inputId > 0) {
+			rs.singlePeer = MTP_inputPeerUser(
+				MTP_long(inputId), MTP_long(inputHash));
+		} else if (inputType == QStringLiteral("chat") && inputId > 0) {
+			rs.singlePeer = MTP_inputPeerChat(MTP_long(inputId));
+		} else {
+			// Fallback: try peer->input() (works if peer is resolved)
+			rs.singlePeer = peer->input();
+		}
+		rs.singlePeerResumeFromId = bestJson[
+			QStringLiteral("last_message_id")].toInt();
+		rs.singlePeerResumeSkipCount = bestJson[
+			QStringLiteral("messages_written")].toInt();
+
+		const auto exportDir = bestJson[QStringLiteral("export_dir")].toString();
+		if (!exportDir.isEmpty() && QDir(exportDir).exists()) {
+			rs.resumeExportDir = exportDir;
+		} else {
+			for (const auto &s : subdirs) {
+				const auto jp = baseDir.absoluteFilePath(
+					s + QStringLiteral("/resume_state.json"));
+				QFile fCheck(jp);
+				if (!fCheck.open(QIODevice::ReadOnly)) continue;
+				const auto d = QJsonDocument::fromJson(fCheck.readAll());
+				fCheck.close();
+				if (d.isObject()
+					&& d.object()[QStringLiteral("peer_id")].toString()
+						== peerIdStr) {
+					rs.resumeExportDir = baseDir.absoluteFilePath(s);
+					break;
+				}
+			}
+		}
+
+		if (rs.resumeExportDir.isEmpty()) return;
+
+		QDir parentDir(rs.resumeExportDir);
+		parentDir.cdUp();
+		rs.path = parentDir.absolutePath();
+
+		const auto peerName = bestJson[QStringLiteral("peer_name")].toString();
+		qInfo() << "[MCP] Auto-resuming export (JSON) for peer"
+			<< (peerName.isEmpty() ? peer->name() : peerName)
+			<< "from message" << rs.singlePeerResumeFromId
+			<< "(" << rs.singlePeerResumeSkipCount << "messages done,"
+			<< bestJson[QStringLiteral("messages_total")].toInt()
+			<< "total)";
+
+		Core::App().exportManager().startAutoExport(peer, rs);
+	});
+	timer->start(200);
 }
 
 void Server::startStdioTransport() {

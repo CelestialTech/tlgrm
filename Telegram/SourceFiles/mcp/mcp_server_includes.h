@@ -26,6 +26,7 @@
 
 #include <QtCore/QTimer>
 #include <QtCore/QRandomGenerator>
+#include <QtCore/QDateTime>
 #include <QtCore/QDebug>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -73,6 +74,7 @@
 #include "export/export_settings.h"
 #include "export/output/export_output_abstract.h"
 #include "mtproto/mtp_instance.h"
+#include "data/data_peer_id.h"
 #include "api/api_credits.h"
 #include "api/api_premium.h"
 #include "data/data_credits.h"

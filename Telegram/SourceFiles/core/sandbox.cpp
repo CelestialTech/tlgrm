@@ -54,6 +54,10 @@ bool Sandbox::QuitOnStartRequested = false;
 Sandbox::Sandbox(int &argc, char **argv)
 : QApplication(argc, argv)
 , _mainThreadId(QThread::currentThreadId()) {
+	// Prevent macOS/Qt from terminating the app when the last visible
+	// window closes — e.g., when the export panel temporarily hides.
+	// Telegram manages its own quit lifecycle via Core::Quit().
+	setQuitOnLastWindowClosed(false);
 }
 
 int Sandbox::start() {

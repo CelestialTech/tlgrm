@@ -85,6 +85,9 @@ struct ApiErrorState {
 
 struct OutputErrorState {
 	QString path;
+	int32 resumeMessageId = 0;
+	int messagesWritten = 0;
+	QString exportPath;
 };
 
 struct CancelledState {

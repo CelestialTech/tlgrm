@@ -81,14 +81,16 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 
 	// Determine resume point
 	int32 resumeFromId = 0;
+	int32 resumeSkipFromJson = 0;
 	QString exportDirPath;
 	if (args.contains("resume_from_message_id")) {
 		resumeFromId = static_cast<int32>(
 			args["resume_from_message_id"].toVariant().toLongLong());
 	} else {
-		// Auto-detect from previous export
+		// Auto-detect from previous export (prefers resume_state.json)
 		resumeFromId = autoDetectResumeId(
-			not_null<PeerData*>(peer), &exportDirPath);
+			not_null<PeerData*>(peer), &exportDirPath,
+			&resumeSkipFromJson);
 	}
 
 	// If files/ exists but no HTML → scan API for matching document names
@@ -97,91 +99,16 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 		QStringList fileList = filesDir.entryList(
 			QDir::Files, QDir::Time); // sorted newest-first
 
-		// Remove partially written files from interrupted export.
-		// The export downloads in 128KB chunks (kFileChunkSize in
-		// export_api_wrap.cpp). Interrupted downloads produce files
-		// whose size is an exact multiple of 128KB. We validate each
-		// candidate with file-type-specific integrity checks to avoid
-		// false positives (valid files that happen to be 128KB-aligned).
-		constexpr auto kChunk = 128 * 1024; // matches export_api_wrap
+		// Remove .dl_ prefixed temp files left by interrupted downloads.
+		// The export system writes to .dl_filename during download and
+		// renames to filename on completion — any .dl_ files are incomplete.
 		QStringList toRemove;
-		for (const auto &fn : fileList) {
-			QFileInfo fi(filesDir.absoluteFilePath(fn));
-			const auto sz = fi.size();
-			if (sz <= 0) continue;
-			if ((sz % kChunk) != 0) continue;
-
-			// Size is exact multiple of 128KB — validate per type.
-			bool confirmed = false;
-			const auto lower = fn.toLower();
-
-			if (lower.endsWith(QLatin1String(".pdf"))) {
-				// PDF: check for %%EOF marker in last 1024 bytes
-				QFile f(fi.absoluteFilePath());
-				if (f.open(QIODevice::ReadOnly)) {
-					const auto tail = qMin(f.size(), qint64(1024));
-					f.seek(f.size() - tail);
-					confirmed = !f.readAll().contains("%%EOF");
-				}
-			} else if (lower.endsWith(QLatin1String(".jpg"))
-					|| lower.endsWith(QLatin1String(".jpeg"))) {
-				// JPEG: valid files end with FFD9 marker
-				QFile f(fi.absoluteFilePath());
-				if (f.open(QIODevice::ReadOnly)) {
-					f.seek(f.size() - 2);
-					const auto tail = f.read(2);
-					if (tail.size() == 2) {
-						confirmed = !(
-							static_cast<uchar>(tail[0]) == 0xFF
-							&& static_cast<uchar>(tail[1]) == 0xD9);
-					}
-				}
-			} else if (lower.endsWith(QLatin1String(".png"))) {
-				// PNG: valid files end with IEND chunk (00 00 00 00
-				// 49 45 4E 44 AE 42 60 82)
-				QFile f(fi.absoluteFilePath());
-				if (f.open(QIODevice::ReadOnly) && f.size() >= 12) {
-					f.seek(f.size() - 8);
-					const auto tail = f.read(8);
-					confirmed = !tail.contains("IEND");
-				}
-			} else if (lower.endsWith(QLatin1String(".mp4"))
-					|| lower.endsWith(QLatin1String(".mov"))) {
-				// MP4/MOV: check for valid top-level atom at start
-				// (ftyp, moov, mdat, free, wide, skip)
-				QFile f(fi.absoluteFilePath());
-				if (f.open(QIODevice::ReadOnly) && f.size() >= 8) {
-					const auto header = f.read(8);
-					const auto fourcc = header.mid(4, 4);
-					const bool validAtom = (fourcc == "ftyp"
-						|| fourcc == "moov"
-						|| fourcc == "mdat"
-						|| fourcc == "free"
-						|| fourcc == "wide"
-						|| fourcc == "skip");
-					if (validAtom) {
-						// Has valid header but is 128KB-aligned:
-						// only flag if single chunk (very likely
-						// truncated) — multi-chunk MP4s can
-						// legitimately be 128KB-aligned
-						confirmed = (sz == kChunk);
-					} else {
-						confirmed = true; // invalid header = corrupt
-					}
-				}
-			} else {
-				// Other types (aac, mp3, ogg, webp, etc.):
-				// Only flag single-chunk files (128KB exactly) as
-				// truncated. Multi-chunk files of these types can
-				// legitimately be 128KB-aligned.
-				confirmed = (sz == kChunk);
-			}
-
-			if (confirmed) {
-				qWarning() << "MCP: Removing truncated file:" << fn
-				           << "size:" << sz
-				           << "chunks:" << (sz / kChunk);
-				QFile::remove(fi.absoluteFilePath());
+		const auto allFiles = filesDir.entryList(
+			QDir::Files | QDir::Hidden, QDir::Time);
+		for (const auto &fn : allFiles) {
+			if (fn.startsWith(QStringLiteral(".dl_"))) {
+				qWarning() << "MCP: Removing incomplete download:" << fn;
+				QFile::remove(filesDir.absoluteFilePath(fn));
 				toRemove.append(fn);
 			}
 		}
@@ -227,13 +154,18 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 		}
 	}
 
-	// Auto-detect skip count from existing HTML
+	// Auto-detect skip count: prefer resume_state.json, then explicit arg,
+	// then HTML scan fallback.
 	int32 skipCount = 0;
 	if (args.contains("messages_written")) {
 		skipCount = static_cast<int32>(
 			args["messages_written"].toVariant().toLongLong());
+	} else if (resumeSkipFromJson > 0) {
+		skipCount = resumeSkipFromJson;
+		qWarning() << "MCP: Using skip count from resume_state.json:"
+		           << skipCount;
 	} else if (resumeFromId > 0) {
-		// Count id="message" occurrences in existing HTML files
+		// Fallback: count id="message" occurrences in existing HTML files
 		const QString scanDir = args.contains("output_path")
 			? args["output_path"].toString()
 			: exportDirPath;
@@ -264,6 +196,7 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 	// Direct path: we have a resume ID or no previous export
 	auto settings = _session->local().readExportSettings();
 	settings.singlePeer = peer->input();
+	settings.gradualMode = true;
 	if (resumeFromId > 0) {
 		settings.singlePeerResumeFromId = resumeFromId;
 		settings.singlePeerResumeSkipCount = skipCount;
@@ -277,6 +210,12 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 		QDir parentDir(resumeDir);
 		parentDir.cdUp();
 		settings.path = parentDir.absolutePath();
+	} else {
+		// No resume dir — reset path to default download location
+		// so we don't accidentally nest inside a previous export's directory.
+		settings.path = File::DefaultDownloadPath(
+			gsl::make_not_null(_session));
+		settings.resumeExportDir.clear();
 	}
 	if (args.contains("format")) {
 		QString fmt = args["format"].toString().toLower();
@@ -313,7 +252,8 @@ QJsonObject Server::toolExportChat(const QJsonObject &args) {
 
 int32 Server::autoDetectResumeId(
 		not_null<PeerData*> peer,
-		QString *exportDirOut) {
+		QString *exportDirOut,
+		int32 *skipCountOut) {
 	// Scan default download path for previous gradual exports of this peer.
 	// Export directories: {Type}-{Name}-{DDMMYYYY-HHMMSS}/
 	// HTML files contain: id="message{id}" attributes.
@@ -344,6 +284,75 @@ int32 Server::autoDetectResumeId(
 
 	QStringList entries = baseDir.entryList(
 		QDir::Dirs | QDir::NoDotAndDotDot, QDir::Time);
+
+	// Method 0: Check resume_state.json (most reliable — written atomically
+	// by the export controller after each slice).
+	for (const auto &entry : entries) {
+		if (!entry.startsWith(exactPrefix)) continue;
+
+		QDir exportDir(baseDir.absoluteFilePath(entry));
+		QFile stateFile(exportDir.absoluteFilePath("resume_state.json"));
+		if (!stateFile.open(QIODevice::ReadOnly)) continue;
+
+		const auto doc = QJsonDocument::fromJson(stateFile.readAll());
+		if (doc.isNull()) continue;
+
+		const auto obj = doc.object();
+		const auto lastMsgId = static_cast<int32>(
+			obj.value("last_message_id").toVariant().toLongLong());
+		const auto written = static_cast<int32>(
+			obj.value("messages_written").toVariant().toLongLong());
+		if (lastMsgId > 0) {
+			qWarning() << "MCP: Auto-detected resume from resume_state.json"
+			           << entry << "- message ID:" << lastMsgId
+			           << "written:" << written;
+			if (exportDirOut) {
+				*exportDirOut = exportDir.absolutePath();
+			}
+			if (skipCountOut) {
+				*skipCountOut = written;
+			}
+			return lastMsgId;
+		}
+	}
+
+	// Method 0.5: Check _fragments/ directory (written per-message before
+	// file downloads, so more reliable than HTML which may not exist yet).
+	for (const auto &entry : entries) {
+		if (!entry.startsWith(exactPrefix)) continue;
+
+		QDir exportDir(baseDir.absoluteFilePath(entry));
+		QDir fragDir(exportDir.absoluteFilePath("_fragments"));
+		if (!fragDir.exists()) continue;
+
+		const auto frags = fragDir.entryList(
+			QStringList() << "*.frag",
+			QDir::Files,
+			QDir::Name);  // sorted alphabetically = sorted by sequence
+		if (frags.isEmpty()) continue;
+
+		// Parse highest message ID from last fragment filename.
+		// Format: SEQNUM_MSGID.frag (e.g. 000001_54321.frag)
+		const auto lastFrag = frags.last();
+		const auto baseName = lastFrag.chopped(5);  // remove ".frag"
+		const auto underscorePos = baseName.indexOf('_');
+		if (underscorePos < 0) continue;
+
+		const auto msgIdStr = baseName.mid(underscorePos + 1);
+		bool ok = false;
+		const auto msgId = msgIdStr.toInt(&ok);
+		if (!ok || msgId <= 0) continue;
+
+		qWarning() << "MCP: Fragment-based resume:" << entry
+		           << "msgId=" << msgId << "count=" << frags.size();
+		if (exportDirOut) {
+			*exportDirOut = exportDir.absolutePath();
+		}
+		if (skipCountOut) {
+			*skipCountOut = static_cast<int32>(frags.size());
+		}
+		return static_cast<int32>(msgId);
+	}
 
 	QString fallbackDir; // files/ but no HTML — used only if no HTML dir found
 	for (const auto &entry : entries) {
@@ -1082,8 +1091,31 @@ void Server::onMessageBatchReceived(const MTPmessages_Messages &result) {
 		return;
 	}
 
-	// Schedule next batch with random delay (1-3 seconds) to avoid flood
+	// Adaptive delay: base 1-3s, escalates with density and time of day
 	int delay = 1000 + (QRandomGenerator::global()->bounded(2000));
+
+	// Escalate if we've been fetching heavily
+	if (_activeExport) {
+		const auto fetched = _activeExport->totalMessagesFetched;
+		if (fetched > 3000) {
+			delay = 3000 + QRandomGenerator::global()->bounded(4000); // 3-7s
+		} else if (fetched > 1500) {
+			delay = 2000 + QRandomGenerator::global()->bounded(3000); // 2-5s
+		}
+	}
+
+	// Weekend/late night: slower pace
+	const auto hour = QTime::currentTime().hour();
+	if (hour >= 0 && hour < 7) {
+		delay = delay * 2;
+	} else if (QDate::currentDate().dayOfWeek() >= 6) {
+		delay = delay * 130 / 100;
+	}
+
+	// ±15% jitter
+	const auto jitter = delay / 7;
+	delay += QRandomGenerator::global()->bounded(jitter * 2 + 1) - jitter;
+
 	QTimer::singleShot(delay, [this]() {
 		if (_activeExport && !_activeExport->finished) {
 			fetchNextMessageBatch();

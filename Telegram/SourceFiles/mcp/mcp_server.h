@@ -126,6 +126,11 @@ private:
 	// Heavy initialization called from event loop, not during session creation
 	void initializeSessionComponents();
 
+	// Auto-resume interrupted exports once the main window is ready.
+	// Called from setSession(); waits for activeWindow() to become
+	// non-null via a polling timer, then runs the resume logic once.
+	void tryAutoResumeExport();
+
 	// Initialize server capabilities
 	void initializeCapabilities();
 
@@ -664,7 +669,8 @@ private:
 
 	// Auto-detect resume point from previous gradual export output
 	int32 autoDetectResumeId(not_null<PeerData*> peer,
-		QString *exportDirOut = nullptr);
+		QString *exportDirOut = nullptr,
+		int32 *skipCountOut = nullptr);
 
 	// Async resume detection by scanning channel documents via API
 	void startResumeDetection(
