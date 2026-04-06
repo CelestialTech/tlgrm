@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #111118; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="importmap">
+{
+  "imports": {
+    "three": "../site/js/vendor/three.module.min.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const canvas = document.getElementById('c');
+const w = canvas.clientWidth;
+const h = canvas.clientHeight;
+
+// Renderer
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(w, h, false);
+renderer.setClearColor(0x333344, 1);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+// Camera — 2:1 dimetric
+const aspect = w / h;
+const d = 20;
+const camera = new THREE.OrthographicCamera(
+  -d * aspect, d * aspect, d, -d, -1000, 1000
+);
+camera.position.set(50, 50, 50);
+camera.lookAt(0, 0, 0);
+
+// Scene
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x333344);
+
+// Lights
+const ambient = new THREE.AmbientLight(0x6a6a8a, 0.6);
+scene.add(ambient);
+
+const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+dir.position.set(10, 20, 10);
+dir.castShadow = true;
+dir.shadow.mapSize.set(1024, 1024);
+scene.add(dir);
+
+// ─── OBJECT UNDER REVIEW ────────────────────────────────────
+// Replace this section with the object being reviewed
+
+// Ground grid
+const GRID = 20;
+const HALF = (GRID - 1) / 2;
+const tileGeo = new THREE.BoxGeometry(0.9, 0.1, 0.9);
+const tileMat = new THREE.MeshStandardMaterial({
+  color: 0x1a3a4a, roughness: 0.9, metalness: 0.1
+});
+const ground = new THREE.InstancedMesh(tileGeo, tileMat, GRID * GRID);
+ground.receiveShadow = true;
+const dummy = new THREE.Object3D();
+let idx = 0;
+for (let r = 0; r < GRID; r++) {
+  for (let c = 0; c < GRID; c++) {
+    dummy.position.set(c - HALF, -0.05, r - HALF);
+    dummy.updateMatrix();
+    ground.setMatrixAt(idx++, dummy.matrix);
+  }
+}
+ground.instanceMatrix.needsUpdate = true;
+scene.add(ground);
+
+// Test cube
+const cubeGeo = new THREE.BoxGeometry(2, 4, 2);
+const cubeMat = new THREE.MeshStandardMaterial({
+  color: 0x00ffd4, emissive: 0x00ffd4, emissiveIntensity: 0.15,
+  roughness: 0.4, metalness: 0.2
+});
+const cube = new THREE.Mesh(cubeGeo, cubeMat);
+cube.position.set(0, 2, 0);
+cube.castShadow = true;
+cube.receiveShadow = true;
+scene.add(cube);
+
+// ─── END OBJECT ──────────────────────────────────────────────
+
+// Expose for CDP debugging
+window.__scene = scene;
+window.__camera = camera;
+window.__renderer = renderer;
+
+// Turntable — rotate quickly, pause on 4 isometric faces
+const STOPS = [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2]; // 0°, 90°, 180°, 270°
+const PAUSE_MS = 1500;   // hold each face
+const SPIN_SPEED = 0.03; // radians per frame between stops
+const SNAP_THRESHOLD = 0.04; // how close to snap to a stop
+
+let currentStop = 0;
+let paused = false;
+let pauseStart = 0;
+
+function render(now) {
+  if (paused) {
+    if (now - pauseStart >= PAUSE_MS) {
+      paused = false;
+      currentStop = (currentStop + 1) % STOPS.length;
+    }
+  } else {
+    const target = STOPS[currentStop];
+    let angle = scene.rotation.y % (2 * Math.PI);
+    if (angle < 0) angle += 2 * Math.PI;
+
+    let diff = target - angle;
+    if (diff < 0) diff += 2 * Math.PI;
+
+    if (diff < SNAP_THRESHOLD || diff > 2 * Math.PI - SNAP_THRESHOLD) {
+      scene.rotation.y = target;
+      paused = true;
+      pauseStart = now;
+    } else {
+      scene.rotation.y += SPIN_SPEED;
+    }
+  }
+  renderer.render(scene, camera);
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+window.__rendered = true;
+</script>
+</body>
+</html>
