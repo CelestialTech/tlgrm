@@ -87,6 +87,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
+#include "mcp/mcp_server.h"
+#include "mcp/mcp_bridge.h"
 #include "boxes/abstract_box.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
@@ -204,6 +206,13 @@ Application::Application()
 		if (session && !UpdaterDisabled()) { // #TODO multi someSessionValue
 			UpdateChecker().setMtproto(session);
 		}
+		// Pass active session to MCP server for live data access. The server is
+		// constructed later in run(), so _mcpServer is read at fire time, not now.
+		if (session && _mcpServer) {
+			_mcpServer->setSession(session);
+		} else if (!session && _mcpServer) {
+			_mcpServer->clearSession();
+		}
 	}, _lifetime);
 }
 
@@ -219,6 +228,12 @@ void Application::closeAdditionalWindows() {
 }
 
 Application::~Application() {
+	// Stop the MCP bridge and server before any other cleanup: the bridge holds
+	// a raw pointer to the server, and session-bound components inside the
+	// server touch data owned by the rest of Application during teardown.
+	_mcpBridge = nullptr;
+	_mcpServer = nullptr;
+
 	if (_saveSettingsTimer && _saveSettingsTimer->isActive()) {
 		Local::writeSettings();
 	}
@@ -420,6 +435,67 @@ void Application::run() {
 		countries->lifetime().add([=] {
 			[[maybe_unused]] const auto countriesCopy = countries;
 		});
+	}
+
+	// MCP is a feature of Tlgrm, not a mode: the server and its IPC bridge always
+	// start. The --mcp flag only selects the stdio transport (for a stdio MCP
+	// client); without it the bridge socket is still created.
+	const auto args = QCoreApplication::arguments();
+	const auto hasMcpStdioFlag = args.contains(u"--mcp"_q);
+
+	_mcpServer = std::make_unique<MCP::Server>();
+
+	const auto transport = hasMcpStdioFlag
+		? MCP::TransportType::Stdio
+		: MCP::TransportType::IPC;
+
+	if (_mcpServer->start(transport)) {
+		DEBUG_LOG(("MCP: Server started (transport: %1)"
+			).arg(hasMcpStdioFlag ? "stdio" : "ipc"));
+
+		domain().activeSessionValue(
+		) | rpl::on_next([=](Main::Session *session) {
+			if (session && _mcpServer) {
+				_mcpServer->setSession(session);
+			} else if (!session && _mcpServer) {
+				_mcpServer->clearSession();
+			}
+		}, _lifetime);
+
+		// Once the domain has started, bind to whichever account already has a
+		// session and follow future session changes for each account.
+		(
+			domain().activeValue(
+			) | rpl::to_empty | rpl::filter([=] {
+				return domain().started();
+			}) | rpl::take(1)
+		) | rpl::on_next([=] {
+			for (const auto &[index, account] : domain().accounts()) {
+				if (auto *existingSession = account->maybeSession()) {
+					if (_mcpServer && !_mcpServer->hasSession()) {
+						_mcpServer->setSession(existingSession);
+					}
+				}
+				account->sessionValue(
+				) | rpl::on_next([this](Main::Session *session) {
+					if (session && _mcpServer && !_mcpServer->hasSession()) {
+						_mcpServer->setSession(session);
+					}
+				}, _lifetime);
+			}
+		}, _lifetime);
+
+		_mcpBridge = std::make_unique<MCP::Bridge>();
+		if (_mcpBridge->start("/tmp/tdesktop_mcp.sock")) {
+			_mcpBridge->setServer(_mcpServer.get());
+			DEBUG_LOG(("MCP: IPC bridge started on /tmp/tdesktop_mcp.sock"));
+		} else {
+			LOG(("MCP Error: Failed to start IPC bridge"));
+			_mcpBridge = nullptr;
+		}
+	} else {
+		LOG(("MCP Error: Failed to start server"));
+		_mcpServer = nullptr;
 	}
 
 	processCreatedWindow(_lastActivePrimaryWindow);
