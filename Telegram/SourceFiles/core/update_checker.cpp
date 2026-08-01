@@ -998,7 +998,7 @@ void MtpChecker::start() {
 		return;
 	}
 	const auto updaterVersion = Platform::AutoUpdateVersion();
-	const auto feed = "tdhbcfeed"
+	const auto feed = "tlgrmfeed"
 		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
 	MTP::ResolveChannel(&_mtp, feed, [=](
 			const MTPInputChannel &channel) {
@@ -1801,7 +1801,7 @@ bool checkReadyUpdate() {
 	QFileInfo updater(cWorkingDir() + u"tupdates/temp/Updater.exe"_q);
 #elif defined Q_OS_MAC // Q_OS_WIN
 	QString curUpdater = (cExeDir() + cExeName() + u"/Contents/Frameworks/Updater"_q);
-	QFileInfo updater(cWorkingDir() + u"tupdates/temp/Telegram.app/Contents/Frameworks/Updater"_q);
+	QFileInfo updater(cWorkingDir() + u"tupdates/temp/Tlgrm.app/Contents/Frameworks/Updater"_q);
 #else // Q_OS_MAC
 	QString curUpdater = (cExeDir() + u"Updater"_q);
 	QFileInfo updater(cWorkingDir() + u"tupdates/temp/Updater"_q);
@@ -1879,21 +1879,24 @@ bool checkReadyUpdate() {
 
 void UpdateApplication() {
 	if (UpdaterDisabled()) {
-		const auto url = [&] {
+		const auto url = [&]() -> QString {
 #ifdef OS_WIN_STORE
-			return "https://www.microsoft.com/en-us/store/p/telegram-desktop/9nztwsqntd0s";
+			return u"https://www.microsoft.com/en-us/store/p/telegram-desktop/9nztwsqntd0s"_q;
 #elif defined OS_MAC_STORE // OS_WIN_STORE
-			return "https://itunes.apple.com/ae/app/telegram-desktop/id946399090";
+			return u"https://itunes.apple.com/ae/app/telegram-desktop/id946399090"_q;
 #else // OS_WIN_STORE || OS_MAC_STORE
 			if (KSandbox::isFlatpak()) {
-				return "https://flathub.org/apps/details/org.telegram.desktop";
+				return u"https://flathub.org/apps/details/org.telegram.desktop"_q;
 			} else if (KSandbox::isSnap()) {
-				return "https://snapcraft.io/telegram-desktop";
+				return u"https://snapcraft.io/telegram-desktop"_q;
 			}
-			return "https://desktop.telegram.org";
+			// No public download page is offered for this build.
+			return QString();
 #endif // OS_WIN_STORE || OS_MAC_STORE
 		}();
-		UrlClickHandler::Open(url);
+		if (!url.isEmpty()) {
+			UrlClickHandler::Open(url);
+		}
 	} else {
 		cSetAutoUpdate(true);
 		const auto window = Core::IsAppLaunched()
