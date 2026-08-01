@@ -68,6 +68,7 @@ struct ProcessingState {
 
 	int itemIndex = 0;
 	int itemCount = 0;
+	int itemSkipped = 0;  // messages skipped (already exported)
 
 	uint64 bytesRandomId = 0;
 	QString bytesName;
@@ -77,13 +78,22 @@ struct ProcessingState {
 
 struct ApiErrorState {
 	MTP::Error data;
+	int32 resumeMessageId = 0;
+	int messagesWritten = 0;
+	QString exportPath;
 };
 
 struct OutputErrorState {
 	QString path;
+	int32 resumeMessageId = 0;
+	int messagesWritten = 0;
+	QString exportPath;
 };
 
 struct CancelledState {
+	int32 resumeMessageId = 0;
+	int messagesWritten = 0;
+	QString exportPath;
 };
 
 struct FinishedState {

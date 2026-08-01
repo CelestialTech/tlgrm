@@ -34,10 +34,10 @@ struct MediaSettings {
 	friend inline constexpr auto is_flag_type(Type) { return true; };
 
 	Types types = DefaultTypes();
-	int64 sizeLimit = 8 * 1024 * 1024;
+	int64 sizeLimit = 4000 * int64(1024 * 1024); // No limit (4GB max)
 
 	static inline Types DefaultTypes() {
-		return Type::Photo;
+		return Type::AllMask;
 	}
 
 };
@@ -85,14 +85,21 @@ struct Settings {
 	MediaSettings media;
 
 	MTPInputPeer singlePeer = MTP_inputPeerEmpty();
+	QString singlePeerName;  // Name for export directory
+	QString singlePeerType;  // "Chat", "Group", or "Channel"
 	TimeId singlePeerFrom = 0;
 	TimeId singlePeerTill = 0;
+	int32 singlePeerResumeFromId = 0;
+	int32 singlePeerResumeSkipCount = 0;
+	QString resumeExportDir;  // If set, reuse this directory instead of creating new
 
 	int32 singleTopicRootId = 0;
 	uint64 singleTopicPeerId = 0;
 	QString singleTopicTitle;
 
 	TimeId availableAt = 0;
+
+	bool gradualMode = false;
 
 	bool onlySinglePeer() const {
 		return singlePeer.type() != mtpc_inputPeerEmpty;

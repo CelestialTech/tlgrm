@@ -8,10 +8,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export/export_manager.h"
 
 #include "export/export_controller.h"
+#include "export/export_settings.h"
 #include "export/view/export_view_panel_controller.h"
 #include "data/data_peer.h"
 #include "main/main_session.h"
 #include "main/main_account.h"
+#include "storage/storage_account.h"
 #include "ui/layers/box_content.h"
 #include "base/unixtime.h"
 
@@ -23,6 +25,40 @@ Manager::~Manager() = default;
 
 void Manager::start(not_null<PeerData*> peer) {
 	start(&peer->session(), peer->input());
+}
+
+void Manager::startAutoExport(
+		not_null<PeerData*> peer,
+		const Settings &settings) {
+	if (_panel) {
+		_panel->activatePanel();
+		return;
+	}
+	auto session = &peer->session();
+	// Use the settings' singlePeer if it has an access hash (from TDF),
+	// otherwise fall back to peer->input() (which may be empty for
+	// unresolved peers created via data().peer(id)).
+	const auto inputPeer = (settings.singlePeer.type() != mtpc_inputPeerEmpty)
+		? settings.singlePeer
+		: peer->input();
+	if (inputPeer.type() == mtpc_inputPeerEmpty) {
+		qWarning() << "Export: startAutoExport failed - no valid inputPeer for"
+			<< peer->name();
+		return;
+	}
+	_controller = std::make_unique<Controller>(
+		&session->mtp(),
+		inputPeer);
+	setupPanel(session);
+
+	auto resolved = settings;
+	resolved.singlePeer = inputPeer;
+	View::ResolveSettings(session, resolved);
+	qWarning() << "Export: startAutoExport peer=" << peer->name()
+	           << "resumeFromId=" << resolved.singlePeerResumeFromId
+	           << "skipCount=" << resolved.singlePeerResumeSkipCount
+	           << "resumeDir=" << resolved.resumeExportDir;
+	_panel->startExportNow(resolved);
 }
 
 void Manager::startTopic(

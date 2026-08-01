@@ -19,6 +19,7 @@ class Session;
 
 namespace Export {
 
+struct Settings;
 class Controller;
 
 namespace View {
@@ -34,6 +35,11 @@ public:
 	void start(
 		not_null<Main::Session*> session,
 		const MTPInputPeer &singlePeer = MTP_inputPeerEmpty());
+	// Auto-start export without waiting for user to click Start.
+	// Shows progress panel immediately.
+	void startAutoExport(
+		not_null<PeerData*> peer,
+		const Settings &settings);
 	void startTopic(
 		not_null<PeerData*> peer,
 		MsgId topicRootId,
