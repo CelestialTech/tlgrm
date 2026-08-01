@@ -1013,9 +1013,12 @@ mac:
         -D WITH_SvtEnc=OFF \\
         -D WITH_RAV1E=OFF \\
         -D WITH_DAV1D=ON \\
+        -D DAV1D_INCLUDE_DIR=$USED_PREFIX/include/ \\
+        -D DAV1D_LIBRARY=$USED_PREFIX/lib/libdav1d.a \\
         -D WITH_LIBDE265=ON \\
         -D LIBDE265_INCLUDE_DIR=$USED_PREFIX/include/ \\
         -D LIBDE265_LIBRARY=$USED_PREFIX/lib/libde265.a \\
+        -D WITH_GDK_PIXBUF=OFF \\
         -D WITH_LIBSHARPYUV=OFF \\
         -D CMAKE_DISABLE_FIND_PACKAGE_TIFF=TRUE \\
         -D CMAKE_DISABLE_FIND_PACKAGE_JPEG=TRUE \\
