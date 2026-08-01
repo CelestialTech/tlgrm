@@ -15,6 +15,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export/output/export_output_stats.h"
 #include "mtproto/mtp_instance.h"
 
+#include <QtCore/QStorageInfo>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+#include <QtCore/QFile>
+#include <QtCore/QDir>
+#include <QtCore/QDateTime>
+
 namespace Export {
 namespace {
 
@@ -22,7 +29,13 @@ const auto kNullStateCallback = [](ProcessingState&) {};
 
 Settings NormalizeSettings(const Settings &settings) {
 	if (!settings.onlySinglePeer()) {
-		return base::duplicate(settings);
+		auto result = base::duplicate(settings);
+		// Clear single-peer resume fields to prevent them leaking
+		// into multi-dialog exports (they are per-dialog, not global).
+		result.singlePeerResumeFromId = 0;
+		result.singlePeerResumeSkipCount = 0;
+		result.resumeExportDir.clear();
+		return result;
 	}
 	auto result = base::duplicate(settings);
 	result.types = result.fullChats = Settings::Type::AnyChatsMask;
@@ -70,6 +83,9 @@ private:
 	void ioError(const QString &path);
 	bool ioCatchError(Output::Result result);
 	void setFinishedState();
+	void writeResumeStateJson(
+		uint64 peerId,
+		const QByteArray &peerName);
 
 	//void requestPasswordState();
 	//void passwordStateDone(const MTPaccount_Password &password);
@@ -123,6 +139,7 @@ private:
 
 	int _messagesWritten = 0;
 	int _messagesCount = 0;
+	int _messagesSkipped = 0;
 
 	int _userpicsWritten = 0;
 	int _userpicsCount = 0;
@@ -152,6 +169,8 @@ private:
 	uint64 _topicPeerId = 0;
 	QString _topicTitle;
 
+	qint64 _lastResumeJsonWriteMs = 0;
+
 	rpl::lifetime _lifetime;
 
 };
@@ -164,7 +183,16 @@ ControllerObject::ControllerObject(
 , _state(PasswordCheckState{}) {
 	_api.errors(
 	) | rpl::on_next([=](const MTP::Error &error) {
-		setState(ApiErrorState{ error });
+		auto errorState = ApiErrorState{ error };
+		const auto progress = _api.currentResumeProgress();
+		errorState.resumeMessageId = progress.lastMessageId;
+		errorState.messagesWritten = _messagesWritten;
+		errorState.exportPath = _settings.path;
+		qWarning() << "[Export] Error occurred, saving resume state:"
+			<< "msgId=" << progress.lastMessageId
+			<< "written=" << _messagesWritten
+			<< "path=" << _settings.path;
+		setState(std::move(errorState));
 	}, _lifetime);
 
 	_api.ioErrors(
@@ -194,7 +222,16 @@ ControllerObject::ControllerObject(
 , _topicTitle(topicTitle) {
 	_api.errors(
 	) | rpl::on_next([=](const MTP::Error &error) {
-		setState(ApiErrorState{ error });
+		auto errorState = ApiErrorState{ error };
+		const auto progress = _api.currentResumeProgress();
+		errorState.resumeMessageId = progress.lastMessageId;
+		errorState.messagesWritten = _messagesWritten;
+		errorState.exportPath = _settings.path;
+		qWarning() << "[Export] Error occurred, saving resume state:"
+			<< "msgId=" << progress.lastMessageId
+			<< "written=" << _messagesWritten
+			<< "path=" << _settings.path;
+		setState(std::move(errorState));
 	}, _lifetime);
 
 	_api.ioErrors(
@@ -237,7 +274,16 @@ void ControllerObject::setState(State &&state) {
 }
 
 void ControllerObject::ioError(const QString &path) {
-	setState(OutputErrorState{ path });
+	auto errorState = OutputErrorState{ path };
+	const auto progress = _api.currentResumeProgress();
+	errorState.resumeMessageId = progress.lastMessageId;
+	errorState.messagesWritten = _messagesWritten;
+	errorState.exportPath = _settings.path;
+	qWarning() << "[Export] IO error occurred, saving resume state:"
+		<< "msgId=" << progress.lastMessageId
+		<< "written=" << _messagesWritten
+		<< "path=" << _settings.path;
+	setState(std::move(errorState));
 }
 
 bool ControllerObject::ioCatchError(Output::Result result) {
@@ -304,6 +350,34 @@ void ControllerObject::startExport(
 	_settings.singleTopicPeerId = _topicPeerId;
 
 	_settings.path = Output::NormalizePath(_settings);
+
+	// If resume dir was requested but NormalizePath fell through
+	// (dir deleted), clear resume fields to avoid partial export.
+	if (!_settings.resumeExportDir.isEmpty()
+		&& !_settings.path.startsWith(
+			QDir(_settings.resumeExportDir).absolutePath())) {
+		qWarning() << "[Export] Resume dir lost, starting fresh export";
+		_settings.singlePeerResumeFromId = 0;
+		_settings.singlePeerResumeSkipCount = 0;
+		_settings.resumeExportDir.clear();
+	}
+
+	// Disk space check — warn if less than 1 GB available at export path
+	{
+		const auto exportDir = QFileInfo(_settings.path).absolutePath();
+		const auto storage = QStorageInfo(exportDir);
+		const auto availableGb = storage.bytesAvailable() / (1024.0 * 1024.0 * 1024.0);
+		if (storage.isValid() && availableGb < 1.0) {
+			qWarning() << "[Export] LOW DISK SPACE:"
+				<< QString::number(availableGb, 'f', 2) << "GB available at"
+				<< exportDir;
+		} else if (storage.isValid()) {
+			qInfo() << "[Export] Disk space available:"
+				<< QString::number(availableGb, 'f', 1) << "GB at"
+				<< exportDir;
+		}
+	}
+
 	_writer = Output::CreateWriter(_settings.format);
 	fillExportSteps();
 	exportNext();
@@ -398,7 +472,12 @@ void ControllerObject::fillSubstepsInSteps(const ApiWrap::StartInfo &info) {
 
 void ControllerObject::cancelExportFast() {
 	_api.cancelExportFast();
-	setState(CancelledState());
+	auto cancelled = CancelledState();
+	const auto progress = _api.currentResumeProgress();
+	cancelled.resumeMessageId = progress.lastMessageId;
+	cancelled.messagesWritten = _messagesWritten;
+	cancelled.exportPath = _settings.path;
+	setState(std::move(cancelled));
 }
 
 void ControllerObject::exportNext() {
@@ -592,20 +671,54 @@ void ControllerObject::exportNextDialog() {
 			if (ioCatchError(_writer->writeDialogStart(info))) {
 				return false;
 			}
-			_messagesWritten = 0;
 			_messagesCount = ranges::accumulate(
 				info.messagesCountPerSplit,
 				0);
+			_messagesSkipped = std::min(
+				_settings.singlePeerResumeSkipCount,
+				_messagesCount);
+			_messagesWritten = _messagesSkipped;
 			setState(stateDialogs(DownloadProgress()));
 			return true;
+		}, [=](const Data::MessagesSlice &slice) {
+			_writer->writeMessageFragments(slice);
 		}, [=](DownloadProgress progress) {
+			// Write resume state during file downloads too (throttled)
+			// so crashes mid-download don't lose all progress.
+			const auto nowMs = QDateTime::currentMSecsSinceEpoch();
+			if (nowMs - _lastResumeJsonWriteMs > 30000) {
+				_lastResumeJsonWriteMs = nowMs;
+				if (const auto *dialog = _dialogsInfo.item(_dialogIndex)) {
+					writeResumeStateJson(
+						dialog->peerId.value,
+						dialog->name);
+				}
+			}
 			setState(stateDialogs(progress));
 			return true;
 		}, [=](Data::MessagesSlice &&result) {
 			if (ioCatchError(_writer->writeDialogSlice(result))) {
 				return false;
 			}
+			if (!result.list.empty()) {
+				_settings.singlePeerResumeFromId = result.list.back().id;
+			}
 			_messagesWritten += result.list.size();
+			// Update total from live API count (initial estimate can be stale)
+			if (result.serverCount > 0) {
+				const auto adjusted = result.serverCount
+					+ _messagesSkipped;
+				if (adjusted > _messagesCount) {
+					_messagesCount = adjusted;
+				}
+			}
+			_settings.singlePeerResumeSkipCount = _messagesWritten;
+			_settings.resumeExportDir = _settings.path;
+			if (const auto *dialog = _dialogsInfo.item(_dialogIndex)) {
+				writeResumeStateJson(
+					dialog->peerId.value,
+					dialog->name);
+			}
 			setState(stateDialogs(DownloadProgress()));
 			return true;
 		}, [=] {
@@ -744,8 +857,11 @@ void ControllerObject::fillMessagesState(
 		: (dialog->type == Data::DialogInfo::Type::VerifyCodes)
 		? ProcessingState::EntityType::VerifyCodes
 		: ProcessingState::EntityType::Chat;
-	result.itemIndex = _messagesWritten + progress.itemIndex;
-	result.itemCount = std::max(_messagesCount, result.itemIndex);
+	result.itemIndex = std::min(
+		_messagesWritten + progress.itemIndex,
+		_messagesCount);
+	result.itemCount = std::max(_messagesCount, _messagesWritten);
+	result.itemSkipped = _messagesSkipped;
 	result.bytesRandomId = progress.randomId;
 	if (!progress.path.isEmpty()) {
 		const auto last = progress.path.lastIndexOf('/');
@@ -782,6 +898,9 @@ void ControllerObject::exportTopic() {
 			setState(stateTopic(DownloadProgress()));
 			return true;
 		},
+		[=](const Data::MessagesSlice &slice) {
+			_writer->writeMessageFragments(slice);
+		},
 		[=](DownloadProgress progress) {
 			setState(stateTopic(progress));
 			return true;
@@ -790,7 +909,19 @@ void ControllerObject::exportTopic() {
 			if (ioCatchError(_writer->writeDialogSlice(slice))) {
 				return false;
 			}
+			if (!slice.list.empty()) {
+				_settings.singlePeerResumeFromId = slice.list.back().id;
+			}
 			_messagesWritten += slice.list.size();
+			if (slice.serverCount > 0
+				&& slice.serverCount > _messagesCount) {
+				_messagesCount = slice.serverCount;
+			}
+			_settings.singlePeerResumeSkipCount = _messagesWritten;
+			_settings.resumeExportDir = _settings.path;
+			writeResumeStateJson(
+				_topicPeerId,
+				_topicTitle.toUtf8());
 			setState(stateTopic(DownloadProgress()));
 			return true;
 		},
@@ -814,8 +945,10 @@ ProcessingState ControllerObject::stateTopic(
 		result.entityName = _topicTitle;
 		result.entityIndex = 0;
 		result.entityCount = 1;
-		result.itemIndex = _messagesWritten + progress.itemIndex;
-		result.itemCount = std::max(_messagesCount, result.itemIndex);
+		result.itemIndex = std::min(
+			_messagesWritten + progress.itemIndex,
+			_messagesCount);
+		result.itemCount = std::max(_messagesCount, _messagesWritten);
 		result.bytesRandomId = progress.randomId;
 		if (!progress.path.isEmpty()) {
 			const auto last = progress.path.lastIndexOf('/');
@@ -826,11 +959,128 @@ ProcessingState ControllerObject::stateTopic(
 	});
 }
 
+void ControllerObject::writeResumeStateJson(
+		uint64 peerId,
+		const QByteArray &peerName) {
+	if (_settings.path.isEmpty()) {
+		return;
+	}
+	const auto progress = _api.currentResumeProgress();
+	const auto lastMsgId = _settings.singlePeerResumeFromId
+		? _settings.singlePeerResumeFromId
+		: progress.lastMessageId;
+	if (lastMsgId <= 0 && _messagesWritten <= 0) {
+		return;
+	}
+
+	QJsonObject state;
+	state["last_message_id"] = lastMsgId;
+	state["messages_written"] = _messagesWritten;
+	state["messages_total"] = _messagesCount;
+	state["peer_id"] = QString::number(peerId);
+	state["peer_name"] = QString::fromUtf8(peerName);
+	state["export_dir"] = _settings.path;
+	state["updated_at"] = QDateTime::currentDateTimeUtc()
+		.toString(Qt::ISODate);
+
+	// Serialize the MTPInputPeer so auto-resume can reconstruct it
+	// without needing the peer to be loaded from the API.
+	_settings.singlePeer.match(
+		[&](const MTPDinputPeerUser &data) {
+			state["input_peer_type"] = QStringLiteral("user");
+			state["input_peer_id"] = QString::number(
+				static_cast<quint64>(data.vuser_id().v));
+			state["input_peer_hash"] = QString::number(
+				static_cast<qint64>(data.vaccess_hash().v));
+		}, [&](const MTPDinputPeerChat &data) {
+			state["input_peer_type"] = QStringLiteral("chat");
+			state["input_peer_id"] = QString::number(
+				static_cast<quint64>(data.vchat_id().v));
+		}, [&](const MTPDinputPeerChannel &data) {
+			state["input_peer_type"] = QStringLiteral("channel");
+			state["input_peer_id"] = QString::number(
+				static_cast<quint64>(data.vchannel_id().v));
+			state["input_peer_hash"] = QString::number(
+				static_cast<qint64>(data.vaccess_hash().v));
+		}, [](const auto &) {});
+
+	const auto json = QJsonDocument(state).toJson(
+		QJsonDocument::Indented);
+	const auto filePath = _settings.path + u"resume_state.json"_q;
+	const auto tmpPath = filePath + u".tmp"_q;
+
+	QFile tmp(tmpPath);
+	if (tmp.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		tmp.write(json);
+		tmp.close();
+		// Atomic rename: overwrite existing resume_state.json
+		QFile::remove(filePath);
+		QFile::rename(tmpPath, filePath);
+	}
+}
+
 void ControllerObject::setFinishedState() {
+	auto totalFiles = _stats.filesCount();
+	auto totalBytes = _stats.bytesCount();
+
+	// For resumed exports, count ALL files in the export directory
+	// (not just the ones downloaded in this run).
+	if (_settings.singlePeerResumeSkipCount > 0
+		&& !_settings.path.isEmpty()) {
+		const QDir dir(_settings.path);
+		int diskFiles = 0;
+		int64 diskBytes = 0;
+		// Scan all subdirectories dynamically instead of hardcoding names,
+		// so we catch any media directories the writer creates.
+		const auto subdirs = dir.entryList(
+			QDir::Dirs | QDir::NoDotAndDotDot);
+		for (const auto &sub : subdirs) {
+			const QDir subDir(dir.absoluteFilePath(sub));
+			for (const auto &fi : subDir.entryInfoList(QDir::Files)) {
+				++diskFiles;
+				diskBytes += fi.size();
+			}
+		}
+		if (diskFiles > totalFiles) {
+			totalFiles = diskFiles;
+			totalBytes = diskBytes;
+		}
+	}
+
+	// Clean up .dl_ temp files left by interrupted downloads.
+	// These are incomplete files that were being downloaded when
+	// the export was interrupted — safe to delete unconditionally.
+	if (!_settings.path.isEmpty()) {
+		const QDir dir(_settings.path);
+		const auto subdirs = dir.entryList(
+			QDir::Dirs | QDir::NoDotAndDotDot);
+		int cleaned = 0;
+		for (const auto &sub : subdirs) {
+			const QDir subDir(dir.absoluteFilePath(sub));
+			for (const auto &fi : subDir.entryInfoList(
+					QDir::Files | QDir::Hidden)) {
+				if (fi.fileName().startsWith(QStringLiteral(".dl_"))) {
+					if (QFile::remove(fi.absoluteFilePath())) {
+						++cleaned;
+					}
+				}
+			}
+		}
+		if (cleaned > 0) {
+			qInfo() << "[Export] Cleaned up"
+				<< cleaned << "incomplete downloads";
+		}
+	}
+
+	// Remove resume_state.json — export completed successfully.
+	if (!_settings.path.isEmpty()) {
+		QFile::remove(_settings.path + u"resume_state.json"_q);
+	}
+
 	setState(FinishedState{
 		_writer->mainFilePath(),
-		_stats.filesCount(),
-		_stats.bytesCount() });
+		totalFiles,
+		totalBytes });
 }
 
 Controller::Controller(

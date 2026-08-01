@@ -1322,6 +1322,7 @@ void FinalizeDialogsInfo(DialogsInfo &info, const Settings &settings);
 struct MessagesSlice {
 	std::vector<Message> list;
 	std::map<PeerId, Peer> peers;
+	int serverCount = 0; // Latest total from API (updates per-slice)
 };
 
 MessagesSlice ParseMessagesSlice(

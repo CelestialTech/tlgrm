@@ -21,6 +21,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "main/main_session.h"
 #include "data/data_session.h"
+#include "data/data_peer.h"
+#include "data/data_user.h"
+#include "data/data_channel.h"
 #include "base/platform/base_platform_info.h"
 #include "base/unixtime.h"
 #include "base/qt/qt_common_adapters.h"
@@ -132,6 +135,42 @@ void ResolveSettings(not_null<Main::Session*> session, Settings &settings) {
 	}
 	if (!settings.onlySinglePeer()) {
 		settings.singlePeerFrom = settings.singlePeerTill = 0;
+	} else {
+		// Populate peer name and type for directory naming
+		const auto peerId = settings.singlePeer.match([](const MTPDinputPeerUser &data) {
+			return peerFromUser(data.vuser_id().v);
+		}, [](const MTPDinputPeerUserFromMessage &data) {
+			return peerFromUser(data.vuser_id().v);
+		}, [](const MTPDinputPeerChat &data) {
+			return peerFromChat(data.vchat_id().v);
+		}, [](const MTPDinputPeerChannel &data) {
+			return peerFromChannel(data.vchannel_id().v);
+		}, [](const MTPDinputPeerChannelFromMessage &data) {
+			return peerFromChannel(data.vchannel_id().v);
+		}, [&](const MTPDinputPeerSelf &data) {
+			return session->userPeerId();
+		}, [](const MTPDinputPeerEmpty &data) {
+			return PeerId(0);
+		});
+
+		if (peerId) {
+			if (const auto peer = session->data().peerLoaded(peerId)) {
+				settings.singlePeerName = peer->name();
+				// Determine peer type for directory naming
+				if (peer->isUser()) {
+					settings.singlePeerType = u"Chat"_q;
+				} else if (const auto channel = peer->asChannel()) {
+					if (channel->isBroadcast()) {
+						settings.singlePeerType = u"Channel"_q;
+					} else {
+						settings.singlePeerType = u"Group"_q;
+					}
+				} else {
+					// Legacy chat (basic group)
+					settings.singlePeerType = u"Group"_q;
+				}
+			}
+		}
 	}
 }
 
@@ -166,7 +205,10 @@ void PanelController::activatePanel() {
 	}
 }
 
-void PanelController::createPanel() {
+void PanelController::ensurePanel() {
+	if (_panel) {
+		return;
+	}
 	const auto singlePeer = _settings->onlySinglePeer();
 	const auto singleTopic = _settings->onlySingleTopic();
 	_panel = base::make_unique_q<Ui::SeparatePanel>(Ui::SeparatePanelArgs{
@@ -177,13 +219,19 @@ void PanelController::createPanel() {
 		: singlePeer
 		? tr::lng_export_header_chats
 		: tr::lng_export_title)());
+	_panel->setInnerSize(singlePeer
+		? st::exportSinglePeerPanelSize
+		: st::exportPanelSize);
 	_panel->closeRequests(
 	) | rpl::on_next([=] {
 		LOG(("Export Info: Panel Hide By Close."));
 		_panel->hideGetDuration();
 	}, _panel->lifetime());
 	_panelCloseEvents.fire(_panel->closeEvents());
+}
 
+void PanelController::createPanel() {
+	ensurePanel();
 	showSettings();
 }
 
@@ -192,6 +240,7 @@ void PanelController::showSettings() {
 		_panel,
 		_session,
 		*_settings);
+	const auto settingsPtr = settings.get();
 	settings->setShowBoxCallback([=](object_ptr<Ui::BoxContent> box) {
 		_panel->showBox(
 			std::move(box),
@@ -216,11 +265,36 @@ void PanelController::showSettings() {
 		*_settings = std::move(settings);
 	}, settings->lifetime());
 
-	auto size = st::exportPanelSize;
-	size.setHeight(size.height() + settings->sizeLimitExtraHeight());
-	_panel->setInnerSize(size);
+	// The panel grows in two independent directions: upstream's size-limit
+	// slider may need an extra line of height, and our format chooser reports
+	// the width its (multi-select) options need. Both feed the same size.
+	const auto defaultSize = _settings->onlySinglePeer()
+		? st::exportSinglePeerPanelSize
+		: st::exportPanelSize;
+	const auto extraHeight = settings->sizeLimitExtraHeight();
+	_panel->setInnerSize(QSize(
+		defaultSize.width(),
+		defaultSize.height() + extraHeight));
+
+	settingsPtr->desiredWidth(
+	) | rpl::on_next([=](int desiredWidth) {
+		_panel->setInnerSize(QSize(
+			std::max(defaultSize.width(), desiredWidth),
+			defaultSize.height() + settingsPtr->sizeLimitExtraHeight()));
+	}, settings->lifetime());
 
 	_panel->showInner(std::move(settings));
+}
+
+void PanelController::startExportNow(const Settings &settings) {
+	*_settings = settings;
+	ensurePanel();
+	showProgress();
+	// This path is used by MCP auto-start — keep the panel visible
+	// even when the main window takes focus, so it doesn't hide and
+	// trigger app exit when there are no other visible windows.
+	_panel->setHideOnDeactivate(false);
+	_process->startExport(*_settings, PrepareEnvironment(_session));
 }
 
 void PanelController::showError(const ApiErrorState &error) {
@@ -306,7 +380,7 @@ void PanelController::showProgress() {
 	_settings->availableAt = 0;
 	ClearSuggestStart(_session);
 
-	_panel->setTitle(tr::lng_export_progress_title());
+	_panel->setTitle(rpl::single(u"Exporting"_q));
 
 	auto progress = base::make_unique_q<ProgressWidget>(
 		_panel.get(),
@@ -335,7 +409,8 @@ void PanelController::showProgress() {
 	}, progress->lifetime());
 
 	_panel->showInner(std::move(progress));
-	_panel->setHideOnDeactivate(true);
+	_panel->setHideOnDeactivate(false);
+	_panel->showAndActivate();
 }
 
 void PanelController::stopWithConfirmation(Fn<void()> callback) {
@@ -399,19 +474,56 @@ void PanelController::fillParams(const PasswordCheckState &state) {
 void PanelController::updateState(State &&state) {
 	if (const auto start = std::get_if<PasswordCheckState>(&state)) {
 		fillParams(*start);
+		// Re-resolve settings to update singlePeerName/singlePeerType
+		// from the now-correct singlePeer (fixes stale peer name bug)
+		ResolveSettings(_session, *_settings);
 	}
 	if (!_panel) {
 		createPanel();
 	}
 	_state = std::move(state);
 	if (const auto apiError = std::get_if<ApiErrorState>(&_state)) {
+		if (apiError->resumeMessageId > 0) {
+			_settings->singlePeerResumeFromId = apiError->resumeMessageId;
+			_settings->singlePeerResumeSkipCount = apiError->messagesWritten;
+			_settings->resumeExportDir = apiError->exportPath;
+			qWarning() << "[Export] Persisting resume state on API error:"
+				<< "msgId=" << apiError->resumeMessageId
+				<< "written=" << apiError->messagesWritten
+				<< "dir=" << apiError->exportPath;
+			saveSettings();
+		}
 		showError(*apiError);
 	} else if (const auto error = std::get_if<OutputErrorState>(&_state)) {
+		if (error->resumeMessageId > 0) {
+			_settings->singlePeerResumeFromId = error->resumeMessageId;
+			_settings->singlePeerResumeSkipCount = error->messagesWritten;
+			_settings->resumeExportDir = error->exportPath;
+			qWarning() << "[Export] Persisting resume state on IO error:"
+				<< "msgId=" << error->resumeMessageId
+				<< "written=" << error->messagesWritten
+				<< "dir=" << error->exportPath;
+			saveSettings();
+		}
 		showError(*error);
 	} else if (v::is<FinishedState>(_state)) {
-		_panel->setTitle(tr::lng_export_title());
+		_settings->singlePeerResumeFromId = 0;
+		_settings->singlePeerResumeSkipCount = 0;
+		_settings->resumeExportDir.clear();
+		saveSettings();
+		_panel->setTitle(rpl::single(u"Export Complete"_q));
 		_panel->setHideOnDeactivate(false);
-	} else if (v::is<CancelledState>(_state)) {
+	} else if (const auto cancelled = std::get_if<CancelledState>(&_state)) {
+		// Persist resume state so cancelled exports can be resumed
+		if (cancelled->resumeMessageId > 0) {
+			_settings->singlePeerResumeFromId = cancelled->resumeMessageId;
+			_settings->singlePeerResumeSkipCount = cancelled->messagesWritten;
+			_settings->resumeExportDir = cancelled->exportPath;
+			qWarning() << "[Export] Persisting resume state on cancel:"
+				<< "msgId=" << cancelled->resumeMessageId
+				<< "written=" << cancelled->messagesWritten;
+			saveSettings();
+		}
 		LOG(("Export Info: Stop Panel After Cancel."));
 		stopExport();
 	}

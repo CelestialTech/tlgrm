@@ -13,13 +13,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
-#include "ui/widgets/scroll_area.h"
 #include "ui/widgets/continuous_sliders.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/layers/generic_box.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/text/text_utilities.h"
 #include "ui/boxes/calendar_box.h"
 #include "ui/boxes/choose_time.h"
@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "base/unixtime.h"
 #include "main/main_session.h"
+#include "styles/style_widgets.h"
 #include "styles/style_export.h"
 #include "styles/style_layers.h"
 
@@ -67,29 +68,105 @@ constexpr auto kMegabyte = int64(1024) * 1024;
 	return (optionWidth + labelWidth <= available);
 }
 
+// Multi-select format chooser: unlike upstream's radio group, several output
+// formats can be enabled at once, and the last checked one can't be unchecked.
 void ChooseFormatBox(
 		not_null<Ui::GenericBox*> box,
 		Output::Format format,
 		Fn<void(Output::Format)> done) {
 	using Format = Output::Format;
-	const auto group = std::make_shared<Ui::RadioenumGroup<Format>>(format);
-	const auto addFormatOption = [&](QString label, Format format) {
-		box->addRow(
-			object_ptr<Ui::Radioenum<Format>>(
-				box,
-				group,
-				format,
-				label,
-				st::defaultBoxCheckbox),
-			st::exportSettingPadding);
+
+	const auto hasHtml = [](Format f) {
+		return f == Format::Html || f == Format::HtmlAndJson
+			|| f == Format::HtmlAndMarkdown || f == Format::All;
 	};
+	const auto hasJson = [](Format f) {
+		return f == Format::Json || f == Format::HtmlAndJson
+			|| f == Format::JsonAndMarkdown || f == Format::All;
+	};
+	const auto hasMarkdown = [](Format f) {
+		return f == Format::Markdown || f == Format::HtmlAndMarkdown
+			|| f == Format::JsonAndMarkdown || f == Format::All;
+	};
+
+	const auto htmlChecked = std::make_shared<bool>(hasHtml(format));
+	const auto jsonChecked = std::make_shared<bool>(hasJson(format));
+	const auto markdownChecked = std::make_shared<bool>(hasMarkdown(format));
+
+	const auto htmlBox = std::make_shared<Ui::Checkbox*>(nullptr);
+	const auto jsonBox = std::make_shared<Ui::Checkbox*>(nullptr);
+	const auto markdownBox = std::make_shared<Ui::Checkbox*>(nullptr);
+
+	const auto countChecked = [=] {
+		return (*htmlChecked ? 1 : 0)
+			+ (*jsonChecked ? 1 : 0)
+			+ (*markdownChecked ? 1 : 0);
+	};
+
 	box->setTitle(tr::lng_export_option_choose_format());
-	addFormatOption(tr::lng_export_option_html(tr::now), Format::Html);
-	addFormatOption(tr::lng_export_option_json(tr::now), Format::Json);
-	addFormatOption(
-		tr::lng_export_option_html_and_json(tr::now),
-		Format::HtmlAndJson);
-	box->addButton(tr::lng_settings_save(), [=] { done(group->current()); });
+
+	*htmlBox = box->addRow(
+		object_ptr<Ui::Checkbox>(
+			box,
+			tr::lng_export_option_html(tr::now),
+			*htmlChecked,
+			st::defaultBoxCheckbox),
+		st::exportSettingPadding);
+	(*htmlBox)->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		if (!checked && countChecked() == 1) {
+			(*htmlBox)->setChecked(true);
+		} else {
+			*htmlChecked = checked;
+		}
+	}, (*htmlBox)->lifetime());
+
+	*jsonBox = box->addRow(
+		object_ptr<Ui::Checkbox>(
+			box,
+			tr::lng_export_option_json(tr::now),
+			*jsonChecked,
+			st::defaultBoxCheckbox),
+		st::exportSettingPadding);
+	(*jsonBox)->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		if (!checked && countChecked() == 1) {
+			(*jsonBox)->setChecked(true);
+		} else {
+			*jsonChecked = checked;
+		}
+	}, (*jsonBox)->lifetime());
+
+	*markdownBox = box->addRow(
+		object_ptr<Ui::Checkbox>(
+			box,
+			QString("Markdown"),
+			*markdownChecked,
+			st::defaultBoxCheckbox),
+		st::exportSettingPadding);
+	(*markdownBox)->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		if (!checked && countChecked() == 1) {
+			(*markdownBox)->setChecked(true);
+		} else {
+			*markdownChecked = checked;
+		}
+	}, (*markdownBox)->lifetime());
+
+	const auto computeFormat = [=]() -> Format {
+		const bool h = *htmlChecked;
+		const bool j = *jsonChecked;
+		const bool m = *markdownChecked;
+		if (h && j && m) return Format::All;
+		if (h && j) return Format::HtmlAndJson;
+		if (h && m) return Format::HtmlAndMarkdown;
+		if (j && m) return Format::JsonAndMarkdown;
+		if (h) return Format::Html;
+		if (j) return Format::Json;
+		return Format::Markdown;
+	};
+
+	box->addButton(tr::lng_settings_save(), [=] { done(computeFormat()); });
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 }
 
@@ -144,24 +221,17 @@ void SettingsWidget::changeData(Callback &&callback) {
 }
 
 void SettingsWidget::setupContent() {
-	const auto scroll = Ui::CreateChild<Ui::ScrollArea>(
-		this,
-		st::boxScroll);
-	const auto wrap = scroll->setOwnedWidget(
-		object_ptr<Ui::OverrideMargins>(
-			scroll,
-			object_ptr<Ui::VerticalLayout>(scroll)));
-	const auto content = static_cast<Ui::VerticalLayout*>(wrap->entity());
+	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+	const auto buttons = setupButtons();
 
-	const auto buttons = setupButtons(scroll, wrap);
 	setupOptions(content);
 	setupPathAndFormat(content);
 
 	sizeValue(
 	) | rpl::on_next([=](QSize size) {
-		scroll->resize(size.width(), size.height() - buttons->height());
-		wrap->resizeToWidth(size.width());
 		content->resizeToWidth(size.width());
+		buttons->resizeToWidth(size.width());
+		buttons->moveToLeft(0, size.height() - buttons->height());
 	}, lifetime());
 }
 
@@ -227,7 +297,35 @@ void SettingsWidget::setupFullExportOptions(
 void SettingsWidget::setupMediaOptions(
 		not_null<Ui::VerticalLayout*> container) {
 	if (_singlePeerId != 0) {
-		addMediaOptions(container);
+		// Single peer export offers the media types but no size slider.
+		addMediaOption(
+			container,
+			tr::lng_export_option_photos(tr::now),
+			MediaType::Photo);
+		addMediaOption(
+			container,
+			tr::lng_export_option_video_files(tr::now),
+			MediaType::Video);
+		addMediaOption(
+			container,
+			tr::lng_export_option_voice_messages(tr::now),
+			MediaType::VoiceMessage);
+		addMediaOption(
+			container,
+			tr::lng_export_option_video_messages(tr::now),
+			MediaType::VideoMessage);
+		addMediaOption(
+			container,
+			tr::lng_export_option_stickers(tr::now),
+			MediaType::Sticker);
+		addMediaOption(
+			container,
+			tr::lng_export_option_gifs(tr::now),
+			MediaType::GIF);
+		addMediaOption(
+			container,
+			tr::lng_export_option_files(tr::now),
+			MediaType::File);
 		return;
 	}
 	const auto mediaWrap = container->add(
@@ -275,8 +373,20 @@ void SettingsWidget::setupOtherOptions(
 void SettingsWidget::setupPathAndFormat(
 		not_null<Ui::VerticalLayout*> container) {
 	if (_singlePeerId != 0) {
-		addFormatAndLocationLabel(container);
+		// Gradual export is always on here, so the mode header is dropped
+		// and only its explanation is kept.
+		container->add(object_ptr<Ui::FixedHeightWidget>(container, 18));
+		addSinglePeerFormatLabel(container);
+		addSinglePeerPathLabel(container);
 		addLimitsLabel(container);
+		addResumeFromLabel(container);
+
+		container->add(
+			object_ptr<Ui::FlatLabel>(
+				container,
+				QString::fromUtf8("Exports messages slowly with random pauses to avoid rate limits. Works with restricted channels."),
+				st::exportAboutOptionLabel),
+			st::exportAboutOptionPadding);
 		return;
 	}
 	const auto formatGroup = std::make_shared<Ui::RadioenumGroup<Format>>(
@@ -301,6 +411,7 @@ void SettingsWidget::setupPathAndFormat(
 	addFormatOption(tr::lng_export_option_html(tr::now), Format::Html);
 	addFormatOption(tr::lng_export_option_json(tr::now), Format::Json);
 	addFormatOption(tr::lng_export_option_html_and_json(tr::now), Format::HtmlAndJson);
+	addFormatOption(QString("Markdown"), Format::Markdown);
 }
 
 void SettingsWidget::addLocationLabel(
@@ -352,52 +463,77 @@ void SettingsWidget::chooseFormat() {
 	_showBoxCallback(std::move(box));
 }
 
-void SettingsWidget::addFormatAndLocationLabel(
+void SettingsWidget::addSinglePeerFormatLabel(
 		not_null<Ui::VerticalLayout*> container) {
-#ifndef OS_MAC_STORE
-	auto pathLink = value() | rpl::map([](const Settings &data) {
-		return data.path;
-	}) | rpl::distinct_until_changed(
-	) | rpl::map([=](const QString &path) {
-		const auto text = IsDefaultPath(_session, path)
-			? Core::App().canReadDefaultDownloadPath()
-			? u"Downloads/"_q + File::DefaultDownloadPathFolder(_session)
-			: tr::lng_download_path_temp(tr::now)
-			: path;
-		return tr::link(
-			QDir::toNativeSeparators(text),
-			u"internal:edit_export_path"_q);
-	});
-	auto formatLink = value() | rpl::map([](const Settings &data) {
+	auto formatText = value() | rpl::map([](const Settings &data) {
 		return data.format;
 	}) | rpl::distinct_until_changed(
 	) | rpl::map([](Format format) {
-		const auto text = (format == Format::Html)
-			? "HTML"
-			: (format == Format::Json)
-			? "JSON"
-			: tr::lng_export_option_html_and_json(tr::now);
-		return tr::link(text, u"internal:edit_format"_q);
+		QString formatName;
+		switch (format) {
+		case Format::Html:
+			formatName = u"HTML"_q;
+			break;
+		case Format::Json:
+			formatName = u"JSON"_q;
+			break;
+		case Format::Markdown:
+			formatName = u"Markdown"_q;
+			break;
+		case Format::HtmlAndJson:
+			formatName = u"HTML, JSON"_q;
+			break;
+		case Format::HtmlAndMarkdown:
+			formatName = u"HTML, Markdown"_q;
+			break;
+		case Format::JsonAndMarkdown:
+			formatName = u"JSON, Markdown"_q;
+			break;
+		case Format::All:
+			formatName = u"HTML, JSON, Markdown"_q;
+			break;
+		}
+		auto result = TextWithEntities{ u"Format: "_q };
+		result.append(Ui::Text::Link(formatName, u"internal:edit_format"_q));
+		return result;
 	});
 	const auto label = container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
-			tr::lng_export_option_format_location(
-				lt_format,
-				std::move(formatLink),
-				lt_path,
-				std::move(pathLink),
-				tr::marked),
+			std::move(formatText),
 			st::exportLocationLabel),
 		st::exportLocationPadding);
-	label->overrideLinkClickHandler([=](const QString &url) {
-		if (url == u"internal:edit_export_path"_q) {
-			chooseFolder();
-		} else if (url == u"internal:edit_format"_q) {
-			chooseFormat();
-		} else {
-			Unexpected("Click handler URL in export limits edit.");
-		}
+	label->overrideLinkClickHandler([=] {
+		chooseFormat();
+	});
+}
+
+void SettingsWidget::addSinglePeerPathLabel(
+		not_null<Ui::VerticalLayout*> container) {
+#ifndef OS_MAC_STORE
+	auto pathText = value() | rpl::map([](const Settings &data) {
+		return data.path;
+	}) | rpl::distinct_until_changed(
+	) | rpl::map([=](const QString &path) {
+		const auto pathDisplay = IsDefaultPath(_session, path)
+			? Core::App().canReadDefaultDownloadPath()
+			? u"Downloads/"_q + File::DefaultDownloadPathFolder(_session)
+			: tr::lng_download_path_temp(tr::now)
+			: path;
+		auto result = TextWithEntities{ u"Download path: "_q };
+		result.append(Ui::Text::Link(
+			QDir::toNativeSeparators(pathDisplay),
+			u"internal:edit_export_path"_q));
+		return result;
+	});
+	const auto label = container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			std::move(pathText),
+			st::exportLocationLabel),
+		st::exportLocationPadding);
+	label->overrideLinkClickHandler([=] {
+		chooseFolder();
 	});
 #endif // OS_MAC_STORE
 }
@@ -465,22 +601,33 @@ void SettingsWidget::addLimitsLabel(
 		std::move(tillTimeLink)
 	) | rpl::map(concat);
 
-	auto datesText = tr::lng_export_limits(
-		lt_from,
+	auto text = rpl::single(
+		Ui::Text::Link(
+			tr::lng_export_limits(tr::now, lt_from, QString(), lt_till, QString()),
+			QString())
+	) | rpl::then(rpl::combine(
 		std::move(fromLink),
-		lt_till,
 		std::move(tillLink),
 		tr::marked
 	) | rpl::after_next([=] {
 		container->resizeToWidth(container->width());
-	});
+	}));
 
 	const auto label = container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
-			std::move(datesText),
-			st::boxLabel),
-		st::exportLimitsPadding);
+			std::move(text),
+			st::exportLocationLabel),
+		st::exportLocationPadding);
+
+	// The panel widens itself so the whole date range fits on one line.
+	label->widthValue(
+	) | rpl::on_next([=](int) {
+		const auto textWidth = label->textMaxWidth();
+		const auto padding = st::exportLocationPadding.left()
+			+ st::exportLocationPadding.right();
+		_desiredWidth = std::max(_desiredWidth.current(), textWidth + padding);
+	}, label->lifetime());
 
 	const auto removeTime = [](TimeId dateTime) {
 		return base::unixtime::serialize(
@@ -595,8 +742,61 @@ void SettingsWidget::addLimitsLabel(
 				});
 			};
 			editTimeLimit(now, done);
-		} else {
-			Unexpected("Click handler URL in export limits edit.");
+		}
+	});
+}
+
+void SettingsWidget::addResumeFromLabel(
+		not_null<Ui::VerticalLayout*> container) {
+	auto resumeLink = value() | rpl::map([](const Settings &data) {
+		return data.singlePeerResumeFromId;
+	}) | rpl::distinct_until_changed(
+	) | rpl::map([](int32 id) {
+		const auto text = id > 0
+			? QString("message #%1").arg(id)
+			: QString("beginning");
+		return Ui::Text::Link(text, u"internal:edit_resume"_q);
+	});
+
+	auto text = std::move(resumeLink) | rpl::map([](TextWithEntities link) {
+		auto result = TextWithEntities();
+		result.append(QString::fromUtf8("Resume from: "));
+		result.append(std::move(link));
+		return result;
+	});
+
+	const auto label = container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			std::move(text),
+			st::exportLocationLabel),
+		st::exportLocationPadding);
+
+	label->overrideLinkClickHandler([=](const QString &url) {
+		if (url == u"internal:edit_resume"_q) {
+			_showBoxCallback(Box([=](not_null<Ui::GenericBox*> box) {
+				box->setTitle(rpl::single(
+					QString::fromUtf8("Resume from message ID")));
+				const auto input = box->addRow(
+					object_ptr<Ui::InputField>(
+						box,
+						st::defaultInputField,
+						rpl::single(QString::fromUtf8("Message ID (0 = beginning)")),
+						readData().singlePeerResumeFromId > 0
+							? QString::number(
+								readData().singlePeerResumeFromId)
+							: QString()));
+				box->addButton(tr::lng_settings_save(), [=] {
+					const auto value = input->getLastText().toInt();
+					changeData([&](Settings &settings) {
+						settings.singlePeerResumeFromId = value;
+					});
+					box->closeBox();
+				});
+				box->addButton(tr::lng_cancel(), [=] {
+					box->closeBox();
+				});
+			}));
 		}
 	});
 }
@@ -649,11 +849,7 @@ void SettingsWidget::editDateLimit(
 	_showBoxCallback(std::move(box));
 }
 
-not_null<Ui::RpWidget*> SettingsWidget::setupButtons(
-		not_null<Ui::ScrollArea*> scroll,
-		not_null<Ui::RpWidget*> wrap) {
-	using namespace rpl::mappers;
-
+not_null<Ui::RpWidget*> SettingsWidget::setupButtons() {
 	const auto buttonsPadding = st::defaultBox.buttonPadding;
 	const auto buttonsHeight = buttonsPadding.top()
 		+ st::defaultBoxButton.height
@@ -661,36 +857,18 @@ not_null<Ui::RpWidget*> SettingsWidget::setupButtons(
 	const auto buttons = Ui::CreateChild<Ui::FixedHeightWidget>(
 		this,
 		buttonsHeight);
-	const auto topShadow = Ui::CreateChild<Ui::FadeShadow>(this);
-	const auto bottomShadow = Ui::CreateChild<Ui::FadeShadow>(this);
-	topShadow->toggleOn(scroll->scrollTopValue(
-	) | rpl::map(_1 > 0));
-	bottomShadow->toggleOn(rpl::combine(
-		scroll->heightValue(),
-		scroll->scrollTopValue(),
-		wrap->heightValue(),
-		_2
-	) | rpl::map([=](int top) {
-		return top < scroll->scrollTopMax();
-	}));
 
 	value() | rpl::map([](const Settings &data) {
 		return (data.types != Types(0)) || data.onlySinglePeer();
 	}) | rpl::distinct_until_changed(
 	) | rpl::on_next([=](bool canStart) {
 		refreshButtons(buttons, canStart);
-		topShadow->raise();
-		bottomShadow->raise();
 	}, buttons->lifetime());
 
 	sizeValue(
 	) | rpl::on_next([=](QSize size) {
 		buttons->resizeToWidth(size.width());
 		buttons->moveToLeft(0, size.height() - buttons->height());
-		topShadow->resizeToWidth(size.width());
-		topShadow->moveToLeft(0, 0);
-		bottomShadow->resizeToWidth(size.width());
-		bottomShadow->moveToLeft(0, buttons->y() - st::lineWidth);
 	}, buttons->lifetime());
 
 	return buttons;
@@ -983,6 +1161,10 @@ rpl::producer<> SettingsWidget::cancelClicks() const {
 	) | rpl::map([](Wrap &&wrap) {
 		return std::move(wrap.value);
 	}) | rpl::flatten_latest();
+}
+
+rpl::producer<int> SettingsWidget::desiredWidth() const {
+	return _desiredWidth.value();
 }
 
 } // namespace View
