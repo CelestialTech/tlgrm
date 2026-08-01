@@ -75,6 +75,17 @@ FilteredCommandLineArguments::FilteredCommandLineArguments(
 		pushArgument(argv[i]);
 	}
 
+	// Preserve --mcp. kForwardArgumentCount is 1, so without this the flag never
+	// reaches QCoreApplication::arguments() and both Application::run() and
+	// Sandbox::singleInstanceChecked() would be unable to see it — the stdio
+	// transport would be permanently unreachable.
+	for (auto i = 1; i != argc; ++i) {
+		if (argv[i] && QLatin1String(argv[i]) == QLatin1String("--mcp")) {
+			pushArgument("--mcp");
+			break;
+		}
+	}
+
 #if defined Q_OS_WIN || defined Q_OS_MAC
 	if (OptionFreeType.value() || OptionHighDpiDownscale.value()) {
 		pushArgument("-platform");

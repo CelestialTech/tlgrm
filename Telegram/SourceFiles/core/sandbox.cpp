@@ -65,6 +65,12 @@ Sandbox::Sandbox(int &argc, char **argv)
 #ifdef Q_OS_MAC
 	Platform::CreateGlobalMenu();
 #endif // Q_OS_MAC
+
+	// Prevent Qt from terminating the app when the last visible window closes —
+	// the gradual export panel hides itself while work continues, and MCP tool
+	// calls must survive a windowless moment. Telegram manages its own quit
+	// lifecycle through Core::Quit().
+	setQuitOnLastWindowClosed(false);
 }
 
 int Sandbox::start() {
@@ -107,6 +113,18 @@ int Sandbox::start() {
 				gManyInstance = true;
 			}
 		}
+	}
+
+	// Tlgrm: an MCP-driven instance is expected to coexist with a normal one, so
+	// it opts out of single-instance handoff.
+	//
+	// DELIBERATE DIVERGENCE from the 6.9.6 fork, which set this unconditionally:
+	// that disabled tg:// URL routing to a running instance for *every* launch
+	// and allowed two processes to open the same tdata concurrently — a
+	// plausible corruption path. Gating on --mcp keeps the intent without the
+	// collateral damage. Drop the condition if unconditional behaviour is wanted.
+	if (QCoreApplication::arguments().contains(u"--mcp"_q)) {
+		gManyInstance = true;
 	}
 
 #if defined Q_OS_LINUX && QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
@@ -467,6 +485,17 @@ void Sandbox::singleInstanceChecked() {
 			return;
 		}
 		_lastCrashDump = crashdump;
+
+		// In MCP mode there is no user at a screen to dismiss a modal crash
+		// dialog, and blocking here would hang every waiting tool call. Restart
+		// reporting and launch straight through instead.
+		if (QCoreApplication::arguments().contains(u"--mcp"_q)) {
+			LOG(("MCP: Skipping crash report dialog"));
+			CrashReports::Restart();
+			launchApplication();
+			return;
+		}
+
 		auto window = new LastCrashedWindow(
 			_lastCrashDump,
 			[=] { launchApplication(); });
