@@ -37,7 +37,14 @@ bool Settings::validate() const {
 		return false;
 	} else if ((fullChats & MustNotBeFull) != 0) {
 		return false;
-	} else if (format != Format::Html && format != Format::Json) {
+	// Accept all valid Format enum values
+	} else if (format != Format::Html
+		&& format != Format::Json
+		&& format != Format::HtmlAndJson
+		&& format != Format::Markdown
+		&& format != Format::HtmlAndMarkdown
+		&& format != Format::JsonAndMarkdown
+		&& format != Format::All) {
 		return false;
 	} else if (!media.validate()) {
 		return false;

@@ -15,6 +15,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/bytes.h"
 #include "base/options.h"
 #include "base/random.h"
+
+#include <QtCore/QDateTime>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QStorageInfo>
+#include <QtCore/QTimer>
+
 #include <set>
 #include <deque>
 
@@ -33,6 +40,19 @@ constexpr auto kLocationCacheSize = 100'000;
 constexpr auto kMaxEmojiPerRequest = 100;
 constexpr auto kStoriesSliceLimit = 100;
 constexpr auto kProfileMusicSliceLimit = 100;
+
+// Files are downloaded into a sibling with this prefix, then renamed on
+// completion, so an interrupted download is distinguishable from a
+// finished one when the export is resumed.
+[[nodiscard]] QString DownloadTempPath(const QString &relativePath) {
+	const auto prefix = u".dl_"_q;
+	const auto lastSlash = relativePath.lastIndexOf('/');
+	return (lastSlash >= 0)
+		? (relativePath.left(lastSlash + 1)
+			+ prefix
+			+ relativePath.mid(lastSlash + 1))
+		: (prefix + relativePath);
+}
 
 struct LocationKey {
 	uint64 type;
@@ -552,6 +572,7 @@ struct ApiWrap::DialogsProcess : ChatsProcess {
 };
 
 struct ApiWrap::AbstractMessagesProcess {
+	Fn<void(const Data::MessagesSlice&)> preDownloadSlice;
 	Fn<bool(DownloadProgress)> fileProgress;
 	Fn<bool(Data::MessagesSlice&&)> handleSlice;
 	FnMut<void()> done;
@@ -561,7 +582,9 @@ struct ApiWrap::AbstractMessagesProcess {
 	Data::ParseMediaContext context;
 	std::optional<Data::MessagesSlice> slice;
 	std::vector<MessageFileWork> messageFileWork;
+	int generation = 0;
 	bool lastSlice = false;
+	bool preDownloadCalled = false;
 	int hydrationIndex = 0;
 	int fileIndex = 0;
 	int messageFileWorkIndex = 0;
@@ -703,18 +726,41 @@ ApiWrap::FileProcess::FileProcess(const QString &path, Output::Stats *stats)
 : file(path, stats) {
 }
 
+bool ApiWrap::isGradualMode() const {
+	// Always use gradual mode (direct API calls instead of takeout
+	// sessions). This is the unified export method for both GUI and MCP.
+	return true;
+}
+
+// Direct request that bypasses the takeout session (for gradual mode).
+// Uses the regular DC, not the export DC (kExportDcShift needs takeout).
 template <typename Request>
-auto ApiWrap::mainRequest(Request &&request) {
-	Expects(_takeoutId.has_value());
-
-	auto original = std::move(_mtp.request(MTPInvokeWithTakeout<Request>(
-		MTP_long(*_takeoutId),
+auto ApiWrap::directRequest(Request &&request) {
+	auto original = std::move(_mtp.request(
 		std::forward<Request>(request)
-	)).toDC(MTP::ShiftDcId(0, MTP::kExportDcShift)));
+	));
 
-	return RequestBuilder<MTPInvokeWithTakeout<Request>>(
+	return RequestBuilder<Request>(
 		std::move(original),
 		[=](const MTP::Error &result) { error(result); });
+}
+
+template <typename Request>
+auto ApiWrap::mainRequest(Request &&request) {
+	// In gradual mode (always true) bypass the takeout session entirely
+	// and use direct API calls instead, avoiding TAKEOUT_REQUIRED errors.
+	return directRequest(std::forward<Request>(request));
+}
+
+// Direct split request that bypasses the takeout session, but keeps the
+// messages-range wrapper so split boundaries are still honoured.
+template <typename Request>
+auto ApiWrap::directSplitRequest(int index, Request &&request) {
+	Expects(index < _splits.size());
+
+	return directRequest(MTPInvokeWithMessagesRange<Request>(
+		_splits[index],
+		std::forward<Request>(request)));
 }
 
 template <typename Request>
@@ -724,14 +770,17 @@ auto ApiWrap::splitRequest(int index, Request &&request) {
 	//if (index == _splits.size() - 1) {
 	//	return mainRequest(std::forward<Request>(request));
 	//}
-	return mainRequest(MTPInvokeWithMessagesRange<Request>(
-		_splits[index],
-		std::forward<Request>(request)));
+	// mainRequest() already forwards to directRequest() in gradual mode,
+	// so this is identical to directSplitRequest() - go through it
+	// directly so every split request has a single implementation and
+	// callers never have to branch on the mode themselves.
+	return directSplitRequest(index, std::forward<Request>(request));
 }
 
 auto ApiWrap::fileRequest(const Data::FileLocation &location, int64 offset) {
 	Expects(location.dcId != 0
 		|| location.data.type() == mtpc_inputTakeoutFileLocation);
+	Expects(!isGradualMode()); // Use sendDirectFilePartRequest instead.
 	Expects(_takeoutId.has_value());
 	Expects(_fileProcess->requestId == 0);
 
@@ -768,8 +817,88 @@ auto ApiWrap::fileRequest(const Data::FileLocation &location, int64 offset) {
 ApiWrap::ApiWrap(
 	base::weak_qptr<MTP::Instance> weak,
 	Fn<void(FnMut<void()>)> runner)
-: _mtp(weak, std::move(runner))
-, _fileCache(std::make_unique<LoadedFileCache>(kLocationCacheSize)) {
+: _mtp(weak, runner)
+, _fileCache(std::make_unique<LoadedFileCache>(kLocationCacheSize))
+, _runner(std::move(runner)) {
+}
+
+// Adaptive throttling: track request density and back off proactively
+// before hitting Telegram's flood detection thresholds. Uses instance
+// variables so simultaneous exports don't cross-contaminate counters.
+void ApiWrap::scheduleGradualDelay(FnMut<void()> callback) {
+	const auto nowMs = QDateTime::currentMSecsSinceEpoch();
+
+	if (_windowStartMs == 0 || (nowMs - _windowStartMs) > 60000) {
+		// Reset window every 60 seconds.
+		_windowStartMs = nowMs;
+		_recentRequests = 0;
+	}
+	++_recentRequests;
+
+	// Base delay: 1-3 seconds random.
+	auto delay = int(base::RandomValue<uint32>() % 2000 + 1000);
+
+	// Escalate delay as request density increases within the window.
+	if (_recentRequests > 30) {
+		// Heavy load: 5-10 seconds (approaching flood territory).
+		delay = int(base::RandomValue<uint32>() % 5000 + 5000);
+	} else if (_recentRequests > 20) {
+		// Moderate load: 3-6 seconds.
+		delay = int(base::RandomValue<uint32>() % 3000 + 3000);
+	} else if (_recentRequests > 10) {
+		// Light load: 2-4 seconds.
+		delay = int(base::RandomValue<uint32>() % 2000 + 2000);
+	}
+
+	// Add +-15% jitter to avoid periodic patterns.
+	const auto jitter = delay / 7;
+	delay += int(base::RandomValue<uint32>() % (jitter * 2 + 1)) - jitter;
+
+	scheduleOnApiThread(delay, std::move(callback));
+}
+
+// Pace downloads to mimic a user viewing content after downloading it.
+// A real user opens a photo / document and spends time on it: 1.5s base
+// plus a second per megabyte, clamped, with wide jitter.
+int ApiWrap::fileViewDelayMs(int64 fileSize) const {
+	const auto sizeMb = double(fileSize) / (1024. * 1024.);
+	auto delayMs = int(1500. + sizeMb * 1000.);
+	delayMs = std::clamp(delayMs, 800, 30000);
+	const auto jitter = delayMs * 3 / 10;
+	delayMs += int(base::RandomValue<uint32>() % (jitter * 2 + 1)) - jitter;
+	return delayMs;
+}
+
+// QTimer needs a thread with an event loop, but ApiWrap lives on its own
+// crl queue, so hop to main for the timer and back through _runner.
+void ApiWrap::scheduleOnApiThread(int delayMs, FnMut<void()> callback) {
+	const auto runner = _runner;
+	crl::on_main([
+		delayMs,
+		runner,
+		callback = std::move(callback)
+	]() mutable {
+		QTimer::singleShot(delayMs, [
+			runner,
+			callback = std::move(callback)
+		]() mutable {
+			if (runner) {
+				runner(std::move(callback));
+			} else {
+				callback();
+			}
+		});
+	});
+}
+
+ApiWrap::ResumeProgress ApiWrap::currentResumeProgress() const {
+	auto result = ResumeProgress();
+	if (_chatProcess) {
+		result.lastMessageId = _chatProcess->largestIdPlusOne - 1;
+	} else if (_topicProcess) {
+		result.lastMessageId = _topicProcess->offsetId;
+	}
+	return result;
 }
 
 rpl::producer<MTP::Error> ApiWrap::errors() const {
@@ -1087,6 +1216,16 @@ void ApiWrap::startMainSession(FnMut<void()> done) {
 			error("Could not retrieve selfId.");
 			return;
 		}
+
+		// In gradual mode skip the takeout session entirely. A sentinel
+		// takeout id keeps code that only checks for presence happy;
+		// directRequest / directSplitRequest never read its value.
+		if (isGradualMode()) {
+			_takeoutId = 0;
+			done();
+			return;
+		}
+
 		_mtp.request(MTPaccount_InitTakeoutSession(
 			MTP_flags(flags),
 			MTP_long(sizeLimit)
@@ -1773,6 +1912,7 @@ void ApiWrap::requestSessions(FnMut<void(Data::SessionsList&&)> done) {
 void ApiWrap::requestMessages(
 		const Data::DialogInfo &info,
 		FnMut<bool(const Data::DialogInfo &)> start,
+		Fn<void(const Data::MessagesSlice&)> preDownload,
 		Fn<bool(DownloadProgress)> progress,
 		Fn<bool(Data::MessagesSlice&&)> slice,
 		FnMut<void()> done) {
@@ -1780,9 +1920,11 @@ void ApiWrap::requestMessages(
 	Expects(_selfId.has_value());
 
 	_chatProcess = std::make_unique<ChatProcess>();
+	_chatProcess->generation = ++_messagesProcessGeneration;
 	_chatProcess->context.selfPeerId = peerFromUser(*_selfId);
 	_chatProcess->info = info;
 	_chatProcess->start = std::move(start);
+	_chatProcess->preDownloadSlice = std::move(preDownload);
 	_chatProcess->fileProgress = std::move(progress);
 	_chatProcess->handleSlice = std::move(slice);
 	_chatProcess->done = std::move(done);
@@ -1861,11 +2003,25 @@ void ApiWrap::messagesCountLoaded(int localSplitIndex, int count) {
 	if (localSplitIndex + 1 < _chatProcess->info.splits.size()) {
 		requestMessagesCount(localSplitIndex + 1);
 	} else if (_chatProcess->start(_chatProcess->info)) {
+		if (_settings->singlePeerResumeFromId > 0) {
+			_chatProcess->largestIdPlusOne
+				= _settings->singlePeerResumeFromId + 1;
+			LOG(("Export Info: Resuming from message ID %1, skipCount %2."
+				).arg(_settings->singlePeerResumeFromId
+				).arg(_settings->singlePeerResumeSkipCount));
+		}
 		requestMessagesSlice();
 	}
 }
 
 void ApiWrap::finishExport(FnMut<void()> done) {
+	if (isGradualMode()) {
+		// No real takeout session to finish - just call done directly.
+		_takeoutId = std::nullopt;
+		done();
+		return;
+	}
+
 	const auto guard = gsl::finally([&] { _takeoutId = std::nullopt; });
 
 	mainRequest(MTPaccount_FinishTakeoutSession(
@@ -1885,12 +2041,13 @@ void ApiWrap::skipFile(uint64 randomId) {
 }
 
 void ApiWrap::cancelExportFast() {
-	if (_takeoutId.has_value()) {
+	if (_takeoutId.has_value() && !isGradualMode()) {
 		const auto requestId = mainRequest(MTPaccount_FinishTakeoutSession(
 			MTP_flags(0)
 		)).send();
 		_mtp.request(requestId).detach();
 	}
+	_takeoutId = std::nullopt;
 }
 
 void ApiWrap::requestSinglePeerDialog() {
@@ -2216,15 +2373,19 @@ void ApiWrap::requestMessagesSlice() {
 		result.match([&](const MTPDmessages_messagesNotModified &data) {
 			error("Unexpected messagesNotModified received.");
 		}, [&](const auto &data) {
-			if constexpr (MTPDmessages_messages::Is<decltype(data)>()) {
-				_chatProcess->lastSlice = true;
-			}
-			startMessagesSlice(Data::ParseMessagesSlice(
+			auto slice = Data::ParseMessagesSlice(
 				_chatProcess->context,
 				data.vmessages(),
 				data.vusers(),
 				data.vchats(),
-				_chatProcess->info.relativePath));
+				_chatProcess->info.relativePath);
+			if constexpr (MTPDmessages_messages::Is<decltype(data)>()) {
+				_chatProcess->lastSlice = true;
+				slice.serverCount = int(data.vmessages().v.size());
+			} else {
+				slice.serverCount = data.vcount().v;
+			}
+			startMessagesSlice(std::move(slice));
 		});
 	});
 }
@@ -2323,6 +2484,7 @@ void ApiWrap::startMessagesSlice(Data::MessagesSlice &&slice) {
 	process->messageFileWork.clear();
 	process->messageFileWorkIndex = 0;
 	process->messageFileWorkMessageIndex = -1;
+	process->preDownloadCalled = false;
 
 	resumeMessagesSlice();
 }
@@ -2366,6 +2528,17 @@ void ApiWrap::resumeMessagesSlice() {
 			hydrateMessageDone(topic, index, rawId, result);
 		}).send();
 		return;
+	}
+
+	// Every message in the slice is fully hydrated now, so this is the
+	// first point at which the fragments are final. Write them out
+	// before any file download starts, so an interrupted export still
+	// has the text of everything it has seen.
+	if (!process->preDownloadCalled) {
+		process->preDownloadCalled = true;
+		if (process->preDownloadSlice) {
+			process->preDownloadSlice(*process->slice);
+		}
 	}
 
 	collectMessagesCustomEmoji(*process->slice);
@@ -2732,6 +2905,13 @@ void ApiWrap::loadNextMessageFile() {
 	Expects(_chatProcess->hydrationIndex
 		== _chatProcess->slice->list.size());
 
+	// Guard against re-entrance from pacing timers: if a file download
+	// is already in progress, wait for it to complete - its done callback
+	// will call loadNextMessageFile again.
+	if (_fileProcess) {
+		return;
+	}
+
 	auto &process = *_chatProcess;
 	auto &list = process.slice->list;
 	while (process.fileIndex < list.size()) {
@@ -2811,10 +2991,30 @@ void ApiWrap::finishMessagesSlice() {
 		&& (++_chatProcess->localSplitIndex
 			< _chatProcess->info.splits.size())) {
 		_chatProcess->lastSlice = false;
-		_chatProcess->largestIdPlusOne = 1;
+		// Keep largestIdPlusOne from the previous split so that a resume
+		// point survives the split advance. Only reset when nothing has
+		// been processed yet. Splits are date ranges over one peer and
+		// the range wrapper bounds the request either way.
+		if (_chatProcess->largestIdPlusOne <= 1) {
+			_chatProcess->largestIdPlusOne = 1;
+		}
 	}
 	if (!_chatProcess->lastSlice) {
-		requestMessagesSlice();
+		// Add a delay between message batch requests to mimic user
+		// scrolling. Without it batches fire back-to-back (~50ms apart
+		// from network latency alone), trivially detectable.
+		if (isGradualMode()) {
+			const auto generation = _chatProcess->generation;
+			scheduleGradualDelay([this, generation] {
+				if (_chatProcess
+					&& _chatProcess->generation == generation
+					&& !_chatProcess->slice.has_value()) {
+					requestMessagesSlice();
+				}
+			});
+		} else {
+			requestMessagesSlice();
+		}
 	} else {
 		finishMessages();
 	}
@@ -2855,6 +3055,24 @@ void ApiWrap::loadMessageFileDone(
 	if (relativePath.isEmpty()) {
 		file->skipReason = Data::File::SkipReason::Unavailable;
 	}
+
+	// Pace downloads to mimic a user viewing content after downloading.
+	// Everything the deferred continuation needs stays valid across the
+	// timer gap: _fileProcess is already released, fileIndex and the
+	// messageFileWork cursor are untouched until loadNextMessageFile
+	// re-runs processFileLoad for this same (now completed) file.
+	if (isGradualMode() && file->size > 0 && !relativePath.isEmpty()) {
+		const auto generation = _chatProcess->generation;
+		scheduleOnApiThread(fileViewDelayMs(file->size), [this, generation] {
+			if (_chatProcess
+				&& _chatProcess->generation == generation
+				&& _chatProcess->slice.has_value()) {
+				loadNextMessageFile();
+			}
+		});
+		return;
+	}
+
 	loadNextMessageFile();
 }
 
@@ -2911,6 +3129,7 @@ void ApiWrap::requestTopicMessages(
 		MTPInputPeer inputPeer,
 		int32 topicRootId,
 		FnMut<bool(int count)> start,
+		Fn<void(const Data::MessagesSlice&)> preDownload,
 		Fn<bool(DownloadProgress)> progress,
 		Fn<bool(Data::MessagesSlice&&)> slice,
 		FnMut<void()> done) {
@@ -2918,6 +3137,7 @@ void ApiWrap::requestTopicMessages(
 	Expects(_selfId.has_value());
 
 	_topicProcess = std::make_unique<TopicProcess>();
+	_topicProcess->generation = ++_messagesProcessGeneration;
 	_topicProcess->context.selfPeerId = peerFromUser(*_selfId);
 	_topicProcess->peerId = peerId;
 	_topicProcess->inputPeer = inputPeer;
@@ -2928,6 +3148,7 @@ void ApiWrap::requestTopicMessages(
 		+ QString::number(topicRootId)
 		+ "/";
 	_topicProcess->start = std::move(start);
+	_topicProcess->preDownloadSlice = std::move(preDownload);
 	_topicProcess->fileProgress = std::move(progress);
 	_topicProcess->handleSlice = std::move(slice);
 	_topicProcess->done = std::move(done);
@@ -3120,6 +3341,11 @@ void ApiWrap::loadNextTopicMessageFile() {
 	Expects(_topicProcess->hydrationIndex
 		== _topicProcess->slice->list.size());
 
+	// Same re-entrance guard as loadNextMessageFile().
+	if (_fileProcess) {
+		return;
+	}
+
 	auto &process = *_topicProcess;
 	auto &list = process.slice->list;
 	while (process.fileIndex < list.size()) {
@@ -3202,7 +3428,18 @@ void ApiWrap::finishTopicMessagesSlice() {
 		&& _topicProcess->processedCount >= _topicProcess->totalCount;
 
 	if (!_topicProcess->lastSlice && !reachedTotal) {
-		requestTopicMessagesSlice();
+		if (isGradualMode()) {
+			const auto generation = _topicProcess->generation;
+			scheduleGradualDelay([this, generation] {
+				if (_topicProcess
+					&& _topicProcess->generation == generation
+					&& !_topicProcess->slice.has_value()) {
+					requestTopicMessagesSlice();
+				}
+			});
+		} else {
+			requestTopicMessagesSlice();
+		}
 	} else {
 		finishTopicMessages();
 	}
@@ -3245,6 +3482,20 @@ void ApiWrap::loadTopicMessageFileDone(
 	if (relativePath.isEmpty()) {
 		file->skipReason = Data::File::SkipReason::Unavailable;
 	}
+
+	// File-size-based download pacing (same logic as chat exports).
+	if (isGradualMode() && file->size > 0 && !relativePath.isEmpty()) {
+		const auto generation = _topicProcess->generation;
+		scheduleOnApiThread(fileViewDelayMs(file->size), [this, generation] {
+			if (_topicProcess
+				&& _topicProcess->generation == generation
+				&& _topicProcess->slice.has_value()) {
+				loadNextTopicMessageFile();
+			}
+		});
+		return;
+	}
+
 	loadNextTopicMessageFile();
 }
 
@@ -3285,6 +3536,8 @@ bool ApiWrap::processFileLoad(
 		return true;
 	} else if (writePreloadedFile(file, origin)) {
 		return !file.relativePath.isEmpty();
+	} else if (resumeOrSkipFile(file)) {
+		return true;
 	}
 	loadFile(file, origin, std::move(progress), std::move(done));
 	return false;
@@ -3333,8 +3586,47 @@ bool ApiWrap::processFileLoad(
 		// Don't load thumbs for large files that we skip.
 		file.skipReason = SkipReason::FileSize;
 		return true;
+	} else if (resumeOrSkipFile(file)) {
+		return true;
 	}
 	loadFile(file, origin, std::move(progress), std::move(done));
+	return false;
+}
+
+bool ApiWrap::resumeOrSkipFile(Data::File &file) {
+	Expects(_settings != nullptr);
+
+	using SkipReason = Data::File::SkipReason;
+
+	// Per-file resume. Downloads land in a ".dl_" prefixed sibling and
+	// are renamed on completion, so a bare final file means "finished".
+	if (!file.suggestedPath.isEmpty()) {
+		// Remove any leftover temp file from a previous crash.
+		QFile::remove(
+			_settings->path + DownloadTempPath(file.suggestedPath));
+
+		const auto info = QFileInfo(_settings->path + file.suggestedPath);
+		if (info.exists() && info.isFile() && info.size() > 0) {
+			// When the expected size is known require an exact match,
+			// otherwise accept any non-empty completed file.
+			if (!file.size || info.size() == file.size) {
+				file.relativePath = file.suggestedPath;
+				_fileCache->save(file.location, file.relativePath);
+				return true;
+			}
+		}
+	}
+
+	// Skip files with an unusable location (for example expired file
+	// references restored from a resume state). Reporting them as ready
+	// lets the caller move on without starting an async download.
+	if (file.location.dcId == 0
+		&& file.location.data.type() != mtpc_inputTakeoutFileLocation) {
+		LOG(("Export Warning: Skipping file with invalid location: %1."
+			).arg(file.suggestedPath));
+		file.skipReason = SkipReason::Unavailable;
+		return true;
+	}
 	return false;
 }
 
@@ -3349,7 +3641,10 @@ bool ApiWrap::writePreloadedFile(
 		file.relativePath = *path;
 		return true;
 	} else if (!file.content.isEmpty()) {
-		const auto process = prepareFileProcess(file, origin);
+		// Preloaded content is written in one go, so it must go straight
+		// to its final name - there is no download to resume and nothing
+		// will ever rename a ".dl_" file for it.
+		const auto process = prepareFileProcess(file, origin, false);
 		if (const auto result = process->file.writeBlock(file.content)) {
 			file.relativePath = process->relativePath;
 			_fileCache->save(file.location, file.relativePath);
@@ -3367,8 +3662,6 @@ void ApiWrap::loadFile(
 		Fn<bool(FileProgress)> progress,
 		FnMut<void(QString)> done) {
 	Expects(_fileProcess == nullptr);
-	Expects(file.location.dcId != 0
-		|| file.location.data.type() == mtpc_inputTakeoutFileLocation);
 
 	_fileProcess = prepareFileProcess(file, origin);
 	_fileProcess->progress = std::move(progress);
@@ -3386,27 +3679,87 @@ void ApiWrap::loadFile(
 
 	loadFilePart();
 
-	Ensures(_fileProcess->requestId != 0);
+	// Upstream asserts that a request was started here. Instead of
+	// aborting the whole export on an unusable location, drain the
+	// process gracefully and report the file as unavailable.
+	if (!_fileProcess || _fileProcess->requestId == 0) {
+		LOG(("Export Warning: No request started for %1 (dcId %2, size %3)."
+			).arg(file.suggestedPath
+			).arg(file.location.dcId
+			).arg(file.size));
+		if (auto process = base::take(_fileProcess)) {
+			if (auto callback = std::move(process->done)) {
+				process = nullptr;
+				callback(QString());
+			}
+		}
+	}
 }
 
 auto ApiWrap::prepareFileProcess(
 	const Data::File &file,
-	const Data::FileOrigin &origin) const
+	const Data::FileOrigin &origin,
+	bool temporary) const
 -> std::unique_ptr<FileProcess> {
 	Expects(_settings != nullptr);
 
 	const auto relativePath = Output::File::PrepareRelativePath(
 		_settings->path,
 		file.suggestedPath);
+	// Downloads are written to a ".dl_" prefixed sibling and renamed on
+	// completion, so an interrupted download is never mistaken for a
+	// finished file when the export is resumed.
 	auto result = std::make_unique<FileProcess>(
-		_settings->path + relativePath,
+		_settings->path
+			+ (temporary ? DownloadTempPath(relativePath) : relativePath),
 		_stats);
-	result->relativePath = relativePath;
+	result->relativePath = relativePath; // Always the final name.
 	result->location = file.location;
 	result->size = file.size;
 	result->origin = origin;
 	result->randomId = base::RandomValue<uint64>();
 	return result;
+}
+
+// Gradual-mode file download: a plain upload.getFile without the takeout
+// wrapper, sent to the media DC. Shared by the initial download and by
+// the retry that follows a file reference refresh.
+mtpRequestId ApiWrap::sendDirectFilePartRequest(int64 offset) {
+	Expects(_fileProcess != nullptr);
+	Expects(_fileProcess->requestId == 0);
+
+	const auto &location = _fileProcess->location;
+	return _mtp.request(MTPupload_GetFile(
+		MTP_flags(0),
+		location.data,
+		MTP_long(offset),
+		MTP_int(kFileChunkSize)
+	)).done([=](const MTPupload_File &result) {
+		_fileProcess->requestId = 0;
+		filePartDone(offset, result);
+	}).fail([=](const MTP::Error &result) {
+		_fileProcess->requestId = 0;
+		if (result.type() == u"TAKEOUT_FILE_EMPTY"_q
+			&& _otherDataProcess != nullptr) {
+			filePartDone(
+				0,
+				MTP_upload_file(
+					MTP_storage_filePartial(),
+					MTP_int(0),
+					MTP_bytes()));
+		} else if (result.type() == u"LOCATION_INVALID"_q
+			|| result.type() == u"VERSION_INVALID"_q
+			|| result.type() == u"LOCATION_NOT_AVAILABLE"_q) {
+			filePartUnavailable();
+		} else if (result.code() == 400
+			&& result.type().startsWith(u"FILE_REFERENCE_"_q)) {
+			filePartRefreshReference(offset);
+		} else {
+			error(result);
+		}
+	}).toDC(
+		MTP::ShiftDcId(location.dcId, MTP::kExportMediaDcShift)
+	).send();
 }
 
 void ApiWrap::loadFilePart() {
@@ -3420,13 +3773,17 @@ void ApiWrap::loadFilePart() {
 
 	const auto offset = _fileProcess->offset;
 	_fileProcess->requests.push_back({ offset });
-	_fileProcess->requestId = fileRequest(
-		_fileProcess->location,
-		_fileProcess->offset
-	).done([=](const MTPupload_File &result) {
-		_fileProcess->requestId = 0;
-		filePartDone(offset, result);
-	}).send();
+	if (isGradualMode()) {
+		_fileProcess->requestId = sendDirectFilePartRequest(offset);
+	} else {
+		_fileProcess->requestId = fileRequest(
+			_fileProcess->location,
+			_fileProcess->offset
+		).done([=](const MTPupload_File &result) {
+			_fileProcess->requestId = 0;
+			filePartDone(offset, result);
+		}).send();
+	}
 	_fileProcess->offset += kFileChunkSize;
 
 	if (_fileProcess->size > 0
@@ -3483,6 +3840,10 @@ void ApiWrap::filePartDone(int64 offset, const MTPupload_File &result) {
 			requests.pop_front();
 		}
 
+		if (!checkDiskSpace(data.vbytes().v.size()) || !_fileProcess) {
+			return;
+		}
+
 		if (_fileProcess->progress) {
 			_fileProcess->progress(FileProgress{
 				file.size(),
@@ -3499,8 +3860,57 @@ void ApiWrap::filePartDone(int64 offset, const MTPupload_File &result) {
 
 	auto process = base::take(_fileProcess);
 	const auto relativePath = process->relativePath;
-	_fileCache->save(process->location, relativePath);
-	process->done(process->relativePath);
+	const auto location = process->location;
+	auto done = std::move(process->done);
+
+	// Destroy the process first so the temp file handle is closed before
+	// the rename - renaming an open file fails on some platforms.
+	process = nullptr;
+
+	const auto dlPath = _settings->path + DownloadTempPath(relativePath);
+	const auto finalPath = _settings->path + relativePath;
+	if (QFile::exists(dlPath)) {
+		QFile::remove(finalPath); // Remove a stale leftover, if any.
+		if (!QFile::rename(dlPath, finalPath)) {
+			LOG(("Export Error: Failed to rename %1 to %2."
+				).arg(dlPath, finalPath));
+		}
+	}
+
+	_fileCache->save(location, relativePath);
+	done(relativePath);
+}
+
+// Periodic disk space check, every ~50 MB written. Prevents silently
+// filling the disk during large exports.
+bool ApiWrap::checkDiskSpace(int64 written) {
+	_bytesWrittenSinceCheck += written;
+	if (_bytesWrittenSinceCheck <= 50 * int64(1024 * 1024)) {
+		return true;
+	}
+	_bytesWrittenSinceCheck = 0;
+	if (!_settings) {
+		return true;
+	}
+	// Use the export settings path (absolute), not the file's relative
+	// path, so QStorageInfo looks at the right filesystem.
+	const auto storage = QStorageInfo(
+		QFileInfo(_settings->path).absolutePath());
+	if (!storage.isValid()) {
+		return true;
+	}
+	const auto availMb = storage.bytesAvailable() / (1024 * 1024);
+	if (availMb < 500) {
+		LOG(("Export Warning: Low disk space, %1 MB remaining."
+			).arg(availMb));
+	}
+	if (availMb < 100) {
+		error("Disk space critically low ("
+			+ QString::number(availMb)
+			+ " MB remaining). Export stopped.");
+		return false;
+	}
+	return true;
 }
 
 QString ApiWrap::filePartMediaFolder() const {
@@ -3519,6 +3929,10 @@ void ApiWrap::filePartRetryReference(
 	Expects(_fileProcess->requestId == 0);
 
 	_fileProcess->location = std::move(location);
+	if (isGradualMode()) {
+		_fileProcess->requestId = sendDirectFilePartRequest(offset);
+		return;
+	}
 	_fileProcess->requestId = fileRequest(
 		_fileProcess->location,
 		offset
@@ -3732,6 +4146,12 @@ void ApiWrap::filePartExtractReference(
 		error("Unexpected messagesNotModified received.");
 	}, [&](const auto &data) {
 		Expects(_selfId.has_value());
+
+		if (!_chatProcess && !_topicProcess) {
+			// The process that owned this download is gone.
+			filePartUnavailable();
+			return;
+		}
 
 		auto context = Data::ParseMediaContext();
 		context.selfPeerId = peerFromUser(*_selfId);

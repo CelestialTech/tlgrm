@@ -28,6 +28,7 @@ base::weak_qptr<Ui::BoxContent> SuggestStart(not_null<Main::Session*> session);
 void ClearSuggestStart(not_null<Main::Session*> session);
 bool IsDefaultPath(not_null<Main::Session*> session, const QString &path);
 void ResolveSettings(not_null<Main::Session*> session, Settings &settings);
+Environment PrepareEnvironment(not_null<Main::Session*> session);
 
 class Panel;
 
@@ -45,6 +46,9 @@ public:
 	void activatePanel();
 	void stopWithConfirmation(Fn<void()> callback = nullptr);
 
+	// Auto-start export with given settings (MCP use).
+	void startExportNow(const Settings &settings);
+
 	[[nodiscard]] rpl::producer<> stopRequests() const;
 
 	[[nodiscard]] rpl::lifetime &lifetime() {
@@ -60,6 +64,7 @@ public:
 private:
 	void fillParams(const PasswordCheckState &state);
 	void stopExport();
+	void ensurePanel();
 	void createPanel();
 	void updateState(State &&state);
 	void showSettings();

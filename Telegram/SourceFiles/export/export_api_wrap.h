@@ -49,6 +49,11 @@ public:
 	rpl::producer<MTP::Error> errors() const;
 	rpl::producer<Output::Result> ioErrors() const;
 
+	struct ResumeProgress {
+		int32 lastMessageId = 0;
+	};
+	[[nodiscard]] ResumeProgress currentResumeProgress() const;
+
 	struct StartInfo {
 		int userpicsCount = 0;
 		int storiesCount = 0;
@@ -102,6 +107,7 @@ public:
 	void requestMessages(
 		const Data::DialogInfo &info,
 		FnMut<bool(const Data::DialogInfo &)> start,
+		Fn<void(const Data::MessagesSlice&)> preDownload,
 		Fn<bool(DownloadProgress)> progress,
 		Fn<bool(Data::MessagesSlice&&)> slice,
 		FnMut<void()> done);
@@ -111,6 +117,7 @@ public:
 		MTPInputPeer inputPeer,
 		int32 topicRootId,
 		FnMut<bool(int count)> start,
+		Fn<void(const Data::MessagesSlice&)> preDownload,
 		Fn<bool(DownloadProgress)> progress,
 		Fn<bool(Data::MessagesSlice&&)> slice,
 		FnMut<void()> done);
@@ -279,16 +286,26 @@ private:
 		Data::Story *story = nullptr);
 	std::unique_ptr<FileProcess> prepareFileProcess(
 		const Data::File &file,
-		const Data::FileOrigin &origin) const;
+		const Data::FileOrigin &origin,
+		bool temporary = true) const;
 	bool writePreloadedFile(
 		Data::File &file,
 		const Data::FileOrigin &origin);
+
+	// Shared by both processFileLoad overloads. Returns true when no
+	// download is needed: either the fully downloaded file is already
+	// on disk from a previous run, or the location can't be used.
+	[[nodiscard]] bool resumeOrSkipFile(Data::File &file);
+
 	void loadFile(
 		const Data::File &file,
 		const Data::FileOrigin &origin,
 		Fn<bool(FileProgress)> progress,
 		FnMut<void(QString)> done);
 	void loadFilePart();
+	[[nodiscard]] mtpRequestId sendDirectFilePartRequest(int64 offset);
+	// Returns false when the export must stop (disk critically full).
+	[[nodiscard]] bool checkDiskSpace(int64 written);
 	void filePartDone(int64 offset, const MTPupload_File &result);
 	void filePartUnavailable();
 	[[nodiscard]] QString filePartMediaFolder() const;
@@ -320,11 +337,22 @@ private:
 	[[nodiscard]] auto mainRequest(Request &&request);
 
 	template <typename Request>
+	[[nodiscard]] auto directRequest(Request &&request);
+
+	template <typename Request>
 	[[nodiscard]] auto splitRequest(int index, Request &&request);
+
+	template <typename Request>
+	[[nodiscard]] auto directSplitRequest(int index, Request &&request);
 
 	[[nodiscard]] auto fileRequest(
 		const Data::FileLocation &location,
 		int64 offset);
+
+	[[nodiscard]] bool isGradualMode() const;
+	void scheduleGradualDelay(FnMut<void()> callback);
+	void scheduleOnApiThread(int delayMs, FnMut<void()> callback);
+	[[nodiscard]] int fileViewDelayMs(int64 fileSize) const;
 
 	void error(const MTP::Error &error);
 	void error(const QString &text);
@@ -356,6 +384,22 @@ private:
 
 	rpl::event_stream<MTP::Error> _errors;
 	rpl::event_stream<Output::Result> _ioErrors;
+
+	// Used to hop deferred (paced) continuations back onto the export
+	// thread after they were scheduled by a QTimer on the main thread.
+	Fn<void(FnMut<void()>)> _runner;
+
+	// Anti-detection: per-instance request density tracking.
+	int _recentRequests = 0;
+	qint64 _windowStartMs = 0;
+
+	// Data safety: per-instance disk space check counter.
+	int64 _bytesWrittenSinceCheck = 0;
+
+	// Incremented for every new ChatProcess / TopicProcess, so a deferred
+	// pacing continuation can tell whether it still targets the process
+	// it was scheduled for.
+	int _messagesProcessGeneration = 0;
 
 };
 

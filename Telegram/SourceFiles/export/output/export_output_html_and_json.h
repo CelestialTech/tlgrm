@@ -48,6 +48,7 @@ public:
 
 	Result writeDialogsStart(const Data::DialogsInfo &data) override;
 	Result writeDialogStart(const Data::DialogInfo &data) override;
+	Result writeMessageFragments(const Data::MessagesSlice &data) override;
 	Result writeDialogSlice(const Data::MessagesSlice &data) override;
 	Result writeDialogEnd() override;
 	Result writeDialogsEnd() override;
