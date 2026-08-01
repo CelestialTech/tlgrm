@@ -109,6 +109,11 @@ namespace Webrtc {
 class Environment;
 } // namespace Webrtc
 
+namespace MCP {
+class Server;
+class Bridge;
+} // namespace MCP
+
 namespace Core {
 
 struct LocalUrlHandler;
@@ -240,6 +245,11 @@ public:
 		return *_exportManager;
 	}
 	[[nodiscard]] bool exportPreventsQuit();
+
+	// MCP Server component.
+	[[nodiscard]] MCP::Server *mcpServer() const {
+		return _mcpServer.get();
+	}
 
 	// Main::Session component.
 	Main::Session *maybePrimarySession() const;
@@ -447,6 +457,10 @@ private:
 	base::weak_qptr<Ui::BoxContent> _badProxyDisableBox;
 
 	const std::unique_ptr<Tray> _tray;
+
+	// MCP server and its IPC bridge. Destroyed first in ~Application().
+	std::unique_ptr<MCP::Server> _mcpServer;
+	std::unique_ptr<MCP::Bridge> _mcpBridge;
 
 	std::unique_ptr<Media::Player::FloatController> _floatPlayers;
 	rpl::lifetime _floatPlayerDelegateLifetime;

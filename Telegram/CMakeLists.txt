@@ -55,6 +55,12 @@ endif()
 
 set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 
+# Tlgrm: the MCP subsystem stores its archive/analytics data in SQLite via QtSql.
+# desktop-app::external_qt does not request the Sql component, so ask for it here
+# rather than patching the vendored cmake_helpers submodule — that keeps the fork's
+# change inside the fork and removes a submodule rebase from every future upgrade.
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Sql REQUIRED)
+
 target_link_libraries(Telegram
 PRIVATE
     tdesktop::lib_fido2
@@ -86,6 +92,7 @@ PRIVATE
     desktop-app::external_kcoreaddons
     desktop-app::external_qt_static_plugins
     desktop-app::external_qt
+    Qt${QT_VERSION_MAJOR}::Sql
     desktop-app::external_qr_code_generator
     desktop-app::external_crash_reports
     desktop-app::external_auto_updates
@@ -1411,6 +1418,71 @@ PRIVATE
     main/session/send_as_peers.h
     main/session/session_show.cpp
     main/session/session_show.h
+    mcp/analytics.cpp
+    mcp/analytics.h
+    mcp/audit_logger.cpp
+    mcp/audit_logger.h
+    mcp/batch_operations.cpp
+    mcp/batch_operations.h
+    mcp/bot_base.cpp
+    mcp/bot_base.h
+    mcp/bot_command_handler.cpp
+    mcp/bot_command_handler.h
+    mcp/bot_manager.cpp
+    mcp/bot_manager.h
+    mcp/cache_manager.cpp
+    mcp/cache_manager.h
+    mcp/chat_archiver.cpp
+    mcp/chat_archiver.h
+    mcp/context_assistant_bot.cpp
+    mcp/context_assistant_bot.h
+    mcp/export_html.cpp
+    mcp/export_html.h
+    mcp/export_markdown.cpp
+    mcp/export_markdown.h
+    mcp/gradual_archiver.cpp
+    mcp/gradual_archiver.h
+    mcp/local_llm.cpp
+    mcp/local_llm.h
+    mcp/mcp_analytics_tools.cpp
+    mcp/mcp_archive_tools.cpp
+    mcp/mcp_batch_tools.cpp
+    mcp/mcp_bot_tools.cpp
+    mcp/mcp_bridge.cpp
+    mcp/mcp_bridge.h
+    mcp/mcp_business_tools.cpp
+    mcp/mcp_core_tools.cpp
+    mcp/mcp_deleted_account_tools.cpp
+    mcp/mcp_gradual_tools.cpp
+    mcp/mcp_helpers.h
+    mcp/mcp_message_ops.cpp
+    mcp/mcp_premium_tools.cpp
+    mcp/mcp_resource_handlers.cpp
+    mcp/mcp_scheduler_tools.cpp
+    mcp/mcp_search_tools.cpp
+    mcp/mcp_server.h
+    mcp/mcp_server_complete.cpp
+    mcp/mcp_server_includes.h
+    mcp/mcp_settings_tools.cpp
+    mcp/mcp_stars_tools.cpp
+    mcp/mcp_system_tools.cpp
+    mcp/mcp_tool_registry.cpp
+    mcp/mcp_v651_tools.cpp
+    mcp/mcp_wallet_tools.cpp
+    mcp/message_scheduler.cpp
+    mcp/message_scheduler.h
+    mcp/rbac.cpp
+    mcp/rbac.h
+    mcp/semantic_search.cpp
+    mcp/semantic_search.h
+    mcp/text_to_speech.cpp
+    mcp/text_to_speech.h
+    mcp/ton_wallet.cpp
+    mcp/ton_wallet.h
+    mcp/video_generator.cpp
+    mcp/video_generator.h
+    mcp/voice_transcription.cpp
+    mcp/voice_transcription.h
     media/audio/media_audio.cpp
     media/audio/media_audio.h
     media/audio/media_audio_edit.cpp
@@ -2275,12 +2347,12 @@ if (build_macstore)
     )
 else()
     if (CMAKE_GENERATOR STREQUAL Xcode)
-        set(bundle_identifier "com.tdesktop.Telegram$<$<CONFIG:Debug>:Debug>")
+        set(bundle_identifier "com.tlgrm.app$<$<CONFIG:Debug>:Debug>")
     else()
-        set(bundle_identifier "com.tdesktop.Telegram")
+        set(bundle_identifier "com.tlgrm.app")
     endif()
     set(bundle_entitlements "Telegram.entitlements")
-    set(output_name "Telegram")
+    set(output_name "Tlgrm")
 endif()
 
 if (CMAKE_GENERATOR STREQUAL Xcode)
