@@ -997,17 +997,12 @@ void MtpChecker::start() {
 		crl::on_main(this, [=] { fail(); });
 		return;
 	}
-	const auto updaterVersion = Platform::AutoUpdateVersion();
-	// Public channel that carries the signed update packages, one per
-	// updater generation: "updates71grm4" on every current platform,
-	// "updates71grm2" on pre-10.13 macOS and glibc < 2.28 Linux. Named to
-	// match the HTTP autoupdate host (updates.71grm.site) so the two
-	// delivery paths stay recognisably one system. The username must be
-	// *occupied by us* — ResolveChannel fails silently on an unregistered
-	// name, which disables MTProto update checks with no user-visible
-	// signal.
-	const auto feed = "updates71grm"
-		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
+	// Public channel carrying the signed update packages. Tlgrm ships a
+	// single macOS updater generation, so this is a literal name rather
+	// than upstream's base + AutoUpdateVersion() suffix (tdhbcfeed ->
+	// tdhbcfeed4). Named to match the HTTP autoupdate host
+	// updates.71grm.site so both delivery paths read as one system.
+	const auto feed = u"updates71grm"_q;
 	MTP::ResolveChannel(&_mtp, feed, [=](
 			const MTPInputChannel &channel) {
 		_mtp.send(
