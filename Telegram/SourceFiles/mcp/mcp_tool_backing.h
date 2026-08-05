@@ -79,7 +79,7 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"categorize_transaction",        Backing::LocalOnly },
 	{"check_business_status",         Backing::LocalOnly },
 	{"claim_achievement_reward",      Backing::LocalOnly },
-	{"classify_intent",               Backing::Unimplemented },
+	{"classify_intent",               Backing::PureCompute },
 	{"clone_voice",                   Backing::LocalOnly },
 	{"configure_ad_filter",           Backing::LocalOnly },
 	{"configure_ai_chatbot",          Backing::LocalOnly },
