@@ -11,7 +11,7 @@ without touching the account.
 """
 import json, socket, sys, time
 
-SOCK, TOKEN = "/tmp/tdesktop_mcp.sock", "/tmp/auth_token"
+SOCK, TOKEN = "/tmp/tlgrm_mcp.sock", "/tmp/auth_token"
 
 
 class Bridge:

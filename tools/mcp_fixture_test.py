@@ -23,7 +23,7 @@ import socket
 import sys
 import time
 
-SOCK, TOKEN = "/tmp/tdesktop_mcp.sock", "/tmp/auth_token"
+SOCK, TOKEN = "/tmp/tlgrm_mcp.sock", "/tmp/auth_token"
 PREFIX = "tlgrm-test-"          # every fixture is named this way
 CHAT_ARG_KEYS = ("chat_id", "channel_id", "peer_id", "from_chat_id", "to_chat_id")
 
@@ -160,11 +160,11 @@ def main():
         msg_id = None
         msgs = read.get("messages") or []
         if msgs and isinstance(msgs[0], dict):
-            msg_id = msgs[0].get("id")
+            msg_id = msgs[0].get("message_id") or msgs[0].get("id")
 
         if msg_id:
             h.call("edit_message", "edit_message",
-                   {"chat_id": ch, "message_id": msg_id, "text": "edited"})
+                   {"chat_id": ch, "message_id": msg_id, "new_text": "edited"})
             h.call("pin_message", "pin_message",
                    {"chat_id": ch, "message_id": msg_id})
             h.call("unpin_message", "unpin_message",
@@ -184,14 +184,14 @@ def main():
         h.call("rename_chat_title", "rename_chat_title",
                {"chat_id": ch, "title": f"{PREFIX}renamed"})
         h.call("set_reaction_price", "set_reaction_price",
-               {"chat_id": ch, "min_stars": 5})
+               {"chat_id": sg, "min_stars": 0})
         h.call("toggle_gift_notifications", "toggle_gift_notifications",
                {"chat_id": sg, "enabled": True})
         h.call("get_chat_info", "get_chat_info", {"chat_id": ch})
 
         # batch paths
         h.call("batch_send", "batch_send",
-               {"chat_ids": [ch], "text": "batch fixture message"})
+               {"chat_ids": [ch], "message": "batch fixture message"})
         h.call("archive_chat", "archive_chat", {"chat_id": ch})
 
         # scoping guard must actually refuse a non-fixture chat

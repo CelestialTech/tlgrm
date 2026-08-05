@@ -19,7 +19,7 @@ What this is looking for:
 import json, socket, sys, time
 from collections import Counter, defaultdict
 
-SOCK, TOKEN = "/tmp/tdesktop_mcp.sock", "/tmp/auth_token"
+SOCK, TOKEN = "/tmp/tlgrm_mcp.sock", "/tmp/auth_token"
 
 # Substrings that mark a tool as unsafe to fire blind at a real account.
 DESTRUCTIVE = (
