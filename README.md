@@ -12,7 +12,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 | **Export reliability** | Takeout-only: 24-hour wait, no resume capability, any crash or network drop means starting over from zero | Gradual export: no takeout wait, auto-detects interrupted exports on disk, counts already-exported messages, resumes from exact position. Reuses existing directory — nothing is re-downloaded |
 | **Deleted account recovery** | When someone deletes their account, all messages in your private chats vanish instantly — no warning, no backup, no way to recover | Scans all chats for deleted accounts, recovers the person's real name from conversation patterns (greetings, email signatures, introductions), archives every message with full media (photos, videos, documents) to a dedicated group |
 | **Disappearing messages** | Self-destructing messages vanish on schedule with no trace | Configurable capture of disappearing messages before they self-destruct — preserves content that would otherwise be lost |
-| **Programmatic access** | Zero — all interaction is manual through the GUI | Always-on IPC socket (`/tmp/tdesktop_mcp.sock`) exposes 330+ tools via JSON-RPC. Any process can connect: shell scripts, Python bots, Node.js services, cron jobs, AI assistants, monitoring dashboards |
+| **Programmatic access** | Zero — all interaction is manual through the GUI | Always-on IPC socket (`/tmp/tdesktop_mcp.sock`) exposes 330+ tools via JSON-RPC. Access is restricted to processes running as the same user that can read the `0600` auth-token file — shell scripts, Python bots, Node.js services, cron jobs, AI assistants, monitoring dashboards |
 | **Analytics** | None — you can scroll through messages manually | Per-chat and per-user statistics: message volume over time, activity heatmaps, word frequency analysis, top contributors, trending topics. All queryable programmatically |
 | **Privacy & security** | Navigate through nested settings menus, one option at a time | Read and write all privacy settings in one call: last seen, profile photo, phone number, forwards, birthday, bio. List all active sessions with device info and IP addresses, terminate any session, manage block lists — all scriptable |
 | **Message operations** | Right-click context menus, one message at a time | Programmatic edit, delete, forward, pin, unpin, and react across any chat. Batchable from scripts — process hundreds of messages in a loop |
@@ -33,7 +33,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 
 #### Automation and scripting
 
-**Build local bots and tools** — The IPC socket at `/tmp/tdesktop_mcp.sock` accepts JSON-RPC connections from any local process. No Telegram Bot API token needed, no rate limits on reads, no bot registration. You operate as your own account with full access to your data. Examples:
+**Build local bots and tools** — The IPC socket at `/tmp/tdesktop_mcp.sock` accepts JSON-RPC connections from local processes running as the same user. The socket is `0600`, the peer's UID is checked via `LOCAL_PEERCRED`, and `initialize` must present the token from the `0600` auth-token file. No Telegram Bot API token needed, no rate limits on reads, no bot registration. You operate as your own account with full access to your data. Examples:
 - A Python script that exports a list of channels every night via cron
 - A monitoring daemon that watches specific chats and sends alerts
 - A dashboard that aggregates message statistics across your groups
@@ -51,10 +51,12 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 
 **Monitor and control** — Check auto-delete periods across chats, review blocked users, verify that your security settings match your expectations. Scriptable for regular audits.
 
+**[Download latest release](https://github.com/CelestialTech/tlgrm/releases/latest)**
+
 [![MCP](https://img.shields.io/badge/MCP-1.0-green.svg)](https://modelcontextprotocol.io/)
 [![C++20](https://img.shields.io/badge/C++-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
-[![Base](https://img.shields.io/badge/base-tdesktop%206.5.1-blue.svg)](https://github.com/telegramdesktop/tdesktop)
+[![Base](https://img.shields.io/badge/base-tdesktop%207.0.7-blue.svg)](https://github.com/telegramdesktop/tdesktop)
 
 ---
 
@@ -125,11 +127,11 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 ### How It Works
 
 1. **Embedded C++ MCP server** runs inside the Telegram Desktop process with direct memory access to all data
-2. **IPC bridge** (`/tmp/tdesktop_mcp.sock`) — always on, any local process can connect and call tools
+2. **IPC bridge** (`/tmp/tdesktop_mcp.sock`) — always on; same-user local processes authenticate with the token file, then call tools
 3. **Python MCP server** (optional) — connects to C++ server via IPC, adds semantic search, intent classification, topic extraction, conversation summarization with Apple Silicon GPU acceleration
-3. **Stdio transport** (`--mcp` flag) — for Claude Desktop or other MCP clients that use stdin/stdout
-4. **Local reads** hit the database directly (no network, no rate limits)
-5. **Writes and exports** use the MTProto API through tdesktop's existing connection
+4. **Stdio transport** (`--mcp` flag) — for Claude Desktop or other MCP clients that use stdin/stdout
+5. **Local reads** hit the database directly (no network, no rate limits)
+6. **Writes and exports** use the MTProto API through tdesktop's existing connection
 
 ### Performance
 
@@ -139,6 +141,30 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 | Search messages | 300-800ms | **10-20ms** | **15-80x** |
 | List chats | 100-200ms | **2-5ms** | **20-100x** |
 | Rate limits | 30 msg/sec | **Unlimited** | N/A |
+
+### Connecting via IPC (Python example)
+
+```python
+import socket, json
+
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect("/tmp/tdesktop_mcp.sock")
+
+def call(method, params=None, id=1):
+    msg = json.dumps({"jsonrpc": "2.0", "id": id, "method": method, "params": params or {}})
+    sock.sendall(msg.encode() + b"\n")
+    return json.loads(sock.recv(65536))
+
+# Initialize
+call("initialize", {"protocolVersion": "2024-11-05", "clientInfo": {"name": "my-script", "version": "1.0"}})
+
+# List your chats
+chats = call("tools/call", {"name": "list_chats", "arguments": {}}, id=2)
+print(chats)
+
+# Export a channel
+call("tools/call", {"name": "export_chat", "arguments": {"peer_id": "1234567890", "format": "html"}}, id=3)
+```
 
 ---
 
@@ -282,10 +308,15 @@ tail -f ../build.log
 ```bash
 cd ~/xCode/tlgrm/tdesktop/Telegram
 
-# Configure with your API credentials
-./configure.sh \
-  -D TDESKTOP_API_ID=YOUR_API_ID \
-  -D TDESKTOP_API_HASH=YOUR_API_HASH
+# Select the official macOS target. Without this the Packer target is not
+# generated at all, and no signed update package can ever be produced —
+# releases end up shipping a DMG that the updater cannot consume.
+# This file is gitignored by upstream, so it must be created per checkout.
+echo mac > build/target
+
+# Configure. With build/target set, configure.sh reads the API credentials
+# from DesktopPrivate/custom_api_id.h, so the -D flags are not needed.
+./configure.sh
 
 # This generates Xcode project in ../out/
 ```
@@ -295,6 +326,12 @@ cd ~/xCode/tlgrm/tdesktop/Telegram
 - Configures build settings for macOS
 - Embeds your API credentials
 - Creates `tdesktop/out/Telegram.xcodeproj`
+- Adds the `Packer` target used to produce update packages
+
+**Note:** `build/target` also enables `-Werror`. That is deliberate — it is
+what caught several silent-failure bugs in this fork. If a build fails on a
+warning, fix the warning rather than removing the target file, or the
+release pipeline loses Packer along with it.
 
 ### Step 6: Build Telegram Desktop (10-20 minutes)
 
@@ -1056,59 +1093,7 @@ Claude: Uses archive_deleted_accounts(peer_id=768828198)
 
 ### Adding New MCP Tools
 
-**Recommended Approach:** Prototype in Python first, then implement in C++.
-
-#### 1. Prototype in Python
-
-```bash
-cd ~/xCode/tlgrm/python-bridge
-
-# Edit mcp_server.py
-```
-
-```python
-@mcp.tool()
-def get_chat_statistics(chat_id: str) -> dict:
-    """
-    Get statistics for a specific chat.
-
-    Args:
-        chat_id: Telegram chat ID
-
-    Returns:
-        Statistics including message count, member count, etc.
-    """
-    # Prototype implementation
-    return {
-        "chat_id": chat_id,
-        "total_messages": 1234,
-        "active_members": 42,
-        "created_date": "2024-01-01"
-    }
-
-# Test
-python main.py
-```
-
-#### 2. Test with Claude Desktop
-
-Update Claude config to use Python server:
-```json
-{
-  "mcpServers": {
-    "telegram": {
-      "command": "python",
-      "args": ["/Users/YOUR_USER/xCode/tlgrm/python-bridge/main.py"]
-    }
-  }
-}
-```
-
-Test the new tool with Claude.
-
-#### 3. Implement in C++
-
-Once the Python prototype works:
+#### 1. Declare and implement in C++
 
 ```cpp
 // In tdesktop/Telegram/SourceFiles/mcp/mcp_server.h
@@ -1508,7 +1493,7 @@ cmake --build . --config Release
 │   │       └── Telegram.app        # Built application
 │   └── Libraries/                  # Built dependencies (ignored)
 │
-├── python-bridge/                  # Python MCP fallback
+├── pythonMCP/                      # Python MCP server (AI/ML layer)
 │   ├── README.md                   # Python implementation docs
 │   ├── requirements.txt            # Python dependencies
 │   ├── config.toml                 # Configuration
@@ -1527,7 +1512,7 @@ cmake --build . --config Release
 │   └── BUILD_GUIDE.md              # Build instructions & troubleshooting
 │
 ├── Libraries/                      # Build dependencies (ignored)
-│   ├── qt_6.2.12/                 # Qt framework
+│   ├── qt_6.11.1/                 # Qt framework
 │   ├── ffmpeg/                    # Media processing
 │   ├── openssl3/                  # Cryptography
 │   └── ... (28 total dependencies)
@@ -1549,7 +1534,7 @@ cmake --build . --config Release
 | `tdesktop/Telegram/SourceFiles` | ~50MB | tdesktop source code | ✅ Yes (submodule) |
 | `tdesktop/out` | ~25GB | Build artifacts | ❌ No (.gitignore) |
 | `Libraries/` | ~15GB | Compiled dependencies | ❌ No (.gitignore) |
-| `python-bridge/` | 88KB | Python MCP server | ✅ Yes |
+| `pythonMCP/` | 88KB | Python MCP server | ✅ Yes |
 | `docs/` | 36KB | Documentation | ✅ Yes |
 
 ---
@@ -1580,7 +1565,7 @@ cmake --build . --config Release
   - Technology stack
   - Upcoming milestones
 
-- **[python-bridge/README.md](python-bridge/README.md)**
+- **[pythonMCP/README.md](pythonMCP/README.md)**
   - Python MCP server documentation
   - IPC client usage
   - Standalone vs bridge modes
@@ -1659,7 +1644,7 @@ cmake --build . --config Release
 2. **Verify Claude Desktop**: Only connect to official Claude Desktop app
 3. **Review Logs**: Monitor MCP usage via system logs
 4. **Protect API Credentials**: Never commit `.env` file to public repos
-5. **Use Whitelisting** (Python bridge): Restrict chat access if needed
+5. **Use Whitelisting** (Python MCP server): Restrict chat access if needed
 
 ---
 
@@ -1743,13 +1728,23 @@ When reporting issues, please include:
 
 ---
 
+## Limitations
+
+- **macOS only** — builds target Apple Silicon and Intel Macs. No Windows or Linux support.
+- **Account risk** — exporting restricted content or heavy automated usage may trigger Telegram's anti-abuse systems. Use responsibly and at your own risk.
+- **Disk space** — full channel exports with media can consume tens of GB. Monitor available space during large exports.
+- **Auto-update is ported but compiled out** — the custom update system (own RSA keys, `tlgrmfeed4` MTProto channel, `https://updates.71grm.site/current4`) is in the tree, but `DESKTOP_APP_DISABLE_AUTOUPDATE` defaults ON for non-official builds, so `TDESKTOP_DISABLE_AUTOUPDATE` is defined and every update path is inert. Enable with `-D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF`, and note that releases must then be signed with the private key matching `config.h`. Until then: pull and rebuild.
+- **Stub tools** — of 333 advertised tools, **147 reach live Telegram state; 186 are stubs**. Stubs return `success: true` over locally-fabricated SQLite that nothing syncs from Telegram, so a caller cannot distinguish them from real results. Highest concentration: settings (84 of 118), stars (36 of 45), business (29 of 36).
+
+---
+
 ## Project Status
 
-**Version**: 6.9.5
-**Base**: Telegram Desktop 6.5.1
-**Last Updated**: 2026-04-02
+**Version**: 7.0.7
+**Base**: Telegram Desktop 7.0.7 (MTProto layer 228, Qt 6.11.1)
+**Last Updated**: 2026-08-03
 **Platform**: macOS (Apple Silicon)
-**MCP Tools**: 330+ registered (54+ fully implemented)
+**MCP Tools**: 333 advertised — 147 backed by live Telegram state, 186 stubs
 
 **Build Status**: ✅ Compiles successfully
 **MCP Protocol**: ✅ Fully working (stdio + IPC)
