@@ -299,6 +299,7 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"remove_from_collection",        Backing::LocalOnly },
 	{"remove_message_tag",            Backing::LocalOnly },
 	{"rename_chat",                   Backing::Mtproto },
+	{"rename_chat_title",               Backing::Mtproto },
 	{"reorder_folders",               Backing::LiveSession },
 	{"reorder_profile_gifts",         Backing::Mtproto },
 	{"request_message_summary",       Backing::Mtproto },

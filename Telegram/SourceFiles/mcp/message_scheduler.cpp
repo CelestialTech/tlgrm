@@ -483,7 +483,13 @@ void MessageScheduler::sendScheduledMessage(ScheduledMessage &message) {
 	message.status = ScheduleStatus::Sending;
 
 	// Get the history/chat
-	auto peer = _session->data().peer(PeerId(message.chatId));
+	const auto schedId = PeerId(message.chatId);
+	if (!message.chatId
+		|| (!peerIsUser(schedId) && !peerIsChat(schedId)
+			&& !peerIsChannel(schedId))) {
+		return;
+	}
+	auto peer = _session->data().peerLoaded(schedId);
 	if (!peer) {
 		qWarning() << "MessageScheduler: Invalid peer ID" << message.chatId;
 		handleSendResult(message.scheduleId, false, "Invalid chat ID");

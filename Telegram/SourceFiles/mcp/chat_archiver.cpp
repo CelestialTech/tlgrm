@@ -401,21 +401,29 @@ bool ChatArchiver::archiveMessage(HistoryItem *message) {
 	return true;
 }
 
-bool ChatArchiver::archiveChat(qint64 chatId, int messageLimit) {
+int ChatArchiver::archiveChat(qint64 chatId, int messageLimit) {
 	if (!_isRunning || !_session) {
-		return false;
+		return NotRunning;
 	}
 
-	auto peer = _session->peer(PeerId(chatId));
+	const auto id = PeerId(chatId);
+	// Session::peer() aborts on an id naming no peer kind, so validate the
+	// shape before the lookup rather than testing the result after it --
+	// peer() returns not_null and never yields the null this used to check.
+	if (!chatId
+		|| (!peerIsUser(id) && !peerIsChat(id) && !peerIsChannel(id))) {
+		qWarning() << "[ChatArchiver] Invalid peer id:" << chatId;
+		return InvalidPeerId;
+	}
+	auto peer = _session->peerLoaded(id);
 	if (!peer) {
 		qWarning() << "[ChatArchiver] Peer not found:" << chatId;
-		return false;
+		return PeerNotLoaded;
 	}
 
+	// history() is findOrCreate() and returns not_null, so there is no
+	// null case to test here -- the check that used to be here never fired.
 	auto history = peer->owner().history(peer);
-	if (!history) {
-		return false;
-	}
 
 	int archived = 0;
 	int limit = (messageLimit <= 0) ? INT_MAX : messageLimit;
@@ -443,7 +451,7 @@ bool ChatArchiver::archiveChat(qint64 chatId, int messageLimit) {
 	}
 
 	qInfo() << "[ChatArchiver] Archived" << archived << "messages from chat" << chatId;
-	return archived > 0;
+	return archived;
 }
 
 bool ChatArchiver::archiveAllChats(int messagesPerChat) {
@@ -457,7 +465,7 @@ bool ChatArchiver::archiveAllChats(int messagesPerChat) {
 	for (const auto &row : chatsList) {
 		if (const auto history = row->history()) {
 			qint64 chatId = history->peer->id.value;
-			if (archiveChat(chatId, messagesPerChat)) {
+			if (archiveChat(chatId, messagesPerChat) > 0) {
 				totalArchived++;
 			}
 		}

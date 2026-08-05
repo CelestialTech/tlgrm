@@ -774,6 +774,19 @@ QJsonObject Server::toolSetReactionPrice(const QJsonObject &args) {
 			value["send_paid_messages_stars"] = stars;
 			done(value);
 		}).fail([=](const MTP::Error &error) {
+			// Telegram answers CHAT_NOT_MODIFIED when the price already has
+			// the requested value. Nothing failed -- the caller asked for a
+			// state the channel is already in, so report the state, not an
+			// error it would have to special-case itself.
+			if (error.type() == u"CHAT_NOT_MODIFIED"_q) {
+				QJsonObject value;
+				value["success"] = true;
+				value["chat_id"] = chatId;
+				value["send_paid_messages_stars"] = stars;
+				value["note"] = "Already set to this price";
+				done(value);
+				return;
+			}
 			fail("channels.updatePaidMessagesPrice failed: " + error.type());
 		}).send();
 	});

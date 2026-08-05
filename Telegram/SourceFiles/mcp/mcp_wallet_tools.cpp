@@ -890,47 +890,64 @@ QJsonObject Server::toolSetSpendingBudget(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolGetBudgetStatus(const QJsonObject &args) {
-	Q_UNUSED(args);
-	QJsonObject result;
-
-	QSqlQuery budgetQuery(_db);
-	budgetQuery.prepare("SELECT daily_limit, weekly_limit, monthly_limit FROM wallet_budgets WHERE id = 1");
-
-	if (budgetQuery.exec() && budgetQuery.next()) {
-		double dailyLimit = budgetQuery.value(0).toDouble();
-		double weeklyLimit = budgetQuery.value(1).toDouble();
-		double monthlyLimit = budgetQuery.value(2).toDouble();
-
-		// Calculate spent amounts
-		QSqlQuery spentQuery(_db);
-		spentQuery.prepare("SELECT "
-						   "SUM(CASE WHEN date >= date('now') THEN ABS(amount) ELSE 0 END) as daily, "
-						   "SUM(CASE WHEN date >= date('now', '-7 days') THEN ABS(amount) ELSE 0 END) as weekly, "
-						   "SUM(CASE WHEN date >= date('now', '-30 days') THEN ABS(amount) ELSE 0 END) as monthly "
-						   "FROM wallet_spending WHERE amount < 0");
-
-		double dailySpent = 0, weeklySpent = 0, monthlySpent = 0;
-		if (spentQuery.exec() && spentQuery.next()) {
-			dailySpent = spentQuery.value(0).toDouble();
-			weeklySpent = spentQuery.value(1).toDouble();
-			monthlySpent = spentQuery.value(2).toDouble();
-		}
-
-		result["daily_limit"] = dailyLimit;
-		result["daily_spent"] = dailySpent;
-		result["daily_remaining"] = qMax(0.0, dailyLimit - dailySpent);
-		result["weekly_limit"] = weeklyLimit;
-		result["weekly_spent"] = weeklySpent;
-		result["weekly_remaining"] = qMax(0.0, weeklyLimit - weeklySpent);
-		result["monthly_limit"] = monthlyLimit;
-		result["monthly_spent"] = monthlySpent;
-		result["monthly_remaining"] = qMax(0.0, monthlyLimit - monthlySpent);
-		result["success"] = true;
-	} else {
-		result["success"] = true;
-		result["note"] = "No budget configured";
+	const auto category = args["category"].toString().trimmed();
+	if (category.isEmpty()) {
+		return toolError("category is required: pass 'daily', 'weekly', "
+			"'monthly', or 'all'");
+	}
+	const auto wanted = category.toLower();
+	if (wanted != "daily" && wanted != "weekly"
+		&& wanted != "monthly" && wanted != "all") {
+		return toolError(QString("Unknown category '%1': expected daily, "
+			"weekly, monthly or all").arg(category));
 	}
 
+	QSqlQuery budget(_db);
+	budget.prepare("SELECT daily_limit, weekly_limit, monthly_limit "
+		"FROM wallet_budgets WHERE id = 1");
+	if (!budget.exec() || !budget.next()) {
+		return toolError("No budget configured; call set_spending_budget first");
+	}
+	const auto limits = std::array<double, 3>{
+		budget.value(0).toDouble(),
+		budget.value(1).toDouble(),
+		budget.value(2).toDouble() };
+
+	QSqlQuery spent(_db);
+	spent.prepare("SELECT "
+		"SUM(CASE WHEN date >= date('now') THEN ABS(amount) ELSE 0 END), "
+		"SUM(CASE WHEN date >= date('now','-7 days') THEN ABS(amount) ELSE 0 END), "
+		"SUM(CASE WHEN date >= date('now','-30 days') THEN ABS(amount) ELSE 0 END) "
+		"FROM wallet_spending WHERE amount < 0");
+	auto used = std::array<double, 3>{};
+	if (spent.exec() && spent.next()) {
+		for (auto i = 0; i != 3; ++i) {
+			used[i] = spent.value(i).toDouble();
+		}
+	}
+
+	// Only the requested window is returned. Previously every window came
+	// back regardless of the category asked for, so the argument had no
+	// effect on the answer at all.
+	const auto names = std::array<const char*, 3>{
+		"daily", "weekly", "monthly" };
+	QJsonObject windows;
+	for (auto i = 0; i != 3; ++i) {
+		if (wanted != "all" && wanted != names[i]) {
+			continue;
+		}
+		QJsonObject entry;
+		entry["limit"] = limits[i];
+		entry["spent"] = used[i];
+		entry["remaining"] = limits[i] - used[i];
+		entry["over_budget"] = (limits[i] > 0) && (used[i] > limits[i]);
+		windows[names[i]] = entry;
+	}
+
+	QJsonObject result;
+	result["success"] = true;
+	result["category"] = wanted;
+	result["windows"] = windows;
 	return result;
 }
 

@@ -2148,17 +2148,34 @@ QJsonObject Server::toolGetGiftAnalytics(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolGetUniqueGiftAnalytics(const QJsonObject &args) {
-	Q_UNUSED(args);
+	const auto giftType = args["gift_type"].toString().trimmed();
+	if (giftType.isEmpty()) {
+		return toolError("gift_type is required");
+	}
+
+	// Reports the requested gift type. It used to aggregate the whole
+	// portfolio and return that under any gift_type the caller passed.
 	QSqlQuery query(_db);
-	query.prepare("SELECT COUNT(DISTINCT gift_type), SUM(quantity), SUM(current_value) FROM portfolio");
+	query.prepare("SELECT quantity, avg_price, current_value "
+		"FROM portfolio WHERE gift_type = ?");
+	query.addBindValue(giftType);
+	if (!query.exec()) {
+		return toolError("Could not read portfolio: "
+			+ query.lastError().text());
+	}
 
 	QJsonObject result;
-	if (query.exec() && query.next()) {
-		result["unique_types"] = query.value(0).toInt();
-		result["total_quantity"] = query.value(1).toInt();
-		result["total_value"] = query.value(2).toDouble();
-	}
 	result["success"] = true;
+	result["gift_type"] = giftType;
+	if (query.next()) {
+		result["quantity"] = query.value(0).toInt();
+		result["avg_price"] = query.value(1).toDouble();
+		result["current_value"] = query.value(2).toDouble();
+		result["held"] = true;
+	} else {
+		result["held"] = false;
+		result["note"] = "No holding recorded locally for this gift type";
+	}
 	return result;
 }
 
@@ -2406,23 +2423,36 @@ QJsonObject Server::toolGetGiveawayOptions(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolGetGiveawayStats(const QJsonObject &args) {
-	Q_UNUSED(args);
+	const auto giveawayId = args["giveaway_id"].toVariant().toLongLong();
+	if (!giveawayId) {
+		return toolError("giveaway_id is required and must be non-zero");
+	}
 
+	// Reports the giveaway asked for. It previously aggregated every giveaway
+	// in the table and returned those totals whatever id was passed, so the
+	// numbers described the wrong thing whenever more than one existed.
 	QSqlQuery query(_db);
-	query.prepare("SELECT COUNT(*), COALESCE(SUM(winner_count), 0), COALESCE(SUM(stars_amount), 0) "
-				  "FROM giveaways");
+	query.prepare("SELECT type, stars_amount, winner_count, channel_id, "
+		"status, created_at FROM giveaways WHERE id = ?");
+	query.addBindValue(giveawayId);
+	if (!query.exec()) {
+		return toolError("Could not read giveaway: "
+			+ query.lastError().text());
+	}
+	if (!query.next()) {
+		return toolError(QString("No giveaway recorded locally with id %1")
+			.arg(giveawayId));
+	}
 
 	QJsonObject result;
-	if (query.exec() && query.next()) {
-		result["total_giveaways"] = query.value(0).toInt();
-		result["total_winners"] = query.value(1).toInt();
-		result["total_stars_distributed"] = query.value(2).toInt();
-	} else {
-		result["total_giveaways"] = 0;
-		result["total_winners"] = 0;
-		result["total_stars_distributed"] = 0;
-	}
 	result["success"] = true;
+	result["giveaway_id"] = giveawayId;
+	result["type"] = query.value(0).toString();
+	result["stars_amount"] = query.value(1).toInt();
+	result["winner_count"] = query.value(2).toInt();
+	result["channel_id"] = query.value(3).toLongLong();
+	result["status"] = query.value(4).toString();
+	result["created_at"] = query.value(5).toString();
 	return result;
 }
 
@@ -2531,20 +2561,32 @@ QJsonObject Server::toolGetAwayConfig(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolSetAwayNow(const QJsonObject &args) {
-	Q_UNUSED(args);
-	// Enable away message immediately
+	const auto message = args["message"].toString();
+	if (message.isEmpty()) {
+		return toolError("message is required: away mode needs the text to "
+			"reply with");
+	}
+
+	// Stores the message it was given. It previously flipped the enabled flag
+	// and ignored the argument entirely, so callers got away mode with
+	// whatever text happened to be configured before -- or an error claiming
+	// nothing was configured while holding the text to configure it with.
 	QSqlQuery query(_db);
-	query.prepare("UPDATE away_config SET enabled = 1 WHERE id = 1");
+	query.prepare("INSERT INTO away_config (id, enabled, message, updated_at) "
+		"VALUES (1, 1, ?, datetime('now')) "
+		"ON CONFLICT(id) DO UPDATE SET "
+		"enabled = 1, message = excluded.message, "
+		"updated_at = datetime('now')");
+	query.addBindValue(message);
+	if (!query.exec()) {
+		return toolError("Could not enable away mode: "
+			+ query.lastError().text());
+	}
 
 	QJsonObject result;
-	if (query.exec() && query.numRowsAffected() > 0) {
-		result["success"] = true;
-		result["enabled"] = true;
-		result["note"] = "Away mode activated";
-	} else {
-		result["success"] = false;
-		result["error"] = "No away message configured - configure one first with set_away_message";
-	}
+	result["success"] = true;
+	result["enabled"] = true;
+	result["message"] = message;
 	return result;
 }
 
@@ -2690,27 +2732,48 @@ QJsonObject Server::toolGetStarRating(const QJsonObject &args) {
 // ============================================================================
 
 QJsonObject Server::toolGetTaxSummary(const QJsonObject &args) {
-	Q_UNUSED(args);
-	QSqlQuery incomeQuery(_db);
-	incomeQuery.prepare("SELECT SUM(amount) FROM wallet_spending WHERE amount > 0");
-
-	QSqlQuery expenseQuery(_db);
-	expenseQuery.prepare("SELECT SUM(ABS(amount)) FROM wallet_spending WHERE amount < 0");
-
-	double totalIncome = 0, totalExpense = 0;
-	if (incomeQuery.exec() && incomeQuery.next()) {
-		totalIncome = incomeQuery.value(0).toDouble();
+	const auto year = args["year"].toInt();
+	if (year < 1970 || year > 2100) {
+		return toolError("year is required and must be a four-digit calendar "
+			"year");
 	}
-	if (expenseQuery.exec() && expenseQuery.next()) {
-		totalExpense = expenseQuery.value(0).toDouble();
+
+	// Scoped to the requested year. This used to sum every transaction ever
+	// recorded and return it under whatever year the caller asked for, which
+	// is the one thing a tax summary must never do.
+	const auto from = QString::number(year) + "-01-01";
+	const auto to = QString::number(year) + "-12-31";
+
+	QSqlQuery query(_db);
+	query.prepare("SELECT "
+		"SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), "
+		"SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), "
+		"COUNT(*) "
+		"FROM wallet_spending WHERE date(date) BETWEEN date(?) AND date(?)");
+	query.addBindValue(from);
+	query.addBindValue(to);
+
+	double income = 0, expense = 0;
+	int count = 0;
+	if (!query.exec()) {
+		return toolError("Could not read transactions: "
+			+ query.lastError().text());
+	}
+	if (query.next()) {
+		income = query.value(0).toDouble();
+		expense = query.value(1).toDouble();
+		count = query.value(2).toInt();
 	}
 
 	QJsonObject result;
 	result["success"] = true;
-	result["total_income"] = totalIncome;
-	result["total_expenses"] = totalExpense;
-	result["net_income"] = totalIncome - totalExpense;
-	result["note"] = "Summary of locally tracked transactions - consult tax advisor for actual obligations";
+	result["year"] = year;
+	result["total_income"] = income;
+	result["total_expenses"] = expense;
+	result["net_income"] = income - expense;
+	result["transaction_count"] = count;
+	result["note"] = "Locally tracked transactions only; nothing here is "
+		"synced from Telegram and it is not tax advice";
 	return result;
 }
 
