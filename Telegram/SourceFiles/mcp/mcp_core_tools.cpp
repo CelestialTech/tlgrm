@@ -372,6 +372,84 @@ QJsonObject Server::toolSendMessage(const QJsonObject &args) {
 	return result;
 }
 
+// Sends a local file to a chat as a document, preserving its bytes and its
+// filename. Used by the release pipeline to publish signed update packages to
+// the update feed channel: MTProto's update path resolves a package through
+// documentAttributeFilename, which SendMediaType::File is the only send mode
+// that guarantees (Photo re-encodes, and anything image-shaped would be
+// recompressed). The caller does not need to know how the file is prepared,
+// chunked or uploaded, nor that uploads are asynchronous — the return
+// acknowledges queueing, not delivery.
+QJsonObject Server::toolSendDocument(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto path = args["file_path"].toString();
+	const auto caption = args.value("caption").toString();
+
+	if (chatId == 0) {
+		return toolError("chat_id is required and must be non-zero");
+	}
+	if (path.isEmpty()) {
+		return toolError("file_path is required and must not be empty");
+	}
+	const auto info = QFileInfo(path);
+	if (!info.exists() || !info.isFile()) {
+		return toolError("file_path is not an existing file: " + path);
+	}
+	if (!_session) {
+		return toolError("Session not available");
+	}
+
+	const auto history = _session->data().history(PeerId(chatId));
+	if (!history) {
+		return toolError("Chat not found");
+	}
+
+	const auto premium = _session->user()->isPremium();
+	auto list = Storage::PrepareMediaList(
+		QStringList(info.absoluteFilePath()),
+		st::sendMediaPreviewSize,
+		premium);
+	if (list.error != Ui::PreparedList::Error::None) {
+		// TooLargeFile is the one a caller can act on: the limit is 2 GB for
+		// premium accounts and 4 GB otherwise, so report it distinctly.
+		const auto reason = (list.error == Ui::PreparedList::Error::TooLargeFile)
+			? QString("file exceeds this account's upload limit")
+			: QString("could not prepare file (error %1)"
+				).arg(int(list.error));
+		return toolError(reason + ": " + list.errorData);
+	}
+	if (list.files.empty()) {
+		return toolError("File prepared to an empty list: " + path);
+	}
+	if (!caption.isEmpty()) {
+		list.files.back().caption.text = caption;
+	}
+
+	_session->api().sendFiles(
+		std::move(list),
+		SendMediaType::File,
+		nullptr, // not an album
+		Api::SendAction(history));
+
+	QJsonObject result;
+	result["success"] = true;
+	result["chat_id"] = chatId;
+	result["file_path"] = info.absoluteFilePath();
+	result["file_name"] = info.fileName();
+	result["size"] = qint64(info.size());
+	if (!caption.isEmpty()) {
+		result["caption"] = caption;
+	}
+	// Deliberately not "sent": sendFiles() queues an asynchronous upload, so
+	// no message id exists yet. Callers that need the post id (the update
+	// feed does) must read it back from the chat once the upload completes.
+	result["status"] = "Document queued for upload";
+
+	qInfo() << "MCP: Queued document" << info.fileName()
+		<< "(" << info.size() << "bytes ) to chat" << chatId;
+	return result;
+}
+
 QJsonObject Server::toolSearchMessages(const QJsonObject &args) {
 	QString query = args["query"].toString();
 	if (query.isEmpty()) {

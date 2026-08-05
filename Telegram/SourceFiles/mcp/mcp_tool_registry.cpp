@@ -75,6 +75,30 @@ void Server::registerTools() {
 			}
 		},
 		Tool{
+			"send_document",
+			"Send a local file to a chat as a document, preserving its "
+				"bytes and filename. Upload is asynchronous: success means "
+				"queued, not delivered.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID"}
+					}},
+					{"file_path", QJsonObject{
+						{"type", "string"},
+						{"description", "Absolute path to an existing local file"}
+					}},
+					{"caption", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional caption for the document"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "file_path"}},
+			}
+		},
+		Tool{
 			"search_messages",
 			"Search messages in local database",
 			QJsonObject{
