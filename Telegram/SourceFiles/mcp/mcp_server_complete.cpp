@@ -26,6 +26,37 @@ Server::Server(QObject *parent)
 	// three declaration sites drift silently and only a running server sees
 	// all of them at once.
 	VerifyToolBackings(QStringList(_toolHandlers.keyBegin(), _toolHandlers.keyEnd()));
+
+	// Also check what is actually advertised. Checking only the handler map
+	// missed seven tools advertised twice, because they are declared in two
+	// different shapes -- a Tool{...} literal and a field-by-field `Tool
+	// tool; tool.name = ...` -- and only a running server sees the list both
+	// produce. Duplicates reach clients as repeated entries in tools/list.
+	{
+		auto seen = QSet<QString>();
+		auto duplicates = QStringList();
+		auto unbacked = QStringList();
+		for (const auto &tool : _tools) {
+			if (seen.contains(tool.name)) {
+				duplicates.append(tool.name);
+			} else {
+				seen.insert(tool.name);
+			}
+			if (!ToolBackingKnown(tool.name.toStdString())) {
+				unbacked.append(tool.name);
+			}
+		}
+		if (!duplicates.isEmpty()) {
+			qWarning() << "MCP: tools advertised more than once:"
+				<< duplicates.join(", ");
+		}
+		if (!unbacked.isEmpty()) {
+			qWarning() << "MCP: advertised tools with no backing entry"
+				<< "(they will be refused as unimplemented):"
+				<< unbacked.join(", ");
+		}
+		Assert(duplicates.isEmpty() && unbacked.isEmpty());
+	}
 }
 
 Server::~Server() {
@@ -1223,15 +1254,18 @@ QJsonObject Server::handleCallTool(const QJsonObject &params) {
 
 	QJsonObject result;
 
-	// Dispatch via O(1) hash lookup — all ~430 tools registered in initializeToolHandlers()
-	auto handler = _toolHandlers.find(toolName);
-	if (handler != _toolHandlers.end()) {
-		result = (*handler)(arguments);
-	} else {
-		result["error"] = "Unknown tool: " + toolName;
-		if (_auditLogger) {
-			_auditLogger->logError("Unknown tool: " + toolName, "tool_call");
-		}
+	// Dispatch through callTool() rather than reaching into _toolHandlers
+	// here. This used to be a second, independent lookup, which meant the
+	// backing check and the session guard in callTool() applied only to
+	// callers that happened to use it -- every request arriving over
+	// JSON-RPC, which is all of them in practice, bypassed both. A tool
+	// backed by nothing was refused in one dispatch path and served in the
+	// other.
+	result = callTool(toolName, arguments);
+	if (result.contains("error") && _auditLogger) {
+		_auditLogger->logError(
+			result["error"].toString() + " (" + toolName + ')',
+			"tool_call");
 	}
 
 	// Log tool completion via audit logger
