@@ -401,7 +401,7 @@ QJsonObject Server::toolListAvailableGifts(const QJsonObject &args) {
 
 	// Request topup options which show available star amounts
 	_session->api().request(MTPpayments_GetStarsTopupOptions(
-	)).done([this](const MTPVector<MTPStarsTopupOption> &options) {
+	)).done([](const MTPVector<MTPStarsTopupOption> &options) {
 		// Options loaded, will be cached by the session
 		qWarning() << "MCP: Loaded" << options.v.size() << "star topup options";
 	}).fail([](const MTP::Error &error) {
@@ -411,7 +411,7 @@ QJsonObject Server::toolListAvailableGifts(const QJsonObject &args) {
 	// Also request available star gifts
 	_session->api().request(MTPpayments_GetStarGifts(
 		MTP_int(0)  // hash for caching
-	)).done([this](const MTPpayments_StarGifts &gifts) {
+	)).done([](const MTPpayments_StarGifts &gifts) {
 		gifts.match([](const MTPDpayments_starGifts &data) {
 			qWarning() << "MCP: Loaded" << data.vgifts().v.size() << "star gifts";
 		}, [](const MTPDpayments_starGiftsNotModified &) {
@@ -600,9 +600,9 @@ QJsonObject Server::toolUnsubscribeFromChannel(const QJsonObject &args) {
 			MTP_inputPeerSelf(),
 			MTP_string(subscriptionId),
 			MTP_bool(true)  // cancel = true
-		)).done([this, subscriptionId]() {
+		)).done([subscriptionId]() {
 			qWarning() << "MCP: Subscription" << subscriptionId << "cancelled successfully";
-		}).fail([this, subscriptionId](const MTP::Error &error) {
+		}).fail([subscriptionId](const MTP::Error &error) {
 			qWarning() << "MCP: Failed to cancel subscription" << subscriptionId << ":" << error.type();
 		}).send();
 
@@ -688,7 +688,7 @@ QJsonObject Server::toolGetEarnings(const QJsonObject &args) {
 	_session->api().request(MTPpayments_GetStarsRevenueStats(
 		MTP_flags(0),
 		inputPeer
-	)).done([this, channelId](const MTPpayments_StarsRevenueStats &stats) {
+	)).done([channelId](const MTPpayments_StarsRevenueStats &stats) {
 		const auto &data = stats.data();
 		const auto &status = data.vstatus().data();
 		auto current = CreditsAmountFromTL(status.vcurrent_balance());
@@ -759,7 +759,7 @@ QJsonObject Server::toolWithdrawEarnings(const QJsonObject &args) {
 		withdrawPeer->input(),
 		MTP_long(isTon ? 0 : amount),
 		MTP_inputCheckPasswordEmpty()  // Empty password triggers 2FA prompt
-	)).fail([this, amount, method](const MTP::Error &error) {
+	)).fail([amount, method](const MTP::Error &error) {
 		// PASSWORD_HASH_INVALID or similar is expected - user must enter password via UI
 		qWarning() << "MCP: Withdrawal initiation:" << error.type()
 				   << "(password required for" << amount << method << ")";
