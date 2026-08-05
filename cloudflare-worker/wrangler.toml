@@ -1,0 +1,37 @@
+name = "tlgrm-updates"
+main = "src/worker.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Custom domain: updates.71grm.site
+# This host is what the client hardcodes as its autoupdate prefix
+# (storage/localstorage.cpp, readAutoupdatePrefixRaw). The two must agree
+# or update checks fail with no user-visible signal.
+# Configure via Cloudflare Dashboard > Workers > tlgrm-updates > Triggers > Custom Domains
+# Or via API: wrangler domains add updates.71grm.site
+routes = [
+  { pattern = "updates.71grm.site/*", zone_name = "71grm.site" }
+]
+
+# KV namespace for caching GitHub API responses and ETags
+[[kv_namespaces]]
+binding = "CACHE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
+
+# Environment variables (set via `wrangler secret put GITHUB_TOKEN`)
+# GITHUB_TOKEN is optional but raises rate limit from 60/hr to 5000/hr
+[vars]
+GITHUB_REPO = "CelestialTech/tlgrm"
+CACHE_TTL_SECONDS = "3600"
+
+# Production environment
+[env.production]
+name = "tlgrm-updates"
+routes = [
+  { pattern = "updates.71grm.site/*", zone_name = "71grm.site" }
+]
+
+[env.production.vars]
+GITHUB_REPO = "CelestialTech/tlgrm"
+CACHE_TTL_SECONDS = "3600"

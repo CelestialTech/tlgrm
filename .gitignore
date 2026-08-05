@@ -187,3 +187,13 @@ ThirdParty/*/
 
 Tlgrm.dmg
 dmg_build/
+
+# ===================================
+# Private signing material — NEVER COMMIT
+# ===================================
+# packer_private.h holds the RSA private keys that sign every update package;
+# their public halves are pinned in config.h and packer.cpp. Leaking them lets
+# anyone sign an update this client will install and trust. These files were
+# previously untracked but not ignored, so any `git add -A` would have
+# published them to the public remote.
+DesktopPrivate/
