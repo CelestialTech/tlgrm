@@ -657,7 +657,15 @@ bool BatchOperations::exportMessage(qint64 chatId, qint64 messageId, const QStri
 		return false;
 	}
 
-	auto peer = _session->data().peer(PeerId(chatId));
+	auto peer = [&]() -> PeerData* {
+		const auto id = PeerId(chatId);
+		// Session::peer() aborts on an id naming no peer kind.
+		if (!chatId
+			|| (!peerIsUser(id) && !peerIsChat(id) && !peerIsChannel(id))) {
+			return nullptr;
+		}
+		return _session->data().peerLoaded(id);
+	}();
 	if (!peer) {
 		qWarning() << "BatchOperations: Invalid peer ID" << chatId;
 		return false;
@@ -715,7 +723,15 @@ bool BatchOperations::markChatAsRead(qint64 chatId) {
 		return false;
 	}
 
-	auto peer = _session->data().peer(PeerId(chatId));
+	auto peer = [&]() -> PeerData* {
+		const auto id = PeerId(chatId);
+		// Session::peer() aborts on an id naming no peer kind.
+		if (!chatId
+			|| (!peerIsUser(id) && !peerIsChat(id) && !peerIsChannel(id))) {
+			return nullptr;
+		}
+		return _session->data().peerLoaded(id);
+	}();
 	if (!peer) {
 		qWarning() << "BatchOperations: Invalid peer ID" << chatId;
 		return false;

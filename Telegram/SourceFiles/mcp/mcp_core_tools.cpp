@@ -9,6 +9,27 @@
 namespace MCP {
 // ===== CORE TOOL IMPLEMENTATIONS =====
 
+PeerData *Server::resolvePeer(qint64 chatId) const {
+	return chatId ? resolvePeer(PeerId(chatId)) : nullptr;
+}
+
+PeerData *Server::resolvePeer(PeerId id) const {
+	if (!_session || !id.value) {
+		return nullptr;
+	}
+	// Session::peer() aborts on an id that names no peer kind, so the shape
+	// has to be checked before the lookup, not after it.
+	if (!peerIsUser(id) && !peerIsChat(id) && !peerIsChannel(id)) {
+		return nullptr;
+	}
+	return _session->data().peerLoaded(id);
+}
+
+History *Server::resolveHistory(qint64 chatId) const {
+	const auto peer = resolvePeer(chatId);
+	return peer ? _session->data().history(peer).get() : nullptr;
+}
+
 QJsonObject Server::toolListChats(const QJsonObject &args) {
 	Q_UNUSED(args);
 
@@ -117,7 +138,7 @@ QJsonObject Server::toolGetChatInfo(const QJsonObject &args) {
 		PeerId peerId(chatId);
 
 		// Get the peer data
-		auto peer = _session->data().peer(peerId);
+		auto peer = resolvePeer(chatId);
 		if (!peer) {
 			qWarning() << "MCP: No peer found for chat" << chatId;
 			chatInfo["error"] = "Chat not found";
@@ -554,7 +575,7 @@ QJsonObject Server::toolGetUserInfo(const QJsonObject &args) {
 		PeerId peerId = peerFromUser(uid);
 
 		// Get the peer data first
-		auto peer = _session->data().peer(peerId);
+		auto peer = resolvePeer(peerId);
 		if (!peer) {
 			qWarning() << "MCP: Peer not found for" << userId;
 			userInfo["error"] = "User not found";

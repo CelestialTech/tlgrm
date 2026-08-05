@@ -1581,7 +1581,7 @@ QJsonObject Server::toolSendSubscriberMessage(const QJsonObject &args) {
 
 	// Resolve the channel and send the message
 	PeerId peerId(channelId);
-	auto peer = _session->data().peer(peerId);
+	auto peer = resolvePeer(peerId);
 	if (!peer) {
 		result["error"] = QString("Channel %1 not found").arg(channelId);
 		result["success"] = false;

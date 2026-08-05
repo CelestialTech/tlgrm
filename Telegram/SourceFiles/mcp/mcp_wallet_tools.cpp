@@ -299,7 +299,7 @@ QJsonObject Server::toolSendGift(const QJsonObject &args) {
 
 	// Resolve the recipient peer
 	PeerId peerId(recipientId);
-	auto peer = _session->data().peer(peerId);
+	auto peer = resolvePeer(peerId);
 	if (!peer) {
 		result["error"] = QString("Recipient %1 not found").arg(recipientId);
 		result["success"] = false;
@@ -447,7 +447,7 @@ QJsonObject Server::toolGetGiftSuggestions(const QJsonObject &args) {
 	}
 
 	PeerId peerId(recipientId);
-	auto peer = _session->data().peer(peerId);
+	auto peer = resolvePeer(peerId);
 	auto user = peer ? peer->asUser() : nullptr;
 
 	if (user) {
@@ -668,7 +668,7 @@ QJsonObject Server::toolGetEarnings(const QJsonObject &args) {
 	PeerData *earningsPeer = nullptr;
 	if (channelId > 0) {
 		PeerId peerId(channelId);
-		earningsPeer = _session->data().peer(peerId);
+		earningsPeer = resolvePeer(peerId);
 	} else {
 		// Self earnings (bot earnings)
 		earningsPeer = _session->data().peer(_session->userPeerId());
@@ -738,7 +738,7 @@ QJsonObject Server::toolWithdrawEarnings(const QJsonObject &args) {
 	PeerData *withdrawPeer = nullptr;
 	if (channelId > 0) {
 		PeerId peerId(channelId);
-		withdrawPeer = _session->data().peer(peerId);
+		withdrawPeer = resolvePeer(peerId);
 	} else {
 		withdrawPeer = _session->data().peer(_session->userPeerId());
 	}
@@ -1104,7 +1104,7 @@ QJsonObject Server::toolRequestStars(const QJsonObject &args) {
 
 	// Send a message to the user requesting stars
 	PeerId peerId(fromUserId);
-	auto peer = _session->data().peer(peerId);
+	auto peer = resolvePeer(peerId);
 	if (peer) {
 		auto history = _session->data().history(peerId);
 		if (history) {

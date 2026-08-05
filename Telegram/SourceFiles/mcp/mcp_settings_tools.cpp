@@ -2447,7 +2447,7 @@ QJsonObject Server::toolBlockUser(const QJsonObject &args) {
 		return result;
 	}
 
-	auto peer = _session->data().peer(PeerId(userId));
+	auto peer = resolvePeer(userId);
 	if (!peer) {
 		QJsonObject result;
 		result["error"] = "User not found";
@@ -2481,7 +2481,7 @@ QJsonObject Server::toolUnblockUser(const QJsonObject &args) {
 		return result;
 	}
 
-	auto peer = _session->data().peer(PeerId(userId));
+	auto peer = resolvePeer(userId);
 	if (!peer) {
 		QJsonObject result;
 		result["error"] = "User not found";
@@ -2740,7 +2740,7 @@ QJsonObject Server::toolTransferGift(const QJsonObject &args) {
 		return result;
 	}
 
-	auto recipient = _session->data().peer(PeerId(recipientId));
+	auto recipient = resolvePeer(recipientId);
 	if (!recipient) {
 		result["error"] = QString("Recipient %1 not found").arg(recipientId);
 		result["success"] = false;

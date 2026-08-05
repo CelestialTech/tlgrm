@@ -745,7 +745,15 @@ bool MessageScheduler::validateChatId(qint64 chatId, QString &error) const {
 	}
 
 	if (_session) {
-		auto peer = _session->data().peer(PeerId(chatId));
+		auto peer = [&]() -> PeerData* {
+		const auto id = PeerId(chatId);
+		// Session::peer() aborts on an id naming no peer kind.
+		if (!chatId
+			|| (!peerIsUser(id) && !peerIsChat(id) && !peerIsChannel(id))) {
+			return nullptr;
+		}
+		return _session->data().peerLoaded(id);
+	}();
 		if (!peer) {
 			error = "Chat not found";
 			return false;
