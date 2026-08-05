@@ -115,18 +115,17 @@ int Sandbox::start() {
 		}
 	}
 
-	// Tlgrm: an MCP-driven instance is expected to coexist with a normal one, so
-	// it opts out of single-instance handoff.
+	// Tlgrm: gManyInstance is deliberately NOT set for --mcp instances.
 	//
-	// DELIBERATE DIVERGENCE from the 6.9.6 fork, which set this unconditionally:
-	// that disabled tg:// URL routing to a running instance for *every* launch
-	// and allowed two processes to open the same tdata concurrently — a
-	// plausible corruption path. Gating on --mcp keeps the intent without the
-	// collateral damage. Drop the condition if unconditional behaviour is wanted.
-	if (QCoreApplication::arguments().contains(u"--mcp"_q)) {
-		gManyInstance = true;
-	}
-
+	// It reads like a single-instance opt-out, but it is not one: the handoff
+	// is driven unconditionally by connectToServer() below, and gManyInstance
+	// has only two consumers — the log line in singleInstanceChecked() and
+	// update_checker.cpp, which skips *every* update check while it is set.
+	// Setting it here therefore bought no coexistence at all (an --mcp launch
+	// still hands off with CMD:show and quits) and silently disabled
+	// auto-updates for the MCP build. Genuine coexistence would need a
+	// distinct _localServerName, which also needs a separate working dir to
+	// avoid two processes opening one tdata.
 #if defined Q_OS_LINUX && QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
 	_localServer.setSocketOptions(QLocalServer::AbstractNamespaceOption);
 	_localSocket.setSocketOptions(QLocalSocket::AbstractNamespaceOption);
