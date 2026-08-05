@@ -127,6 +127,93 @@ QJsonObject Server::toolListChats(const QJsonObject &args) {
 	return result;
 }
 
+// Creates a channel or supergroup and returns its chat_id.
+//
+// Exists mainly so tests have somewhere disposable to act: roughly half the
+// tool surface mutates or destroys, and none of it could be exercised against
+// a real account. Paired with delete_channel, a test run can build its own
+// fixtures and remove them again.
+QJsonObject Server::toolCreateChannel(const QJsonObject &args) {
+	const auto title = args["title"].toString().trimmed();
+	const auto about = args.value("about").toString();
+	const auto megagroup = args.value("megagroup").toBool(false);
+
+	if (!_session) {
+		return toolError("No active session");
+	}
+	if (title.isEmpty()) {
+		return toolError("title is required");
+	}
+
+	using Flag = MTPchannels_CreateChannel::Flag;
+	const auto flags = megagroup ? Flag::f_megagroup : Flag::f_broadcast;
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPchannels_CreateChannel(
+			MTP_flags(flags),
+			MTP_string(title),
+			MTP_string(about),
+			MTPInputGeoPoint(),
+			MTPstring(),
+			MTP_int(0)
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			const auto chats = [&]() -> const QVector<MTPChat>* {
+				switch (result.type()) {
+				case mtpc_updates: return &result.c_updates().vchats().v;
+				case mtpc_updatesCombined:
+					return &result.c_updatesCombined().vchats().v;
+				}
+				return nullptr;
+			}();
+			QJsonObject value;
+			if (!chats || chats->isEmpty()) {
+				value = toolError("Channel created but Telegram returned no "
+					"chat to identify it");
+				done(value);
+				return;
+			}
+			const auto peer = _session->data().processChats(
+				MTP_vector<MTPChat>(*chats));
+			value["success"] = true;
+			value["chat_id"] = qint64(peer->id.value);
+			value["title"] = title;
+			value["megagroup"] = megagroup;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("channels.createChannel failed: " + error.type());
+		}).send();
+	}, 30000);
+}
+
+// Deletes a channel or supergroup outright. Only its creator can, which is
+// the guard that matters for a tool this destructive -- Telegram refuses
+// otherwise rather than this having to check.
+QJsonObject Server::toolDeleteChannel(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto peer = resolvePeer(chatId);
+	const auto channel = peer ? peer->asChannel() : nullptr;
+	if (!channel) {
+		return toolError("chat_id must name a channel or supergroup this "
+			"client has loaded");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPchannels_DeleteChannel(
+			channel->inputChannel()
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			QJsonObject value;
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("channels.deleteChannel failed: " + error.type());
+		}).send();
+	}, 30000);
+}
+
 QJsonObject Server::toolGetChatInfo(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 

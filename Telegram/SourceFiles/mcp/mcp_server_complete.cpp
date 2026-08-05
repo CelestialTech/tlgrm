@@ -1404,6 +1404,8 @@ void Server::initializeToolHandlers() {
 	// CORE TOOLS
 	_toolHandlers["list_chats"] = [this](const QJsonObject &args) { return toolListChats(args); };
 	_toolHandlers["get_chat_info"] = [this](const QJsonObject &args) { return toolGetChatInfo(args); };
+	_toolHandlers["create_channel"] = [this](const QJsonObject &args) { return toolCreateChannel(args); };
+	_toolHandlers["delete_channel"] = [this](const QJsonObject &args) { return toolDeleteChannel(args); };
 	_toolHandlers["read_messages"] = [this](const QJsonObject &args) { return toolReadMessages(args); };
 	_toolHandlers["send_message"] = [this](const QJsonObject &args) { return toolSendMessage(args); };
 	_toolHandlers["send_document"] = [this](const QJsonObject &args) { return toolSendDocument(args); };
