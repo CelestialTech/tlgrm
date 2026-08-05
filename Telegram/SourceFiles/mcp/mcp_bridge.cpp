@@ -50,7 +50,7 @@ QString Bridge::defaultSocketPath() {
 	if (!dir.mkpath(socketDir)) {
 		qWarning() << "MCP Bridge: Failed to create socket directory" << socketDir;
 		// Fallback to /tmp with restricted permissions
-		return "/tmp/tdesktop_mcp.sock";
+		return "/tmp/tlgrm_mcp.sock";
 	}
 
 	// Restrict directory to owner only (0700)
@@ -124,7 +124,7 @@ bool Bridge::start(const QString &socketPath) {
 	{
 		const auto configDir = QStandardPaths::writableLocation(
 			QStandardPaths::ConfigLocation);
-		const auto configPath = configDir + "/tdesktop/mcp_socket_path";
+		const auto configPath = configDir + "/tlgrm/mcp_socket_path";
 		QDir().mkpath(QFileInfo(configPath).absolutePath());
 		QFile configFile(configPath);
 		if (configFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {

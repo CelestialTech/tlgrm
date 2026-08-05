@@ -11,25 +11,45 @@ namespace MCP {
 
 QJsonObject Server::toolArchiveChat(const QJsonObject &args) {
 	if (!_archiver) {
-		QJsonObject error;
-		error["error"] = "Archiver not available";
-		return error;
+		return toolError("Archiver not available");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto limit = clampLimit(args.value("limit").toInt(1000), 1000);
+
+	// Report which precondition failed. This used to answer "Failed to
+	// archive chat" for every cause -- an unknown chat, an archiver that was
+	// never started, and a genuine write error were indistinguishable, so
+	// the one actionable case (start the archiver) looked like a bug.
+	if (!resolvePeer(chatId)) {
+		return toolError(QString("Chat %1 is not loaded in this client")
+			.arg(chatId));
+	}
+	if (!_archiver->isRunning()) {
+		return toolError("Archiver is not running; start it before archiving");
+	}
+	const auto archived = _archiver->archiveChat(chatId, limit);
+	if (archived < 0) {
+		switch (archived) {
+		case ChatArchiver::NotRunning:
+			return toolError("Archiver is not running; start it first");
+		case ChatArchiver::InvalidPeerId:
+			return toolError(QString("chat_id %1 names no user, chat or "
+				"channel").arg(chatId));
+		case ChatArchiver::PeerNotLoaded:
+			return toolError(QString("Chat %1 is not loaded in this client; "
+				"open it once so its history is available").arg(chatId));
+		}
+		return toolError("Archiver could not carry out the request");
 	}
 
-	qint64 chatId = args["chat_id"].toVariant().toLongLong();
-	int limit = clampLimit(args.value("limit").toInt(1000), 1000);
-
-	bool success = _archiver->archiveChat(chatId, limit);
-
+	// Zero archived is a success, not a failure: the chat had nothing new.
+	// Reporting the count lets the caller tell the two apart, which a bare
+	// boolean never could.
 	QJsonObject result;
-	result["success"] = success;
+	result["success"] = true;
 	result["chat_id"] = chatId;
 	result["requested_limit"] = limit;
-
-	if (!success) {
-		result["error"] = "Failed to archive chat";
-	}
-
+	result["archived_count"] = archived;
 	return result;
 }
 

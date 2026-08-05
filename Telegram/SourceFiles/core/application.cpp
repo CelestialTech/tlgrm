@@ -489,9 +489,9 @@ void Application::run() {
 		}, _lifetime);
 
 		_mcpBridge = std::make_unique<MCP::Bridge>();
-		if (_mcpBridge->start("/tmp/tdesktop_mcp.sock")) {
+		if (_mcpBridge->start("/tmp/tlgrm_mcp.sock")) {
 			_mcpBridge->setServer(_mcpServer.get());
-			DEBUG_LOG(("MCP: IPC bridge started on /tmp/tdesktop_mcp.sock"));
+			DEBUG_LOG(("MCP: IPC bridge started on /tmp/tlgrm_mcp.sock"));
 		} else {
 			LOG(("MCP Error: Failed to start IPC bridge"));
 			_mcpBridge = nullptr;

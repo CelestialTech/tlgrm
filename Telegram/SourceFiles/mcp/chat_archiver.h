@@ -66,12 +66,30 @@ public:
 
 	// Initialization
 	bool start(const QString &databasePath);
+
+	// Supplies the live session. archiveChat() and archiveAllChats() read
+	// history through it and refuse to run without one -- and nothing set it
+	// until now, so both had always failed with the archiver reporting itself
+	// as running.
+	void setSession(Data::Session *session) {
+		_session = session;
+	}
 	void stop();
 	[[nodiscard]] bool isRunning() const { return _isRunning; }
 
 	// Core archival functions
 	bool archiveMessage(HistoryItem *message);
-	bool archiveChat(qint64 chatId, int messageLimit = -1);  // -1 = all messages
+	// Returns the number of messages archived, or a negative Error if the
+	// request could not be carried out. Zero is a success: a chat with nothing
+	// new to archive has been archived correctly. This used to return bool as
+	// `archived > 0`, which reported an empty chat as a failure, and later a
+	// single -1, which could not say which precondition had failed.
+	enum Error : int {
+		NotRunning = -1,   // archiver was never started
+		InvalidPeerId = -2, // id names no user, chat or channel
+		PeerNotLoaded = -3, // valid id, but this client has not loaded it
+	};
+	int archiveChat(qint64 chatId, int messageLimit = -1);  // -1 = all messages
 	bool archiveAllChats(int messagesPerChat = 1000);
 
 	// Ephemeral message handling

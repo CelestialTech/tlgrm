@@ -510,6 +510,9 @@ void Server::initializeSessionComponents() {
 		fflush(stderr);
 		// Don't return - continue with other components
 	} else {
+		// Without this the archiver runs but holds no session, so
+		// archive_chat and archive_all_chats fail while isRunning() is true.
+		_archiver->setSession(_session ? &_session->data() : nullptr);
 		fprintf(stderr, "[MCP] ChatArchiver initialized\n");
 		fflush(stderr);
 	}
@@ -1464,6 +1467,7 @@ void Server::initializeToolHandlers() {
 
 	// MESSAGE OPERATIONS
 	_toolHandlers["edit_message"] = [this](const QJsonObject &args) { return toolEditMessage(args); };
+	_toolHandlers["rename_chat_title"] = [this](const QJsonObject &args) { return toolRenameChatTitle(args); };
 	_toolHandlers["delete_message"] = [this](const QJsonObject &args) { return toolDeleteMessage(args); };
 	_toolHandlers["forward_message"] = [this](const QJsonObject &args) { return toolForwardMessage(args); };
 	_toolHandlers["pin_message"] = [this](const QJsonObject &args) { return toolPinMessage(args); };
