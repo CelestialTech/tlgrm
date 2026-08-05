@@ -2486,50 +2486,6 @@ void Server::registerTools() {
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
 		},
 
-		// ===== GRADUAL EXPORT TOOLS (5) - Bypass Takeout Detection =====
-		Tool{
-			"start_gradual_export",
-			"Start gradual export for a chat - uses direct API calls to bypass takeout detection",
-			QJsonObject{
-				{"type", "object"},
-				{"properties", QJsonObject{
-					{"chat_id", QJsonObject{
-						{"type", "integer"},
-						{"description", "Chat ID to export"}
-					}},
-					{"min_delay_ms", QJsonObject{
-						{"type", "integer"},
-						{"description", "Minimum delay between requests in ms"},
-						{"default", 2000}
-					}},
-					{"max_delay_ms", QJsonObject{
-						{"type", "integer"},
-						{"description", "Maximum delay between requests in ms"},
-						{"default", 5000}
-					}},
-					{"min_batch_size", QJsonObject{
-						{"type", "integer"},
-						{"description", "Minimum messages per batch"},
-						{"default", 10}
-					}},
-					{"max_batch_size", QJsonObject{
-						{"type", "integer"},
-						{"description", "Maximum messages per batch"},
-						{"default", 50}
-					}},
-					{"export_format", QJsonObject{
-						{"type", "string"},
-						{"description", "Export format: json, html, markdown, or all"},
-						{"default", "json"}
-					}},
-					{"export_path", QJsonObject{
-						{"type", "string"},
-						{"description", "Custom export path (optional)"}
-					}}
-				}},
-				{"required", QJsonArray{"chat_id"}}
-			}
-		},
 
 	};
 
@@ -3255,6 +3211,47 @@ void Server::registerTools() {
 		}}, {"required", QJsonArray{"chat_id", "topic_id"}}}},
 	};
 	for (const auto &t : moreTools) {
+		_tools.append(t);
+	}
+
+	// These were callable but never advertised, so no client could discover
+	// them and tools/list understated the surface by eight. Schemas below are
+	// taken from what each implementation actually reads, not from what its
+	// name suggests.
+	const QVector<Tool> unlistedTools = {
+		Tool{"list_deleted_accounts", "List deleted accounts found in the local message history", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"list_deleted_channels", "List deleted channels found in the local message history", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"archive_deleted_accounts", "Archive messages from deleted accounts into a target group, pacing requests to look like ordinary use", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"peer_id", QJsonObject{{"type", "integer"}, {"description", "Single peer to archive"}}},
+			{"peer_ids", QJsonObject{{"type", "array"}, {"description", "Several peers to archive; takes precedence over peer_id"}, {"items", QJsonObject{{"type", "integer"}}}}},
+			{"target_group_id", QJsonObject{{"type", "integer"}, {"description", "Group to archive into"}}},
+			{"group_title", QJsonObject{{"type", "string"}, {"description", "Title for the archive group when one is created"}}},
+			{"min_delay_ms", QJsonObject{{"type", "integer"}, {"description", "Minimum delay between requests in ms"}}},
+			{"max_delay_ms", QJsonObject{{"type", "integer"}, {"description", "Maximum delay between requests in ms"}}},
+			{"add_date_headers", QJsonObject{{"type", "boolean"}, {"description", "Insert a header when the date changes"}}},
+			{"add_chat_separators", QJsonObject{{"type", "boolean"}, {"description", "Insert a separator between source chats"}}},
+			{"date_format", QJsonObject{{"type", "string"}, {"description", "Format string for date headers"}}}
+		}}}},
+
+		Tool{"get_deleted_archive_status", "Progress of the running deleted-account archive operation", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"pause_deleted_archive", "Pause the running deleted-account archive operation", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"resume_deleted_archive", "Resume a paused deleted-account archive operation", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"cancel_deleted_archive", "Cancel the running deleted-account archive operation", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"create_giveaway", "Create a Telegram Stars giveaway in a channel", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"channel_id", QJsonObject{{"type", "integer"}, {"description", "Channel to host the giveaway"}}},
+			{"stars_amount", QJsonObject{{"type", "integer"}, {"description", "Total stars to give away"}}},
+			{"winners_count", QJsonObject{{"type", "integer"}, {"description", "Number of winners"}}},
+			{"prize", QJsonObject{{"type", "string"}, {"description", "Prize description"}}},
+			{"end_date", QJsonObject{{"type", "integer"}, {"description", "Unix timestamp when the giveaway ends"}}}
+		}}, {"required", QJsonArray{"channel_id"}}}},
+	};
+	for (const auto &t : unlistedTools) {
 		_tools.append(t);
 	}
 }

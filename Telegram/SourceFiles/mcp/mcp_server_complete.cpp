@@ -20,6 +20,12 @@ Server::Server(QObject *parent)
 	registerResources();
 	registerPrompts();
 	initializeToolHandlers();
+
+	// Handlers are registered by now, so the table can be checked against
+	// what is actually callable. Done here rather than in a test because the
+	// three declaration sites drift silently and only a running server sees
+	// all of them at once.
+	VerifyToolBackings(QStringList(_toolHandlers.keyBegin(), _toolHandlers.keyEnd()));
 }
 
 Server::~Server() {
@@ -48,7 +54,31 @@ QJsonObject Server::callTool(const QString &toolName, const QJsonObject &args) {
 		return toolError("No active session — please log in first");
 	}
 
-	return it.value()(args);
+	// Refuse tools nothing backs, before the handler can report success.
+	// Several of these build a plausible-looking reply out of literals; run
+	// them and the caller cannot tell the answer was invented. Failing here
+	// is the single rule that keeps that from happening again.
+	const auto name = toolName.toStdString();
+	const auto backing = ToolBackingFor(name);
+	if (backing == Backing::Unimplemented) {
+		auto error = toolError(QString(
+			"Tool '%1' is not implemented: nothing backs it, so any result "
+			"would be invented. It is listed so the gap is visible rather "
+			"than hidden.").arg(toolName));
+		error["backing"] = QString::fromUtf8(BackingName(backing).data());
+		return error;
+	}
+
+	auto result = it.value()(args);
+
+	// Tell the caller where the answer came from. local-only results describe
+	// this client's database, which nothing syncs from Telegram — a caller
+	// that reads them as Telegram's view of the world would be wrong, and
+	// until now had no way to know.
+	if (!result.contains("backing")) {
+		result["backing"] = QString::fromUtf8(BackingName(backing).data());
+	}
+	return result;
 }
 
 void Server::initializeCapabilities() {
@@ -1131,10 +1161,36 @@ QJsonObject Server::handleListTools(const QJsonObject &params) {
 
 	QJsonArray tools;
 	for (const auto &tool : _tools) {
+		// Say what backs each tool where the client will actually read it.
+		// Descriptions are written per tool and none of them mentioned this,
+		// so a caller had no way to tell a Telegram query from a read of a
+		// local table nothing syncs. Annotating here rather than editing 335
+		// description strings keeps the fact in one place, where it cannot
+		// drift out of step with the table.
+		const auto backing = ToolBackingFor(tool.name.toStdString());
+		auto description = tool.description;
+		switch (backing) {
+		case Backing::LocalOnly:
+			description += " [local-only: reads this client's own database,"
+				" which is not synced from Telegram]";
+			break;
+		case Backing::PureCompute:
+			description += " [pure-compute: derived from the arguments"
+				" alone; performs no lookup]";
+			break;
+		case Backing::Unimplemented:
+			description += " [UNIMPLEMENTED: nothing backs this tool and"
+				" calling it returns an error]";
+			break;
+		case Backing::Mtproto:
+		case Backing::LiveSession:
+			break;
+		}
 		tools.append(QJsonObject{
 			{"name", tool.name},
-			{"description", tool.description},
+			{"description", description},
 			{"inputSchema", tool.inputSchema},
+			{"backing", QString::fromUtf8(BackingName(backing).data())},
 		});
 	}
 
@@ -1600,11 +1656,6 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["get_voice_transcription"] = [this](const QJsonObject &args) { return toolGetVoiceTranscription(args); };
 	_toolHandlers["translate_message"] = [this](const QJsonObject &args) { return toolTranslateMessage(args); };
 	_toolHandlers["get_translation_history"] = [this](const QJsonObject &args) { return toolGetTranslationHistory(args); };
-	_toolHandlers["add_message_tag"] = [this](const QJsonObject &args) { return toolAddMessageTag(args); };
-	_toolHandlers["get_message_tags"] = [this](const QJsonObject &args) { return toolGetMessageTags(args); };
-	_toolHandlers["remove_message_tag"] = [this](const QJsonObject &args) { return toolRemoveMessageTag(args); };
-	_toolHandlers["search_by_tag"] = [this](const QJsonObject &args) { return toolSearchByTag(args); };
-	_toolHandlers["get_tag_suggestions"] = [this](const QJsonObject &args) { return toolGetTagSuggestions(args); };
 	_toolHandlers["get_ad_filter_stats"] = [this](const QJsonObject &args) { return toolGetAdFilterStats(args); };
 	_toolHandlers["set_chat_rules"] = [this](const QJsonObject &args) { return toolSetChatRules(args); };
 	_toolHandlers["get_chat_rules"] = [this](const QJsonObject &args) { return toolGetChatRules(args); };

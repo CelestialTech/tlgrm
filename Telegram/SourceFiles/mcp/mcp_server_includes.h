@@ -68,6 +68,7 @@
 #include "api/api_blocked_peers.h"
 #include "apiwrap.h"
 #include "storage/storage_account.h"
+#include "mcp/mcp_tool_backing.h"
 #include "storage/storage_media_prepare.h"
 #include "storage/localimageloader.h"
 #include "ui/chat/attach/attach_prepare.h"
