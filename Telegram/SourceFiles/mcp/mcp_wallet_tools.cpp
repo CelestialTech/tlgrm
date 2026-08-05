@@ -786,37 +786,80 @@ QJsonObject Server::toolWithdrawEarnings(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolSetMonetizationRules(const QJsonObject &args) {
-	QJsonObject result;
-	QJsonObject rules = args["rules"].toObject();
+	if (!args.contains("rules") || !args["rules"].isObject()) {
+		return toolError("rules is required and must be an object");
+	}
+	const auto rules = args["rules"].toObject();
 
+	// Stored as one row, replacing the previous rule set. Previously this
+	// echoed the rules back with "configured locally" and stored nothing.
+	const auto encoded = QString::fromUtf8(
+		QJsonDocument(rules).toJson(QJsonDocument::Compact));
+	QSqlQuery query(_db);
+	query.prepare("INSERT OR REPLACE INTO monetization_rules "
+		"(id, rules, updated_at) VALUES (1, ?, datetime('now'))");
+	query.addBindValue(encoded);
+	if (!query.exec()) {
+		return toolError("Could not store monetization rules: "
+			+ query.lastError().text());
+	}
+
+	QJsonObject result;
 	result["success"] = true;
 	result["rules"] = rules;
-	result["note"] = "Monetization rules configured locally";
-
 	return result;
 }
 
 QJsonObject Server::toolGetMonetizationAnalytics(const QJsonObject &args) {
-	Q_UNUSED(args);
-	QJsonObject result;
-
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
 	if (!_session) {
-		result["error"] = "No active session";
-		result["success"] = false;
-		return result;
+		return toolError("No active session");
+	}
+	const auto peer = chatId
+		? _session->data().peerLoaded(PeerId(chatId))
+		: _session->user().get();
+	if (!peer) {
+		return toolError("Chat not found");
 	}
 
-	// Credits API not available in this version
-	qint64 balance = 0;
-
-	result["success"] = true;
-	result["stars_balance"] = balance;
-	result["total_revenue"] = 0;
-	result["subscribers"] = 0;
-	result["content_views"] = 0;
-	result["note"] = "Use get_earnings with a specific channel_id for detailed revenue stats";
-
-	return result;
+	// Real revenue figures, replacing a hand-built reply that reported zeros
+	// with success. StarsAmount carries a nanos component, so amounts are
+	// returned both raw and combined rather than truncated to whole stars.
+	// StarsAmount is boxed and has a TON variant whose amount is a signed
+	// nano value -- decoding it by hand gets negatives wrong. Use the
+	// converter the rest of the app uses.
+	const auto amount = [](const MTPStarsAmount &value) {
+		const auto parsed = CreditsAmountFromTL(value);
+		QJsonObject entry;
+		entry["whole"] = qint64(parsed.whole());
+		entry["nano"] = qint64(parsed.nano());
+		entry["value"] = parsed.value();
+		entry["currency"] = parsed.ton() ? "ton" : "stars";
+		return entry;
+	};
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_GetStarsRevenueStats(
+			MTP_flags(0),
+			peer->input()
+		)).done([=](const MTPpayments_StarsRevenueStats &result) {
+			const auto &data = result.data();
+			const auto &status = data.vstatus().data();
+			QJsonObject value;
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			value["usd_rate"] = data.vusd_rate().v;
+			value["current_balance"] = amount(status.vcurrent_balance());
+			value["available_balance"] = amount(status.vavailable_balance());
+			value["overall_revenue"] = amount(status.voverall_revenue());
+			value["withdrawal_enabled"] = status.is_withdrawal_enabled();
+			if (const auto next = status.vnext_withdrawal_at()) {
+				value["next_withdrawal_at"] = next->v;
+			}
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("payments.getStarsRevenueStats failed: " + error.type());
+		}).send();
+	});
 }
 
 // Budget Management
@@ -892,15 +935,38 @@ QJsonObject Server::toolGetBudgetStatus(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolSetBudgetAlert(const QJsonObject &args) {
-	QJsonObject result;
-	double threshold = args["threshold"].toDouble();
-	QString alertType = args.value("type").toString("percentage");  // percentage or absolute
+	const auto threshold = args["threshold"].toDouble();
+	const auto alertType = args.value("type").toString("percentage");
 
+	if (threshold <= 0) {
+		return toolError("threshold must be greater than zero");
+	}
+	if (alertType != "percentage" && alertType != "absolute") {
+		return toolError("type must be 'percentage' or 'absolute'");
+	}
+	if (alertType == "percentage" && threshold > 100) {
+		return toolError("a percentage threshold cannot exceed 100");
+	}
+
+	// Telegram has no server-side spending alert, so this is genuinely local
+	// state -- but it has to actually be stored. It previously echoed the
+	// arguments back with "Budget alert configured" and wrote nothing, so the
+	// alert did not exist and no later call could find it.
+	QSqlQuery query(_db);
+	query.prepare("INSERT INTO budget_alerts (threshold, alert_type) "
+		"VALUES (?, ?)");
+	query.addBindValue(threshold);
+	query.addBindValue(alertType);
+	if (!query.exec()) {
+		return toolError("Could not store budget alert: "
+			+ query.lastError().text());
+	}
+
+	QJsonObject result;
 	result["success"] = true;
+	result["id"] = query.lastInsertId().toLongLong();
 	result["threshold"] = threshold;
 	result["alert_type"] = alertType;
-	result["note"] = "Budget alert configured";
-
 	return result;
 }
 
@@ -1072,77 +1138,61 @@ QJsonObject Server::toolRequestStars(const QJsonObject &args) {
 
 QJsonObject Server::toolGetStarsRate(const QJsonObject &args) {
 	Q_UNUSED(args);
-	QJsonObject result;
-
 	if (!_session) {
-		result["success"] = true;
-		result["rate_usd"] = 0.0;
-		result["note"] = "No active session - cannot fetch rate";
-		return result;
+		return toolError("No active session");
 	}
 
-	// Credits API not available in this version
-	float64 usdRate = 0.0;
+	// Telegram publishes both rates in appConfig, so no request is needed.
+	// This used to return 0.0 with success=true under a comment claiming the
+	// credits API was unavailable -- a zero rate is worse than an error here,
+	// because it reads as a usable number and silently turns any conversion
+	// into zero.
+	const auto &config = _session->appConfig();
+	const auto withdrawRate = config.starsWithdrawRate();
+	const auto sellRate = config.starsSellRate();
 
+	QJsonObject result;
 	result["success"] = true;
-	result["rate_usd"] = usdRate;
-	if (usdRate > 0) {
-		result["rate_usd_per_star"] = usdRate;
-		result["stars_per_usd"] = 1.0 / usdRate;
-	} else {
-		result["note"] = "USD rate not yet loaded. Call get_wallet_balance first to trigger rate loading.";
-	}
-
+	result["usd_per_star_withdraw"] = withdrawRate;
+	result["usd_per_star_sell"] = sellRate;
+	result["stars_per_usd_withdraw"] = (withdrawRate > 0)
+		? (1. / withdrawRate)
+		: 0.;
+	result["source"] = "appConfig:stars_usd_withdraw_rate_x1000";
 	return result;
 }
 
 QJsonObject Server::toolConvertStars(const QJsonObject &args) {
-	QJsonObject result;
-	int starsAmount = args["stars_amount"].toInt();
-	QString targetCurrency = args.value("target").toString("usd");
+	const auto starsAmount = args["stars_amount"].toInt();
+	const auto target = args.value("target").toString("usd").toLower();
 
 	if (starsAmount <= 0) {
-		result["error"] = "Invalid stars_amount";
-		result["success"] = false;
-		return result;
+		return toolError("stars_amount must be a positive integer");
 	}
-
 	if (!_session) {
-		result["error"] = "No active session";
-		result["success"] = false;
-		return result;
+		return toolError("No active session");
+	}
+	if (target != "usd") {
+		return toolError(QString(
+			"Only 'usd' conversion is supported; Telegram publishes no rate "
+			"for '%1'").arg(target));
 	}
 
-	// Credits API not available in this version
-	float64 usdRate = 0.0;
+	// Two rates exist and they differ: withdrawing stars and selling them are
+	// priced separately, so reporting one number would be wrong for whichever
+	// case the caller meant. Both are returned and named.
+	const auto &config = _session->appConfig();
+	const auto withdrawRate = config.starsWithdrawRate();
+	const auto sellRate = config.starsSellRate();
 
-	double convertedAmount = 0;
-	double rateUsed = 0;
-
-	if (targetCurrency == "usd" && usdRate > 0) {
-		convertedAmount = starsAmount * usdRate;
-		rateUsed = usdRate;
-	} else if (targetCurrency == "usd") {
-		// Fallback approximate rate
-		rateUsed = 0.013;
-		convertedAmount = starsAmount * rateUsed;
-		result["rate_source"] = "approximate";
-	} else {
-		// TON conversion not directly available, approximate
-		rateUsed = 0.0001;
-		convertedAmount = starsAmount * rateUsed;
-		result["rate_source"] = "approximate";
-	}
-
+	QJsonObject result;
 	result["success"] = true;
 	result["stars_amount"] = starsAmount;
-	result["target"] = targetCurrency;
-	result["converted_amount"] = convertedAmount;
-	result["rate_used"] = rateUsed;
-	if (usdRate > 0 && targetCurrency == "usd") {
-		result["rate_source"] = "telegram_api";
-	}
-
+	result["target"] = target;
+	result["usd_if_withdrawn"] = starsAmount * withdrawRate;
+	result["usd_if_sold"] = starsAmount * sellRate;
+	result["usd_per_star_withdraw"] = withdrawRate;
+	result["usd_per_star_sell"] = sellRate;
 	return result;
 }
 

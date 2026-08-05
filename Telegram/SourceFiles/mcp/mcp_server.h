@@ -10,6 +10,8 @@
 #pragma once
 
 #include <QtCore/QObject>
+#include <QtCore/QEventLoop>
+#include <QtCore/QTimer>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonArray>
@@ -664,6 +666,56 @@ private:
 
 	// Create standardized error response for tools
 	QJsonObject toolError(const QString &message, const QJsonObject &context = QJsonObject());
+
+	// Bridges MTProto's asynchronous replies to the synchronous contract a
+	// tool call has to satisfy.
+	//
+	// Without this the only way to touch the API from a tool was to fire a
+	// request, hand its reply to a logging lambda, and return success before
+	// anything arrived -- which is how several tools came to report results
+	// they never received. `send` is handed a done and a fail callback and
+	// should issue exactly one request; whichever fires first ends the wait.
+	//
+	// Spins a nested event loop, so it can only be called from the main
+	// thread and is guarded against re-entrancy by _processingToolCall. A
+	// request that never completes ends at `timeoutMs` with an error rather
+	// than hanging the server: an answer that never came is a failure, not a
+	// success with empty fields.
+	template <typename Send>
+	QJsonObject awaitMtp(Send &&send, int timeoutMs = 15000) {
+		auto result = QJsonObject();
+		auto finished = false;
+		auto loop = QEventLoop();
+		const auto done = [&](QJsonObject value) {
+			if (finished) return;
+			result = std::move(value);
+			finished = true;
+			loop.quit();
+		};
+		const auto fail = [&](const QString &error) {
+			if (finished) return;
+			result = toolError(error);
+			finished = true;
+			loop.quit();
+		};
+		send(done, fail);
+		if (finished) {
+			return result;
+		}
+		auto timer = QTimer();
+		timer.setSingleShot(true);
+		QObject::connect(&timer, &QTimer::timeout, &loop, [&] {
+			if (!finished) {
+				result = toolError(QString(
+					"Telegram did not answer within %1 ms").arg(timeoutMs));
+				finished = true;
+				loop.quit();
+			}
+		});
+		timer.start(timeoutMs);
+		loop.exec();
+		return result;
+	}
 
 	// Extract message data to JSON - reduces code duplication
 	QJsonObject extractMessageJson(HistoryItem *item);
