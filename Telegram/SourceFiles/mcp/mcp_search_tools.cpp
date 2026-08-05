@@ -141,7 +141,7 @@ QJsonObject Server::toolIndexMessages(const QJsonObject &args) {
 
 	// Try to index from history blocks (live session data)
 	if (_session && chatId > 0) {
-		auto peer = _session->data().peer(PeerId(chatId));
+		auto peer = resolvePeer(chatId);
 		if (peer) {
 			auto history = _session->data().history(peer);
 			if (history) {

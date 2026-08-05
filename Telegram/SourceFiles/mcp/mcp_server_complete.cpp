@@ -27,6 +27,22 @@ Server::Server(QObject *parent)
 	// all of them at once.
 	VerifyToolBackings(QStringList(_toolHandlers.keyBegin(), _toolHandlers.keyEnd()));
 
+	// Index the declared required fields once, so callTool() can enforce
+	// them on every call.
+	for (const auto &tool : _tools) {
+		const auto required = tool.inputSchema.value("required").toArray();
+		auto fields = QStringList();
+		for (const auto &value : required) {
+			const auto name = value.toString();
+			if (!name.isEmpty()) {
+				fields.append(name);
+			}
+		}
+		if (!fields.isEmpty()) {
+			_toolRequiredFields.insert(tool.name, fields);
+		}
+	}
+
 	// Also check what is actually advertised. Checking only the handler map
 	// missed seven tools advertised twice, because they are declared in two
 	// different shapes -- a Tool{...} literal and a field-by-field `Tool
@@ -83,6 +99,28 @@ QJsonObject Server::callTool(const QString &toolName, const QJsonObject &args) {
 
 	if (!_session && !sessionFreeTools.contains(toolName)) {
 		return toolError("No active session — please log in first");
+	}
+
+	// Enforce the schema the registry already declares.
+	//
+	// Every tool advertises an inputSchema with a "required" list, and until
+	// now nothing checked it -- 28 tools answered happily with none of their
+	// required arguments supplied, returning success and a result describing
+	// nothing. Checking here rather than in each tool means a tool cannot
+	// forget, and the schema stops being decorative.
+	if (const auto i = _toolRequiredFields.find(toolName);
+		i != _toolRequiredFields.end()) {
+		auto missing = QStringList();
+		for (const auto &field : *i) {
+			if (!args.contains(field) || args[field].isNull()) {
+				missing.append(field);
+			}
+		}
+		if (!missing.isEmpty()) {
+			return toolError(QString("Missing required argument%1: %2")
+				.arg(missing.size() > 1 ? "s" : "")
+				.arg(missing.join(", ")));
+		}
 	}
 
 	// Refuse tools nothing backs, before the handler can report success.
@@ -723,7 +761,7 @@ void Server::tryAutoResumeExport() {
 						return PeerId(0);
 					});
 				if (peerId) {
-					const auto peer = self->_session->data().peer(peerId);
+					const auto peer = self->resolvePeer(peerId);
 					qInfo() << "[MCP] Auto-resuming export (TDF) for peer"
 						<< peer->name() << "from message"
 						<< settings.singlePeerResumeFromId
@@ -926,7 +964,7 @@ void Server::tryAutoResumeExport() {
 		if (!ok || rawId == 0) return;
 
 		const auto peerId = PeerId(PeerIdHelper(rawId));
-		const auto peer = self->_session->data().peer(peerId);
+		const auto peer = self->resolvePeer(peerId);
 
 		auto rs = self->_session->local().readExportSettings();
 		rs.gradualMode = true;

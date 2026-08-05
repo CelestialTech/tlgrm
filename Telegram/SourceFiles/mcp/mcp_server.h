@@ -36,6 +36,8 @@ class Session;
 } // namespace Main
 
 class HistoryItem;
+class History;
+class PeerData;
 
 namespace MCP {
 
@@ -667,6 +669,27 @@ private:
 	// Create standardized error response for tools
 	QJsonObject toolError(const QString &message, const QJsonObject &context = QJsonObject());
 
+	// Resolves a caller-supplied chat_id into a peer, or nullptr.
+	//
+	// Always use this rather than Session::peer(). That one creates the peer
+	// if it is missing and ends in Unexpected("Peer id type.") for an id that
+	// names no peer kind, so it aborts the whole client -- calling
+	// get_chat_info with no chat_id at all used to take the process down,
+	// because 0 is not a valid peer id. It also returns not_null, which makes
+	// the `if (!peer)` checks written after it dead code.
+	//
+	// Returns nullptr for: no session, a zero or malformed id, or a peer this
+	// client has not loaded. Callers should report that as "chat not found"
+	// rather than distinguishing the cases, which are not distinguishable to
+	// the caller anyway.
+	[[nodiscard]] PeerData *resolvePeer(qint64 chatId) const;
+	[[nodiscard]] PeerData *resolvePeer(PeerId id) const;
+
+	// Same contract for histories. Session::history() is findOrCreate() and
+	// routes through the same aborting peer lookup, and likewise returns
+	// not_null -- so `if (!history)` after it never fires either.
+	[[nodiscard]] History *resolveHistory(qint64 chatId) const;
+
 	// Bridges MTProto's asynchronous replies to the synchronous contract a
 	// tool call has to satisfy.
 	//
@@ -788,6 +811,10 @@ private:
 
 	// Tool dispatcher lookup table
 	QHash<QString, ToolHandler> _toolHandlers;
+
+	// name -> its schema's "required" list, built once from _tools so
+	// callTool() can enforce it without re-parsing a QJsonObject per call.
+	QHash<QString, QStringList> _toolRequiredFields;
 
 	// RPL lifetime for session event subscriptions
 
