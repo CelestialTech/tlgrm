@@ -12,6 +12,7 @@
 #include <QtCore/QObject>
 #include <QtCore/QEventLoop>
 #include <QtCore/QTimer>
+#include <QtCore/QPointer>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonArray>
@@ -731,14 +732,55 @@ private:
 		timer.setSingleShot(true);
 		QObject::connect(&timer, &QTimer::timeout, &loop, [&] {
 			if (!finished) {
+				// Deliberately not phrased as "did not happen". The request
+				// was sent; only the answer is late. delete_channel timed out
+				// here while Telegram carried the deletion out anyway, so a
+				// caller told the operation failed would have been wrong.
 				result = toolError(QString(
-					"Telegram did not answer within %1 ms").arg(timeoutMs));
+					"Telegram did not answer within %1 ms; the request may "
+					"still be in flight, so re-check before retrying"
+					).arg(timeoutMs));
 				finished = true;
 				loop.quit();
 			}
 		});
 		timer.start(timeoutMs);
-		loop.exec();
+
+		// Nested event loops are the hazard this class of call introduces:
+		// while exec() runs, the application keeps dispatching, and anything
+		// it dispatches can destroy the objects this frame is standing on.
+		//
+		// ExcludeUserInputEvents shuts the widest door. Without it a click on
+		// the close button, or a quit shortcut, is delivered *inside* the
+		// wait: the Server and its session are torn down while one of the
+		// Server's own member functions is suspended here, and returning into
+		// it is undefined. Excluding input does not delay the reply we are
+		// waiting for, which arrives on the network queue rather than as user
+		// input.
+		//
+		// What input exclusion cannot stop is a logout or a connection drop,
+		// both of which arrive as network events and can clear the session
+		// under us. So the object is watched as well, and members are only
+		// touched again once it is known to still exist.
+		const auto alive = QPointer<Server>(this);
+		loop.exec(QEventLoop::ExcludeUserInputEvents);
+		if (!alive) {
+			// The Server was destroyed during the wait. Its fields, including
+			// anything `result` was built from, are gone; return a value that
+			// touches nothing rather than reading freed memory.
+			return QJsonObject{
+				{ "success", false },
+				{ "error", QStringLiteral(
+					"Server shut down while waiting for Telegram") },
+			};
+		}
+		if (!_session) {
+			return QJsonObject{
+				{ "success", false },
+				{ "error", QStringLiteral(
+					"Session ended while waiting for Telegram") },
+			};
+		}
 		return result;
 	}
 

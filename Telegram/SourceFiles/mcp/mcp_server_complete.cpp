@@ -1284,7 +1284,14 @@ QJsonObject Server::handleCallTool(const QJsonObject &params) {
 		response["isError"] = true;
 		return response;
 	}
+	// Cleared however this returns. The flag used to be set here and cleared
+	// at the one exit below, so any early return added later -- and there are
+	// several now, for missing arguments and unbacked tools -- would leave it
+	// stuck true and the server would refuse every tool call from then on.
 	_processingToolCall = true;
+	const auto clearProcessing = gsl::finally([&] {
+		_processingToolCall = false;
+	});
 
 	QString toolName = params["name"].toString();
 	QJsonObject arguments = params["arguments"].toObject();
@@ -1315,8 +1322,6 @@ QJsonObject Server::handleCallTool(const QJsonObject &params) {
 		QString errorMsg = hasError ? result["error"].toString() : QString();
 		_auditLogger->logToolCompleted(toolName, hasError ? "error" : "success", 0, errorMsg);
 	}
-
-	_processingToolCall = false;
 
 	// Build response object
 	QJsonObject response;
