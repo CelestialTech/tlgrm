@@ -202,6 +202,8 @@ bool Server::start(TransportType transport) {
 		q.exec("CREATE TABLE IF NOT EXISTS miniapp_budgets (miniapp_id TEXT PRIMARY KEY, approved_amount REAL, spent_amount REAL DEFAULT 0, created_at TEXT)");
 		q.exec("CREATE TABLE IF NOT EXISTS portfolio (gift_type TEXT PRIMARY KEY, quantity INTEGER DEFAULT 0, avg_price REAL DEFAULT 0, current_value REAL DEFAULT 0)");
 		q.exec("CREATE TABLE IF NOT EXISTS price_history (id INTEGER PRIMARY KEY AUTOINCREMENT, gift_type TEXT, date TEXT, price REAL)");
+		q.exec("CREATE TABLE IF NOT EXISTS budget_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, threshold REAL NOT NULL, alert_type TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))");
+		q.exec("CREATE TABLE IF NOT EXISTS monetization_rules (id INTEGER PRIMARY KEY, rules TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now')))");
 		q.exec("CREATE TABLE IF NOT EXISTS price_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, gift_type TEXT, target_price REAL, direction TEXT, triggered INTEGER DEFAULT 0, created_at TEXT)");
 		q.exec("CREATE TABLE IF NOT EXISTS star_reactions (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, message_id INTEGER, stars_count INTEGER, created_at TEXT)");
 		q.exec("CREATE TABLE IF NOT EXISTS paid_content (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, content TEXT, price INTEGER, preview_text TEXT, unlocks INTEGER DEFAULT 0, created_at TEXT)");

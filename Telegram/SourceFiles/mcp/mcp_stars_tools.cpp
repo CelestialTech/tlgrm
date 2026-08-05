@@ -741,16 +741,42 @@ QJsonObject Server::toolGetReactionAnalytics(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolSetReactionPrice(const QJsonObject &args) {
-	QJsonObject result;
-	qint64 chatId = args["chat_id"].toVariant().toLongLong();
-	int minStars = args.value("min_stars").toInt(1);
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto stars = qint64(args.value("min_stars").toInt(1));
+	if (!_session) {
+		return toolError("No active session");
+	}
+	if (!chatId) {
+		return toolError("chat_id is required and must be non-zero");
+	}
+	if (stars < 0) {
+		return toolError("min_stars must not be negative");
+	}
+	const auto peer = _session->data().peerLoaded(PeerId(chatId));
+	const auto channel = peer ? peer->asChannel() : nullptr;
+	if (!channel) {
+		return toolError("chat_id must name a channel or supergroup: paid "
+			"message pricing is only settable there");
+	}
 
-	result["success"] = true;
-	result["chat_id"] = chatId;
-	result["min_stars"] = minStars;
-	result["note"] = "Reaction price set locally";
-
-	return result;
+	// Previously returned success with the note "Reaction price set locally",
+	// having stored nothing anywhere. This sets the real per-message price.
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPchannels_UpdatePaidMessagesPrice(
+			MTP_flags(0),
+			channel->inputChannel(),
+			MTP_long(stars)
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			QJsonObject value;
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			value["send_paid_messages_stars"] = stars;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("channels.updatePaidMessagesPrice failed: " + error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolGetTopReacted(const QJsonObject &args) {
@@ -1324,14 +1350,45 @@ QJsonObject Server::toolGetLeaderboard(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolShareAchievement(const QJsonObject &args) {
-	QJsonObject result;
-	QString achievementId = args["achievement_id"].toString();
-	qint64 chatId = args.value("chat_id").toVariant().toLongLong();
+	const auto achievementId = args["achievement_id"].toString();
+	const auto chatId = args.value("chat_id").toVariant().toLongLong();
 
+	if (achievementId.isEmpty()) {
+		return toolError("achievement_id is required");
+	}
+	if (!chatId) {
+		return toolError("chat_id is required and must be non-zero");
+	}
+	if (!_session) {
+		return toolError("No active session");
+	}
+
+	// Only report a share once a message has actually been queued. This used
+	// to return success with the target chat echoed back, having sent nothing
+	// at all -- the achievement was never shared with anyone.
+	const auto progress = toolGetAchievementProgress(args);
+	if (!progress.value("completed").toBool()) {
+		return toolError(QString(
+			"Achievement '%1' is not completed yet").arg(achievementId));
+	}
+
+	const auto history = _session->data().history(PeerId(chatId));
+	if (!history) {
+		return toolError("Chat not found");
+	}
+	const auto text = QString("Achievement unlocked: %1").arg(
+		progress.value("name").toString(achievementId));
+
+	auto message = Api::MessageToSend(Api::SendAction(history));
+	message.textWithTags = TextWithTags{ text };
+	_session->api().sendMessage(std::move(message));
+
+	QJsonObject result;
 	result["success"] = true;
 	result["achievement_id"] = achievementId;
 	result["shared_to"] = chatId;
-
+	result["text"] = text;
+	result["status"] = "Message queued for sending";
 	return result;
 }
 

@@ -40,6 +40,7 @@
 #include <QtSql/QSqlError>
 
 #include "main/main_session.h"
+#include "main/main_app_config.h"
 #include "data/data_session.h"
 #include "data/data_peer.h"
 #include "data/data_user.h"

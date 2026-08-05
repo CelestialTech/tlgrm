@@ -143,39 +143,99 @@ QJsonObject Server::toolUpdateProfileBio(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolUpdateProfileUsername(const QJsonObject &args) {
-	QString username = args["username"].toString();
-
+	const auto username = args["username"].toString().trimmed();
 	if (!_session) {
-		return QJsonObject{
-			{"error", "No active session"},
-			{"status", "error"},
-		};
+		return toolError("No active session");
+	}
+	if (username.isEmpty()) {
+		return toolError("username is required (pass an empty_ok flag is not "
+			"supported; use the app to clear a username)");
 	}
 
-	// Username changes require interactive verification flow
-	return QJsonObject{
-		{"username", username},
-		{"status", "not_supported"},
-		{"note", "Username changes require interactive verification - use Telegram app to change username"},
-	};
+	// account.updateUsername needs no verification step -- the earlier claim
+	// that this "requires interactive verification" confused it with changing
+	// a phone number, which does. Telegram validates the name and answers
+	// with the updated user, or with USERNAME_OCCUPIED / USERNAME_INVALID /
+	// USERNAME_PURCHASE_AVAILABLE, all of which are worth passing through
+	// verbatim rather than flattening into one failure.
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_UpdateUsername(
+			MTP_string(username)
+		)).done([=](const MTPUser &result) {
+			QJsonObject value;
+			value["success"] = true;
+			value["username"] = username;
+			result.match([&](const MTPDuser &data) {
+				value["user_id"] = qint64(data.vid().v);
+			}, [](const MTPDuserEmpty &) {});
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("account.updateUsername failed: " + error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolUpdateProfilePhone(const QJsonObject &args) {
-	QString phone = args["phone"].toString();
+	const auto phone = args["phone"].toString().trimmed();
+	const auto codeHash = args.value("phone_code_hash").toString();
+	const auto code = args.value("code").toString();
 
 	if (!_session) {
-		return QJsonObject{
-			{"error", "No active session"},
-			{"status", "error"},
-		};
+		return toolError("No active session");
+	}
+	if (phone.isEmpty()) {
+		return toolError("phone is required, in international format");
 	}
 
-	// Phone changes require SMS verification and are not supported via MCP
-	return QJsonObject{
-		{"phone", phone},
-		{"status", "not_supported"},
-		{"note", "Phone changes require SMS verification - use Telegram app to change phone number"},
-	};
+	// Changing a number genuinely needs a confirmation code, so this is two
+	// calls rather than one: the first sends the code and returns the hash,
+	// the second passes the hash back with the code the user received. The
+	// previous single-shot version simply declared the whole thing
+	// unsupported.
+	if (code.isEmpty() || codeHash.isEmpty()) {
+		return awaitMtp([&](auto done, auto fail) {
+			_session->api().request(MTPaccount_SendChangePhoneCode(
+				MTP_string(phone),
+				MTP_codeSettings(
+					MTP_flags(0),
+					MTPVector<MTPbytes>(),
+					MTPstring(),
+					MTPBool())
+			)).done([=](const MTPauth_SentCode &result) {
+				QJsonObject value;
+				result.match([&](const MTPDauth_sentCode &data) {
+					value["success"] = true;
+					value["phone"] = phone;
+					value["phone_code_hash"] = qs(data.vphone_code_hash());
+					value["status"] = "code_sent";
+					value["next_step"] = "Call update_profile_phone again with the "
+						"same phone, this phone_code_hash, and the code received.";
+				}, [&](const auto &) {
+					value = toolError("Telegram answered with an unsupported "
+						"sent-code type for this flow");
+				});
+				done(value);
+			}).fail([=](const MTP::Error &error) {
+				fail("account.sendChangePhoneCode failed: " + error.type());
+			}).send();
+		});
+	}
+
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_ChangePhone(
+			MTP_string(phone),
+			MTP_string(codeHash),
+			MTP_string(code)
+		)).done([=](const MTPUser &result) {
+			QJsonObject value;
+			value["success"] = true;
+			value["phone"] = phone;
+			value["status"] = "changed";
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("account.changePhone failed: " + error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolGetPrivacySettings(const QJsonObject &args) {
@@ -1047,38 +1107,37 @@ QJsonObject Server::toolSearchTransactions(const QJsonObject &args) {
 
 QJsonObject Server::toolGetTopupOptions(const QJsonObject &args) {
 	Q_UNUSED(args);
-	QJsonArray options;
-
-	QJsonObject opt1;
-	opt1["stars"] = 50;
-	opt1["price_usd"] = 0.65;
-	options.append(opt1);
-
-	QJsonObject opt2;
-	opt2["stars"] = 150;
-	opt2["price_usd"] = 1.95;
-	options.append(opt2);
-
-	QJsonObject opt3;
-	opt3["stars"] = 500;
-	opt3["price_usd"] = 6.50;
-	options.append(opt3);
-
-	QJsonObject opt4;
-	opt4["stars"] = 1000;
-	opt4["price_usd"] = 13.00;
-	options.append(opt4);
-
-	QJsonObject opt5;
-	opt5["stars"] = 2500;
-	opt5["price_usd"] = 32.50;
-	options.append(opt5);
-
-	QJsonObject result;
-	result["success"] = true;
-	result["options"] = options;
-	result["note"] = "Approximate prices - check Telegram app for current rates";
-	return result;
+	if (!_session) {
+		return toolError("No active session");
+	}
+	// payments.getStarsTopupOptions returns the real purchasable amounts.
+	// This previously returned a hardcoded list, which went stale silently
+	// whenever Telegram changed its pricing.
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_GetStarsTopupOptions(
+		)).done([=](const MTPVector<MTPStarsTopupOption> &result) {
+			QJsonArray options;
+			for (const auto &option : result.v) {
+				const auto &data = option.data();
+				QJsonObject entry;
+				entry["stars"] = qint64(data.vstars().v);
+				entry["currency"] = qs(data.vcurrency());
+				entry["amount"] = qint64(data.vamount().v);
+				entry["extended"] = data.is_extended();
+				if (const auto product = data.vstore_product()) {
+					entry["store_product"] = qs(*product);
+				}
+				options.append(entry);
+			}
+			QJsonObject value;
+			value["success"] = true;
+			value["options"] = options;
+			value["count"] = options.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("payments.getStarsTopupOptions failed: " + error.type());
+		}).send();
+	});
 }
 
 // ============================================================================
@@ -1457,21 +1516,42 @@ QJsonObject Server::toolGetFragmentListings(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolUpdateListing(const QJsonObject &args) {
-	QString listingId = args["listing_id"].toString();
-	int newPrice = args.value("price").toInt(-1);
-
-	QJsonObject result;
-	if (listingId.isEmpty()) {
-		result["error"] = "Missing listing_id";
-		result["success"] = false;
-		return result;
+	const auto slug = args.value("slug").toString().trimmed();
+	const auto msgId = args.value("msg_id").toInt();
+	const auto price = qint64(args.value("price").toVariant().toLongLong());
+	if (!_session) {
+		return toolError("No active session");
+	}
+	if (slug.isEmpty() && !msgId) {
+		return toolError("either slug or msg_id is required to identify the "
+			"saved gift being relisted");
+	}
+	if (price < 0) {
+		return toolError("price must not be negative");
 	}
 
-	result["success"] = true;
-	result["listing_id"] = listingId;
-	if (newPrice >= 0) result["price"] = newPrice;
-	result["note"] = "Listing updates require marketplace API";
-	return result;
+	// Sets the real resale price. This used to validate listing_id and then
+	// return success with the note "Listing updates require marketplace API",
+	// having changed nothing.
+	const auto gift = slug.isEmpty()
+		? MTP_inputSavedStarGiftUser(MTP_int(msgId))
+		: MTP_inputSavedStarGiftSlug(MTP_string(slug));
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_UpdateStarGiftPrice(
+			gift,
+			StarsAmountToTL(CreditsAmount(price))
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			QJsonObject value;
+			value["success"] = true;
+			value["price"] = price;
+			if (!slug.isEmpty()) value["slug"] = slug;
+			if (msgId) value["msg_id"] = msgId;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("payments.updateStarGiftPrice failed: " + error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolGetMarketTrends(const QJsonObject &args) {
@@ -1821,36 +1901,109 @@ QJsonObject Server::toolGetProfileGifts(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolUpdateGiftDisplay(const QJsonObject &args) {
-	QString giftId = args["gift_id"].toString();
-	bool visible = args.value("visible").toBool(true);
-	int displayOrder = args.value("display_order").toInt(0);
+	const auto chatId = args.value("chat_id").toVariant().toLongLong();
+	const auto msgIds = args.value("msg_ids").toArray();
+	if (!_session) {
+		return toolError("No active session");
+	}
+	if (msgIds.isEmpty()) {
+		return toolError("msg_ids is required: pass the saved-gift message ids "
+			"to pin, in the order they should appear");
+	}
+	const auto peer = chatId
+		? _session->data().peerLoaded(PeerId(chatId))
+		: _session->user().get();
+	if (!peer) {
+		return toolError("Chat not found");
+	}
 
-	QJsonObject result;
-	result["success"] = true;
-	result["gift_id"] = giftId;
-	result["visible"] = visible;
-	result["display_order"] = displayOrder;
-	result["note"] = "Gift display settings saved locally";
-	return result;
+	auto gifts = QVector<MTPInputSavedStarGift>();
+	gifts.reserve(msgIds.size());
+	for (const auto &value : msgIds) {
+		gifts.push_back(MTP_inputSavedStarGiftUser(MTP_int(value.toInt())));
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_ToggleStarGiftsPinnedToTop(
+			peer->input(),
+			MTP_vector<MTPInputSavedStarGift>(gifts)
+		)).done([=](const MTPBool &result) {
+			QJsonObject value;
+			value["success"] = mtpIsTrue(result);
+			value["pinned_count"] = msgIds.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("payments.toggleStarGiftsPinnedToTop failed: " + error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolReorderProfileGifts(const QJsonObject &args) {
-	QJsonArray order = args["order"].toArray();
+	const auto chatId = args.value("chat_id").toVariant().toLongLong();
+	const auto order = args.value("collection_ids").toArray();
+	if (!_session) {
+		return toolError("No active session");
+	}
+	if (order.isEmpty()) {
+		return toolError("collection_ids is required: Telegram reorders gift "
+			"collections, not individual gifts. Use update_gift_display to pin "
+			"specific gifts to the top.");
+	}
+	const auto peer = chatId
+		? _session->data().peerLoaded(PeerId(chatId))
+		: _session->user().get();
+	if (!peer) {
+		return toolError("Chat not found");
+	}
 
-	QJsonObject result;
-	result["success"] = true;
-	result["new_order"] = order;
-	result["note"] = "Profile gift order saved locally";
-	return result;
+	auto ids = QVector<MTPint>();
+	ids.reserve(order.size());
+	for (const auto &value : order) {
+		ids.push_back(MTP_int(value.toInt()));
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_ReorderStarGiftCollections(
+			peer->input(),
+			MTP_vector<MTPint>(ids)
+		)).done([=](const MTPBool &result) {
+			QJsonObject value;
+			value["success"] = mtpIsTrue(result);
+			value["collection_count"] = order.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("payments.reorderStarGiftCollections failed: " + error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolToggleGiftNotifications(const QJsonObject &args) {
-	bool enabled = args.value("enabled").toBool(true);
-
-	QJsonObject result;
-	result["success"] = true;
-	result["notifications_enabled"] = enabled;
-	return result;
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto enabled = args.value("enabled").toBool(true);
+	if (!_session) {
+		return toolError("No active session");
+	}
+	if (!chatId) {
+		return toolError("chat_id is required and must be non-zero");
+	}
+	const auto peer = _session->data().peerLoaded(PeerId(chatId));
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	using Flag = MTPpayments_ToggleChatStarGiftNotifications::Flag;
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_ToggleChatStarGiftNotifications(
+			MTP_flags(enabled ? Flag::f_enabled : Flag(0)),
+			peer->input()
+		)).done([=](const MTPBool &result) {
+			QJsonObject value;
+			value["success"] = mtpIsTrue(result);
+			value["chat_id"] = chatId;
+			value["enabled"] = enabled;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("payments.toggleChatStarGiftNotifications failed: "
+				+ error.type());
+		}).send();
+	});
 }
 
 // ============================================================================
@@ -1890,42 +2043,75 @@ QJsonObject Server::toolBrowseGiftMarketplace(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolGetGiftDetails(const QJsonObject &args) {
-	QString giftId = args["gift_id"].toString();
-
-	QJsonObject result;
-	result["success"] = true;
-	result["gift_id"] = giftId;
-	result["note"] = "Gift details require Telegram API sync";
-	return result;
+	const auto slug = args["slug"].toString().trimmed();
+	if (!_session) {
+		return toolError("No active session");
+	}
+	if (slug.isEmpty()) {
+		return toolError("slug is required: unique gifts are addressed by slug, "
+			"not by numeric id");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_GetUniqueStarGift(
+			MTP_string(slug)
+		)).done([=](const MTPpayments_UniqueStarGift &result) {
+			const auto &data = result.data();
+			QJsonObject value;
+			value["success"] = true;
+			data.vgift().match([&](const MTPDstarGiftUnique &gift) {
+				value["id"] = qint64(gift.vid().v);
+				value["gift_id"] = qint64(gift.vgift_id().v);
+				value["title"] = qs(gift.vtitle());
+				value["slug"] = qs(gift.vslug());
+				value["num"] = gift.vnum().v;
+				value["availability_issued"] = gift.vavailability_issued().v;
+				value["availability_total"] = gift.vavailability_total().v;
+				value["attribute_count"] = gift.vattributes().v.size();
+				if (const auto owner = gift.vowner_name()) {
+					value["owner_name"] = qs(*owner);
+				}
+			}, [&](const MTPDstarGift &gift) {
+				value["id"] = qint64(gift.vid().v);
+				value["note"] = "slug resolved to a non-unique gift";
+			});
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("payments.getUniqueStarGift failed: " + error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolGetUpgradeOptions(const QJsonObject &args) {
-	Q_UNUSED(args);
-	QJsonArray options;
-
-	QJsonObject opt1;
-	opt1["type"] = "premium_1_month";
-	opt1["duration"] = "1 month";
-	opt1["stars_cost"] = 1000;
-	options.append(opt1);
-
-	QJsonObject opt2;
-	opt2["type"] = "premium_6_months";
-	opt2["duration"] = "6 months";
-	opt2["stars_cost"] = 5000;
-	options.append(opt2);
-
-	QJsonObject opt3;
-	opt3["type"] = "premium_12_months";
-	opt3["duration"] = "12 months";
-	opt3["stars_cost"] = 9000;
-	options.append(opt3);
-
-	QJsonObject result;
-	result["success"] = true;
-	result["options"] = options;
-	result["note"] = "Approximate prices - check Telegram for current rates";
-	return result;
+	const auto giftId = args["gift_id"].toVariant().toLongLong();
+	if (!_session) {
+		return toolError("No active session");
+	}
+	if (!giftId) {
+		return toolError("gift_id is required and must be non-zero");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_GetStarGiftUpgradePreview(
+			MTP_long(giftId)
+		)).done([=](const MTPpayments_StarGiftUpgradePreview &result) {
+			const auto &data = result.data();
+			QJsonArray prices;
+			for (const auto &price : data.vprices().v) {
+				const auto &pd = price.data();
+				QJsonObject entry;
+				entry["upgrade_stars"] = qint64(pd.vupgrade_stars().v);
+				entry["date"] = pd.vdate().v;
+				prices.append(entry);
+			}
+			QJsonObject value;
+			value["success"] = true;
+			value["gift_id"] = giftId;
+			value["prices"] = prices;
+			value["sample_attribute_count"] = data.vsample_attributes().v.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("payments.getStarGiftUpgradePreview failed: " + error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolGetGiftTransferHistory(const QJsonObject &args) {
@@ -2180,24 +2366,43 @@ QJsonObject Server::toolListGiveaways(const QJsonObject &args) {
 
 QJsonObject Server::toolGetGiveawayOptions(const QJsonObject &args) {
 	Q_UNUSED(args);
-	QJsonArray options;
-
-	QJsonObject opt1;
-	opt1["type"] = "stars_giveaway";
-	opt1["min_stars"] = 100;
-	opt1["max_winners"] = 100;
-	options.append(opt1);
-
-	QJsonObject opt2;
-	opt2["type"] = "premium_giveaway";
-	opt2["durations"] = QJsonArray({"1_month", "3_months", "6_months", "12_months"});
-	opt2["max_winners"] = 100;
-	options.append(opt2);
-
-	QJsonObject result;
-	result["success"] = true;
-	result["options"] = options;
-	return result;
+	if (!_session) {
+		return toolError("No active session");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_GetStarsGiveawayOptions(
+		)).done([=](const MTPVector<MTPStarsGiveawayOption> &result) {
+			QJsonArray options;
+			for (const auto &option : result.v) {
+				const auto &data = option.data();
+				QJsonObject entry;
+				entry["stars"] = qint64(data.vstars().v);
+				entry["currency"] = qs(data.vcurrency());
+				entry["amount"] = qint64(data.vamount().v);
+				entry["yearly_boosts"] = data.vyearly_boosts().v;
+				entry["is_default"] = data.is_default();
+				entry["extended"] = data.is_extended();
+				QJsonArray winners;
+				for (const auto &w : data.vwinners().v) {
+					const auto &wd = w.data();
+					QJsonObject entry2;
+					entry2["users"] = wd.vusers().v;
+					entry2["per_user_stars"] = qint64(wd.vper_user_stars().v);
+					entry2["is_default"] = wd.is_default();
+					winners.append(entry2);
+				}
+				entry["winners_options"] = winners;
+				options.append(entry);
+			}
+			QJsonObject value;
+			value["success"] = true;
+			value["options"] = options;
+			value["count"] = options.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("payments.getStarsGiveawayOptions failed: " + error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolGetGiveawayStats(const QJsonObject &args) {
