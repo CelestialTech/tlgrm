@@ -158,6 +158,8 @@ private:
 	// Core tool implementations (original 6)
 	QJsonObject toolListChats(const QJsonObject &args);
 	QJsonObject toolGetChatInfo(const QJsonObject &args);
+	QJsonObject toolCreateChannel(const QJsonObject &args);
+	QJsonObject toolDeleteChannel(const QJsonObject &args);
 	QJsonObject toolReadMessages(const QJsonObject &args);
 	QJsonObject toolSendMessage(const QJsonObject &args);
 	QJsonObject toolSendDocument(const QJsonObject &args);
