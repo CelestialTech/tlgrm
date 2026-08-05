@@ -454,6 +454,11 @@ void BatchOperations::executeDeleteOperation(qint64 operationId, const BatchDele
 		QThread::msleep(1000 / _operationsPerSecond);
 	}
 
+	// Record the tally: successfulItems/failedItems are surfaced in
+	// operationToJson(), so leaving them unset reported every batch as
+	// 0 succeeded / 0 failed no matter what actually happened.
+	result.successfulItems = successful;
+	result.failedItems = failed;
 	completeOperation(operationId, failed == 0, failed > 0 ? "Some deletions failed" : QString());
 }
 
@@ -481,6 +486,11 @@ void BatchOperations::executeForwardOperation(qint64 operationId, const BatchFor
 		QThread::msleep(1000 / _operationsPerSecond);
 	}
 
+	// Record the tally: successfulItems/failedItems are surfaced in
+	// operationToJson(), so leaving them unset reported every batch as
+	// 0 succeeded / 0 failed no matter what actually happened.
+	result.successfulItems = successful;
+	result.failedItems = failed;
 	completeOperation(operationId, failed == 0, failed > 0 ? "Some forwards failed" : QString());
 }
 
@@ -516,6 +526,11 @@ void BatchOperations::executeExportOperation(qint64 operationId, const BatchExpo
 
 	file.close();
 
+	// Record the tally: successfulItems/failedItems are surfaced in
+	// operationToJson(), so leaving them unset reported every batch as
+	// 0 succeeded / 0 failed no matter what actually happened.
+	result.successfulItems = successful;
+	result.failedItems = failed;
 	completeOperation(operationId, failed == 0, failed > 0 ? "Some exports failed" : QString());
 }
 
@@ -543,6 +558,11 @@ void BatchOperations::executeMarkReadOperation(qint64 operationId, const BatchMa
 		QThread::msleep(1000 / _operationsPerSecond);
 	}
 
+	// Record the tally: successfulItems/failedItems are surfaced in
+	// operationToJson(), so leaving them unset reported every batch as
+	// 0 succeeded / 0 failed no matter what actually happened.
+	result.successfulItems = successful;
+	result.failedItems = failed;
 	completeOperation(operationId, failed == 0, failed > 0 ? "Some mark-reads failed" : QString());
 }
 

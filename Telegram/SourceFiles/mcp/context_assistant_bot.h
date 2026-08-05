@@ -48,6 +48,13 @@ struct UserPreferences {
 	QStringList mutedTopics;
 	QSet<qint64> mutedChats;
 	QDateTime lastUpdated;
+
+	// Busiest hour of the day (0-23) observed for this user, and how many
+	// messages fell in it. Written by analyzeUserBehavior(); peakActivityCount
+	// is 0 until that has run with at least one message, which is how callers
+	// distinguish "not analysed yet" from "genuinely quiet at every hour".
+	int peakActivityHour = 0;
+	int peakActivityCount = 0;
 };
 
 // Context-Aware Personal AI Assistant Bot

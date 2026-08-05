@@ -1093,7 +1093,6 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 		}
 
 		int archived = 0;
-		qint64 lastMsgId = offsetId;
 		qint64 oldestMsgId = offsetId > 0 ? offsetId : INT64_MAX;
 
 		for (auto blockIt = history->blocks.rbegin();
@@ -1152,7 +1151,6 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 					_status.archivedMessages++;
 					_status.messagesArchivedThisHour++;
 					_status.messagesArchivedToday++;
-					lastMsgId = item->id.bare;
 					const auto textSize = item->originalText().text.toUtf8().size();
 					_status.totalBytesProcessed += textSize;
 					if (item->media()) {

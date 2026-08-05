@@ -681,7 +681,12 @@ void ControllerObject::exportNextDialog() {
 			setState(stateDialogs(DownloadProgress()));
 			return true;
 		}, [=](const Data::MessagesSlice &slice) {
-			_writer->writeMessageFragments(slice);
+			// Unlike its sibling callbacks this one is void, so there is no
+			// false to return; ioCatchError's transition into the error
+			// state is the whole error path. Dropping the Result instead
+			// would let a full disk or a permissions failure pass as a
+			// successful fragment write and corrupt the resumed export.
+			ioCatchError(_writer->writeMessageFragments(slice));
 		}, [=](DownloadProgress progress) {
 			// Write resume state during file downloads too (throttled)
 			// so crashes mid-download don't lose all progress.
@@ -899,7 +904,12 @@ void ControllerObject::exportTopic() {
 			return true;
 		},
 		[=](const Data::MessagesSlice &slice) {
-			_writer->writeMessageFragments(slice);
+			// Unlike its sibling callbacks this one is void, so there is no
+			// false to return; ioCatchError's transition into the error
+			// state is the whole error path. Dropping the Result instead
+			// would let a full disk or a permissions failure pass as a
+			// successful fragment write and corrupt the resumed export.
+			ioCatchError(_writer->writeMessageFragments(slice));
 		},
 		[=](DownloadProgress progress) {
 			setState(stateTopic(progress));

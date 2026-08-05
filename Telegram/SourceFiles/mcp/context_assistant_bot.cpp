@@ -531,6 +531,8 @@ void ContextAssistantBot::analyzeUserBehavior(qint64 userId) {
 
 	// Store behavioral data in user preferences
 	UserPreferences prefs = getUserPreferences(userId);
+	prefs.peakActivityHour = peakHour;
+	prefs.peakActivityCount = peakCount;
 	prefs.lastUpdated = QDateTime::currentDateTime();
 	_userPreferences.insert(userId, prefs);
 }
