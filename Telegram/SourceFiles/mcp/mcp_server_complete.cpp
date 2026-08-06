@@ -1404,6 +1404,8 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["get_chat_info"] = [this](const QJsonObject &args) { return toolGetChatInfo(args); };
 	_toolHandlers["create_channel"] = [this](const QJsonObject &args) { return toolCreateChannel(args); };
 	_toolHandlers["delete_channel"] = [this](const QJsonObject &args) { return toolDeleteChannel(args); };
+	_toolHandlers["set_channel_username"] = [this](const QJsonObject &args) { return toolSetChannelUsername(args); };
+	_toolHandlers["check_channel_username"] = [this](const QJsonObject &args) { return toolCheckChannelUsername(args); };
 	_toolHandlers["read_messages"] = [this](const QJsonObject &args) { return toolReadMessages(args); };
 	_toolHandlers["send_message"] = [this](const QJsonObject &args) { return toolSendMessage(args); };
 	_toolHandlers["send_document"] = [this](const QJsonObject &args) { return toolSendDocument(args); };
@@ -1462,13 +1464,12 @@ void Server::initializeToolHandlers() {
 
 	// MESSAGE OPERATIONS
 	_toolHandlers["edit_message"] = [this](const QJsonObject &args) { return toolEditMessage(args); };
-	_toolHandlers["rename_chat_title"] = [this](const QJsonObject &args) { return toolRenameChatTitle(args); };
+	_toolHandlers["rename_chat"] = [this](const QJsonObject &args) { return toolRenameChatTitle(args); };
 	_toolHandlers["delete_message"] = [this](const QJsonObject &args) { return toolDeleteMessage(args); };
 	_toolHandlers["forward_message"] = [this](const QJsonObject &args) { return toolForwardMessage(args); };
 	_toolHandlers["pin_message"] = [this](const QJsonObject &args) { return toolPinMessage(args); };
 	_toolHandlers["unpin_message"] = [this](const QJsonObject &args) { return toolUnpinMessage(args); };
 	_toolHandlers["add_reaction"] = [this](const QJsonObject &args) { return toolAddReaction(args); };
-	_toolHandlers["rename_chat"] = [this](const QJsonObject &args) { return toolRenameChatTitle(args); };
 
 	// BATCH OPERATIONS
 	_toolHandlers["batch_send"] = [this](const QJsonObject &args) { return toolBatchSend(args); };

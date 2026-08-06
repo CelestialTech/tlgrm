@@ -214,6 +214,74 @@ QJsonObject Server::toolDeleteChannel(const QJsonObject &args) {
 	}, 30000);
 }
 
+// Sets or clears a channel's public username, which is what makes it
+// reachable as t.me/<name> and resolvable by ResolveChannel. create_channel
+// alone leaves a channel private, and the update feed has to be public for
+// the updater to find it without being a member.
+QJsonObject Server::toolSetChannelUsername(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto username = args["username"].toString().trimmed();
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto peer = resolvePeer(chatId);
+	const auto channel = peer ? peer->asChannel() : nullptr;
+	if (!channel) {
+		return toolError("chat_id must name a channel or supergroup");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPchannels_UpdateUsername(
+			channel->inputChannel(),
+			MTP_string(username)
+		)).done([=](const MTPBool &result) {
+			QJsonObject value;
+			value["success"] = mtpIsTrue(result);
+			value["chat_id"] = chatId;
+			value["username"] = username;
+			if (!username.isEmpty()) {
+				value["link"] = "https://t.me/" + username;
+			}
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("channels.updateUsername failed: " + error.type());
+		}).send();
+	}, 30000);
+}
+
+// Whether a username is free for this channel to take. Worth asking before
+// updateUsername so the caller gets "taken" rather than a generic failure.
+QJsonObject Server::toolCheckChannelUsername(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto username = args["username"].toString().trimmed();
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto peer = resolvePeer(chatId);
+	const auto channel = peer ? peer->asChannel() : nullptr;
+	if (!channel) {
+		return toolError("chat_id must name a channel or supergroup");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPchannels_CheckUsername(
+			channel->inputChannel(),
+			MTP_string(username)
+		)).done([=](const MTPBool &result) {
+			QJsonObject value;
+			value["success"] = true;
+			value["username"] = username;
+			value["available"] = mtpIsTrue(result);
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			QJsonObject value;
+			value["success"] = true;
+			value["username"] = username;
+			value["available"] = false;
+			value["reason"] = error.type();
+			done(value);
+		}).send();
+	});
+}
+
 QJsonObject Server::toolGetChatInfo(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 

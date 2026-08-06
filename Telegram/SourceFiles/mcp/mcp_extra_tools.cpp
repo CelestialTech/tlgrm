@@ -1,4 +1,8 @@
-// MCP v6.5.1 Feature Tools implementation.
+// Additional MCP tools.
+//
+// Was mcp_v651_tools.cpp: the name encoded the upstream Telegram version these
+// tools were first written against, which says nothing about what they do and
+// nothing about Tlgrm's own versioning.
 // This file is part of Telegram Desktop MCP integration.
 //
 // For license and copyright information please follow this link:

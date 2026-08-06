@@ -1469,7 +1469,7 @@ PRIVATE
     mcp/mcp_tool_backing.cpp
     mcp/mcp_tool_backing.h
     mcp/mcp_tool_registry.cpp
-    mcp/mcp_v651_tools.cpp
+    mcp/mcp_extra_tools.cpp
     mcp/mcp_wallet_tools.cpp
     mcp/message_scheduler.cpp
     mcp/message_scheduler.h

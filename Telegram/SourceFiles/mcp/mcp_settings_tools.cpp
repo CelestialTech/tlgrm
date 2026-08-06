@@ -928,7 +928,73 @@ QJsonObject Server::toolDeleteChatRule(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolExecuteChatRules(const QJsonObject &args) {
-	return toolTestChatRules(args);
+	// Matches the rules and CARRIES OUT the actions, which is what "execute"
+	// has to mean. This forwarded to test_chat_rules, a dry-run matcher whose
+	// answer is `would_trigger` -- so a caller asking to execute rules got a
+	// report of what would have happened and nothing happened at all.
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto message = args["test_message"].toString();
+	if (!chatId) {
+		return toolError("chat_id is required and must be non-zero");
+	}
+	if (message.isEmpty()) {
+		return toolError("test_message is required: the text to run the rules "
+			"against");
+	}
+
+	const auto matched = toolTestChatRules(args);
+	if (!matched.value("success").toBool()) {
+		return matched;
+	}
+	const auto rules = matched.value("matched_rules").toArray();
+
+	QJsonArray performed;
+	for (const auto &entry : rules) {
+		const auto rule = entry.toObject();
+		const auto actions = rule.value("actions").toObject();
+		QJsonObject done;
+		done["rule_name"] = rule.value("rule_name");
+
+		// Only actions we can actually carry out are reported as performed.
+		// Anything else is named as unsupported rather than counted, so the
+		// result cannot overstate what happened.
+		if (actions.contains(u"reply"_q)) {
+			QJsonObject send;
+			send["chat_id"] = chatId;
+			send["text"] = actions.value("reply").toString();
+			const auto sent = toolSendMessage(send);
+			done["reply"] = sent.value("success").toBool();
+			if (!sent.value("success").toBool()) {
+				done["reply_error"] = sent.value("error");
+			}
+		}
+		if (actions.contains(u"tag"_q)) {
+			QJsonObject tag;
+			tag["chat_id"] = chatId;
+			tag["tag"] = actions.value("tag").toString();
+			done["tagged"] = toolAddMessageTag(tag).value("success").toBool();
+		}
+		const auto unsupported = [&] {
+			QJsonArray out;
+			for (auto i = actions.begin(); i != actions.end(); ++i) {
+				if (i.key() != u"reply"_q && i.key() != u"tag"_q) {
+					out.append(i.key());
+				}
+			}
+			return out;
+		}();
+		if (!unsupported.isEmpty()) {
+			done["unsupported_actions"] = unsupported;
+		}
+		performed.append(done);
+	}
+
+	QJsonObject result;
+	result["success"] = true;
+	result["chat_id"] = chatId;
+	result["rules_matched"] = rules.size();
+	result["performed"] = performed;
+	return result;
 }
 
 // ============================================================================

@@ -1185,7 +1185,7 @@ void Server::registerTools() {
 		},
 		Tool{
 			"get_filtered_ads",
-			"Get log of filtered ads",
+			"Get aggregate ad-filter statistics (counts, not the individual ads)",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
@@ -1724,7 +1724,7 @@ void Server::registerTools() {
 		},
 		Tool{
 			"get_gift_analytics",
-			"Get gift giving/receiving analytics",
+			"Get reaction analytics (this returns reaction data, not gift data)",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
 		},
 		Tool{
@@ -1947,7 +1947,7 @@ void Server::registerTools() {
 		},
 		Tool{
 			"get_star_gift_details",
-			"Get details of a specific star gift",
+			"Get recorded price history for a gift type",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
@@ -2242,7 +2242,7 @@ void Server::registerTools() {
 		},
 		Tool{
 			"set_miniapp_budget",
-			"Set spending budget for a mini app",
+			"Approve a mini app spend (does not set a standing budget -- use set_spending_budget for that)",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
@@ -2382,7 +2382,7 @@ void Server::registerTools() {
 		},
 		Tool{
 			"get_fragment_listings",
-			"Get listings from Fragment marketplace",
+			"Get listings from this client's local marketplace table (not Telegram Fragment)",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
@@ -3219,18 +3219,6 @@ void Server::registerTools() {
 	// taken from what each implementation actually reads, not from what its
 	// name suggests.
 	const QVector<Tool> unlistedTools = {
-
-
-
-
-
-
-
-		Tool{"rename_chat_title", "Change the title of a group, supergroup or channel", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat to rename"}}},
-			{"title", QJsonObject{{"type", "string"}, {"description", "New title"}}}
-		}}, {"required", QJsonArray{"chat_id", "title"}}}},
-
 		Tool{"create_channel", "Create a channel or supergroup and return its chat_id", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"title", QJsonObject{{"type", "string"}, {"description", "Channel title"}}},
 			{"about", QJsonObject{{"type", "string"}, {"description", "Channel description"}}},
@@ -3240,6 +3228,16 @@ void Server::registerTools() {
 		Tool{"delete_channel", "Delete a channel or supergroup (creator only)", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel to delete"}}}
 		}}, {"required", QJsonArray{"chat_id"}}}},
+
+		Tool{"set_channel_username", "Set or clear a channel's public username (pass an empty string to clear)", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel to update"}}},
+			{"username", QJsonObject{{"type", "string"}, {"description", "Public username, without the @"}}}
+		}}, {"required", QJsonArray{"chat_id", "username"}}}},
+
+		Tool{"check_channel_username", "Check whether a public username is available for a channel", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel that would take the username"}}},
+			{"username", QJsonObject{{"type", "string"}, {"description", "Username to test, without the @"}}}
+		}}, {"required", QJsonArray{"chat_id", "username"}}}},
 
 		Tool{"create_giveaway", "Create a Telegram Stars giveaway in a channel", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"channel_id", QJsonObject{{"type", "integer"}, {"description", "Channel to host the giveaway"}}},
