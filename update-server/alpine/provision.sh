@@ -99,6 +99,9 @@ if ! id "$CF_USER" >/dev/null 2>&1; then
     adduser -S -D -H -G "$CF_USER" -s /sbin/nologin "$CF_USER"
 fi
 install -d -o "$CF_USER" -g "$CF_USER" -m 0700 "/home/$CF_USER/.cloudflared"
+# The tunnel logs here rather than /var/log, which an unprivileged user cannot
+# write — start-stop-daemon treats that as a failed start, not a warning.
+install -d -o "$CF_USER" -g "$CF_USER" -m 0755 "/home/$CF_USER/logs"
 
 if command -v cloudflared >/dev/null 2>&1; then
     log "cloudflared present at $(command -v cloudflared)"

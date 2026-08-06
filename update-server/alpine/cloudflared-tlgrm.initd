@@ -14,8 +14,17 @@ command_user="cftlgrm:cftlgrm"
 command_background=true
 
 pidfile="/run/${RC_SVCNAME}.pid"
-output_log="/var/log/cloudflared-tlgrm.log"
-error_log="/var/log/cloudflared-tlgrm.log"
+# Not /var/log: an unprivileged service user cannot open a file there, and
+# start-stop-daemon fails the start rather than falling back — the service
+# reports "crashed" with the real reason only in the console output. The
+# sirenpost tunnel on this host logs into its own directory for the same
+# reason.
+output_log="/home/cftlgrm/logs/tunnel.out.log"
+error_log="/home/cftlgrm/logs/tunnel.err.log"
+
+start_pre() {
+    checkpath --directory --owner cftlgrm:cftlgrm --mode 0755 /home/cftlgrm/logs
+}
 
 depend() {
     need net
