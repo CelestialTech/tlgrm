@@ -33,8 +33,14 @@ The response is keyed by platform, then by channel:
 Rosetta, `mac` on Intel. If `released` exceeds the running `AppVersion`, the
 client downloads `{prefix}` + `link`.
 
-Served by the Cloudflare Worker in `cloudflare-worker/`, which builds this
-response from the GitHub release assets.
+Served by **`update-server/`** running on `ironforge.local` — a static musl
+binary that generates this response from the packages in `/srv/tlgrm-updates`,
+published through its own Cloudflare tunnel.
+
+`cloudflare-worker/` implements the same protocol from GitHub release assets
+and remains in the repository as an alternative origin. Only one can own the
+hostname; the Worker's custom-domain binding was removed when ironforge took
+it over.
 
 ### MTProto
 
@@ -115,16 +121,20 @@ Upload the same package to the GitHub release as well — the Worker serves
 
 ## Current status
 
-The client, the packer and the publishing pipeline are complete and verified.
-Two pieces of infrastructure are not yet provisioned, and until they are, **no
-update is delivered**:
+Both delivery paths are provisioned and serving.
 
-- `@updates71grm` does not exist — the username is free and needs registering
-- `updates.71grm.site` has no DNS record, and the Worker is not deployed
+| Path | Where | State |
+|---|---|---|
+| MTProto | `@updates71grm` | channel exists, public, resolving |
+| HTTP | `updates.71grm.site` | ironforge via tunnel, returning a manifest |
 
-Neither needs code. Until they exist the MTProto check fails to resolve the
-channel and the HTTP check fails to connect, which is exactly the silent
-no-op this system was repaired to stop having.
+Verified end to end: `/current4` returns
+`{"armac":{"stable":{"link":"/tarmacupd7000007","released":"7000007"}}}`, and
+the package downloads over the public tunnel byte-identical to the signed
+original (77,886,744 bytes, matching sha256).
+
+What remains is publishing a release: the packages are served from
+`/srv/tlgrm-updates` on ironforge, and the channel still needs its first post.
 
 ## Things that failed silently here before
 
