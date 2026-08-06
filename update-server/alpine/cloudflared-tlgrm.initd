@@ -1,0 +1,26 @@
+#!/sbin/openrc-run
+# Third cloudflared tunnel on this host, for updates.71grm.site.
+#
+# Runs as its own user with its own credentials because tunnel credentials are
+# per-Cloudflare-account: post.ironsirens.party and updates.71grm.site live in
+# different accounts, so they cannot share a tunnel.
+
+name="cloudflared-tlgrm"
+description="Cloudflare tunnel for updates.71grm.site"
+
+command="/usr/local/bin/cloudflared"
+command_args="tunnel --no-autoupdate --config /home/cftlgrm/.cloudflared/config.yml run"
+command_user="cftlgrm:cftlgrm"
+command_background=true
+
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/cloudflared-tlgrm.log"
+error_log="/var/log/cloudflared-tlgrm.log"
+
+depend() {
+    need net
+    after firewall
+    # Start after the origin so the tunnel does not briefly advertise a
+    # hostname that answers connection-refused.
+    after tlgrm-updates
+}

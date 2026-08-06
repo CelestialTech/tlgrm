@@ -1,0 +1,20 @@
+# Rotation for the tlgrm-updates service logs.
+#
+# copytruncate is required, not stylistic: OpenRC's start-stop-daemon holds the
+# output fd open for the lifetime of the process, so a plain rename orphans the
+# fd and every subsequent write lands in the rotated file. Same reason the
+# sirenpost config on this host uses it.
+#
+# Alpine runs logrotate from /etc/periodic/daily/logrotate under crond, so no
+# extra cron entry is needed.
+
+/srv/tlgrm-updates/logs/*.log {
+    daily
+    rotate 7
+    size 50M
+    compress
+    copytruncate
+    notifempty
+    missingok
+    create 640 tlgrm tlgrm
+}

@@ -1,0 +1,46 @@
+#!/sbin/openrc-run
+# OpenRC service for tlgrm-updates — serves the Telegram Desktop update
+# manifest and packages over HTTP for updates.71grm.site.
+#
+# Binds loopback only; cloudflared publishes it. Nothing on this box should be
+# reachable from the LAN directly, matching how sirenpost and telegram-bot-api
+# are already run here.
+
+name="tlgrm-updates"
+description="Tlgrm update server (manifest + packages)"
+
+command="/usr/local/bin/tlgrm-updates"
+command_user="tlgrm:tlgrm"
+command_background=true
+
+# Read by the binary at startup. Kept here rather than in the binary so the
+# port and package directory can change without a rebuild.
+export TLGRM_LISTEN="${TLGRM_LISTEN:-127.0.0.1:8083}"
+export TLGRM_PACKAGES_DIR="${TLGRM_PACKAGES_DIR:-/srv/tlgrm-updates}"
+export RUST_LOG="${RUST_LOG:-info}"
+
+pidfile="/run/${RC_SVCNAME}.pid"
+
+# /var/log is not writable by an unprivileged service user, the same reason
+# sirenpost logs into its own data directory.
+output_log="/srv/tlgrm-updates/logs/updates.out.log"
+error_log="/srv/tlgrm-updates/logs/updates.err.log"
+
+# A package transfer runs to tens of seconds. OpenRC's default
+# SIGTERM/5/SIGKILL/5 would cut downloads mid-flight, leaving clients with
+# truncated files that fail signature verification — which looks like a
+# corrupt release rather than a restart.
+retry="SIGTERM/45/SIGKILL/5"
+
+depend() {
+    need net
+    # Soft: a missing ntpd should not stop updates being served. TLS is
+    # terminated by cloudflared, so clock skew here is not fatal.
+    use ntpd
+    after firewall ntpd cloudflared
+}
+
+start_pre() {
+    checkpath --directory --owner tlgrm:tlgrm --mode 0755 /srv/tlgrm-updates
+    checkpath --directory --owner tlgrm:tlgrm --mode 0755 /srv/tlgrm-updates/logs
+}

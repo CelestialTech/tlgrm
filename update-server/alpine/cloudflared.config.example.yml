@@ -1,0 +1,23 @@
+# Example cloudflared config for publishing tlgrm-updates.
+#
+# This host already runs two tunnels (`cloudflared` for post.ironsirens.party
+# and `cloudflared-obsidian`). They belong to a different Cloudflare account
+# than 71grm.site, so updates needs its own tunnel and its own service user
+# rather than an extra ingress rule on an existing one — credentials are
+# per-account and cannot be shared across them.
+#
+# Install to /home/cftlgrm/.cloudflared/config.yml (owner cftlgrm:cftlgrm, 0600).
+
+tunnel: <TUNNEL-UUID>
+credentials-file: /home/cftlgrm/.cloudflared/<TUNNEL-UUID>.json
+
+# Bound to loopback so the metrics endpoint is not exposed. 36500 and 36501 are
+# already taken by the two existing tunnels on this host.
+metrics: 127.0.0.1:36502
+
+ingress:
+  - hostname: updates.71grm.site
+    service: http://localhost:8083
+
+  # Everything else is refused rather than falling through to another service.
+  - service: http_status:404
