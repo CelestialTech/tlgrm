@@ -14,6 +14,8 @@ PRIVATE
     export/export_api_wrap.cpp
     export/export_api_wrap.h
     export/export_controller.cpp
+    export/export_resume_state.cpp
+    export/export_resume_state.h
     export/export_controller.h
     export/export_pch.h
     export/export_settings.cpp
@@ -45,3 +47,26 @@ PUBLIC
     desktop-app::lib_base
     tdesktop::td_scheme
 )
+
+# Headless tests for the resume record.
+#
+# A separate executable rather than a scenario in the in-app harness: that one
+# is #ifdef _DEBUG, its repository copy has to stay a no-op, and it needs a
+# live session. A resume record is pure data, so its tests should need nothing
+# but Qt Core -- tests that require an account are tests nobody runs.
+#
+# Build and run:  cmake --build . --target tlgrm_export_tests && ./tlgrm_export_tests
+if (NOT DESKTOP_APP_DISABLE_TESTS)
+    add_executable(tlgrm_export_tests
+        ${src_loc}/export/export_resume_state.cpp
+        ${src_loc}/export/export_resume_state_tests.cpp
+    )
+    init_non_host_target(tlgrm_export_tests)
+    target_include_directories(tlgrm_export_tests PRIVATE ${src_loc})
+    target_link_libraries(tlgrm_export_tests
+    PRIVATE
+        desktop-app::external_qt
+        desktop-app::lib_base
+    )
+    add_test(NAME tlgrm_export_tests COMMAND tlgrm_export_tests)
+endif()

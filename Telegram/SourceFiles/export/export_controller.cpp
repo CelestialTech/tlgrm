@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "export/export_controller.h"
 
+#include "export/export_resume_state.h"
+
 #include "export/export_api_wrap.h"
 #include "export/export_settings.h"
 #include "export/data/export_data_types.h"
@@ -983,50 +985,32 @@ void ControllerObject::writeResumeStateJson(
 		return;
 	}
 
-	QJsonObject state;
-	state["last_message_id"] = lastMsgId;
-	state["messages_written"] = _messagesWritten;
-	state["messages_total"] = _messagesCount;
-	state["peer_id"] = QString::number(peerId);
-	state["peer_name"] = QString::fromUtf8(peerName);
-	state["export_dir"] = _settings.path;
-	state["updated_at"] = QDateTime::currentDateTimeUtc()
-		.toString(Qt::ISODate);
+	auto state = ResumeState();
+	state.lastMessageId = lastMsgId;
+	state.messagesWritten = _messagesWritten;
+	state.messagesTotal = _messagesCount;
+	state.peerId = peerId;
+	state.peerName = QString::fromUtf8(peerName);
+	state.exportDir = _settings.path;
+	state.updatedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
 
-	// Serialize the MTPInputPeer so auto-resume can reconstruct it
-	// without needing the peer to be loaded from the API.
+	// Recorded so a resume can rebuild the request without the peer being
+	// loaded from the API.
 	_settings.singlePeer.match(
 		[&](const MTPDinputPeerUser &data) {
-			state["input_peer_type"] = QStringLiteral("user");
-			state["input_peer_id"] = QString::number(
-				static_cast<quint64>(data.vuser_id().v));
-			state["input_peer_hash"] = QString::number(
-				static_cast<qint64>(data.vaccess_hash().v));
+			state.inputPeerType = u"user"_q;
+			state.inputPeerId = static_cast<uint64>(data.vuser_id().v);
+			state.inputPeerHash = static_cast<int64>(data.vaccess_hash().v);
 		}, [&](const MTPDinputPeerChat &data) {
-			state["input_peer_type"] = QStringLiteral("chat");
-			state["input_peer_id"] = QString::number(
-				static_cast<quint64>(data.vchat_id().v));
+			state.inputPeerType = u"chat"_q;
+			state.inputPeerId = static_cast<uint64>(data.vchat_id().v);
 		}, [&](const MTPDinputPeerChannel &data) {
-			state["input_peer_type"] = QStringLiteral("channel");
-			state["input_peer_id"] = QString::number(
-				static_cast<quint64>(data.vchannel_id().v));
-			state["input_peer_hash"] = QString::number(
-				static_cast<qint64>(data.vaccess_hash().v));
+			state.inputPeerType = u"channel"_q;
+			state.inputPeerId = static_cast<uint64>(data.vchannel_id().v);
+			state.inputPeerHash = static_cast<int64>(data.vaccess_hash().v);
 		}, [](const auto &) {});
 
-	const auto json = QJsonDocument(state).toJson(
-		QJsonDocument::Indented);
-	const auto filePath = _settings.path + u"resume_state.json"_q;
-	const auto tmpPath = filePath + u".tmp"_q;
-
-	QFile tmp(tmpPath);
-	if (tmp.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-		tmp.write(json);
-		tmp.close();
-		// Atomic rename: overwrite existing resume_state.json
-		QFile::remove(filePath);
-		QFile::rename(tmpPath, filePath);
-	}
+	WriteResumeState(_settings.path, state);
 }
 
 void ControllerObject::setFinishedState() {

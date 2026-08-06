@@ -7,6 +7,8 @@
 // https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mcp_server_includes.h"
+
+#include "export/export_resume_state.h"
 #include <rpl/rpl.h>
 
 namespace MCP {
@@ -791,31 +793,22 @@ void Server::tryAutoResumeExport() {
 		for (const auto &sub : subdirs) {
 			const auto jsonPath = baseDir.absoluteFilePath(
 				sub + QStringLiteral("/resume_state.json"));
-			QFile f(jsonPath);
-			if (!f.open(QIODevice::ReadOnly)) continue;
+			// Shared parser. This read the counters with QJsonValue::toInt(),
+			// which yields 0 for a value stored as a string -- so the
+			// `total <= 0` test below rejected every record and this path
+			// never resumed anything.
+			const auto state = Export::ReadResumeState(
+				baseDir.absoluteFilePath(sub));
+			if (!state) continue;
 
-			QJsonParseError err;
-			const auto doc = QJsonDocument::fromJson(f.readAll(), &err);
-			f.close();
-			if (err.error != QJsonParseError::NoError || !doc.isObject()) {
-				continue;
-			}
-			const auto obj = doc.object();
-
-			if (!obj.contains(QStringLiteral("last_message_id"))
-				|| !obj.contains(QStringLiteral("messages_written"))
-				|| !obj.contains(QStringLiteral("messages_total"))
-				|| !obj.contains(QStringLiteral("peer_id"))) {
-				continue;
-			}
-
-			const auto written = obj[QStringLiteral("messages_written")].toInt();
-			const auto total = obj[QStringLiteral("messages_total")].toInt();
+			const auto written = state->messagesWritten;
+			const auto total = state->messagesTotal;
 			if (total <= 0 || written >= total) continue;
 
-			const auto updatedStr = obj[QStringLiteral("updated_at")].toString();
 			const auto updatedAt = QDateTime::fromString(
-				updatedStr, Qt::ISODate);
+				state->updatedAt, Qt::ISODate);
+			const auto obj = QJsonDocument::fromJson(
+				SerializeResumeState(*state)).object();
 			if (updatedAt.isValid()
 				&& (!bestTime.isValid() || updatedAt > bestTime)) {
 				bestTime = updatedAt;
@@ -1002,13 +995,9 @@ void Server::tryAutoResumeExport() {
 			for (const auto &s : subdirs) {
 				const auto jp = baseDir.absoluteFilePath(
 					s + QStringLiteral("/resume_state.json"));
-				QFile fCheck(jp);
-				if (!fCheck.open(QIODevice::ReadOnly)) continue;
-				const auto d = QJsonDocument::fromJson(fCheck.readAll());
-				fCheck.close();
-				if (d.isObject()
-					&& d.object()[QStringLiteral("peer_id")].toString()
-						== peerIdStr) {
+				const auto st = Export::ReadResumeState(
+					baseDir.absoluteFilePath(s));
+				if (st && QString::number(st->peerId) == peerIdStr) {
 					rs.resumeExportDir = baseDir.absoluteFilePath(s);
 					break;
 				}
