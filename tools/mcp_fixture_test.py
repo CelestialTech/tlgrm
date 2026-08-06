@@ -123,16 +123,32 @@ class Harness:
         return bool(self.fixtures)
 
     def destroy_fixtures(self):
+        """Delete every fixture, retrying rather than leaving debris.
+
+        A single attempt is not enough: delete_channel can time out client-side
+        while Telegram carries the deletion out anyway, and the chat list is
+        cached for 60s, so a fixture can look alive when it is already gone.
+        Both showed up as channels left behind on a real account. Retry, then
+        confirm against a list read after the cache has turned over.
+        """
         survivors = []
         for cid in sorted(self.fixtures):
-            try:
-                res = self.b.tool("delete_channel", {"chat_id": cid})
-                if res.get("success"):
-                    print(f"  deleted {cid}")
-                else:
-                    survivors.append((cid, res.get("error") or res))
-            except Exception as e:  # noqa: BLE001 - report, never mask
-                survivors.append((cid, str(e)))
+            for attempt in range(3):
+                try:
+                    res = self.b.tool("delete_channel", {"chat_id": cid})
+                    if res.get("success"):
+                        print(f"  deleted {cid}")
+                        break
+                    err = str(res.get("error") or res)
+                    # already gone; the list we read from was simply stale
+                    if "CHANNEL_PRIVATE" in err or "CHANNEL_INVALID" in err:
+                        print(f"  {cid} already gone")
+                        break
+                except Exception as e:  # noqa: BLE001 - report, never mask
+                    err = str(e)
+                time.sleep(5 * (attempt + 1))
+            else:
+                survivors.append((cid, err))
         return survivors
 
 
@@ -185,8 +201,13 @@ def main():
                {"chat_id": ch, "title": f"{PREFIX}renamed"})
         h.call("set_reaction_price", "set_reaction_price",
                {"chat_id": sg, "min_stars": 0})
+        # broadcast channel: the setting exists only there
         h.call("toggle_gift_notifications", "toggle_gift_notifications",
-               {"chat_id": sg, "enabled": True})
+               {"chat_id": ch, "enabled": True})
+        # supergroup: must be refused with a clear reason, not PEER_ID_INVALID
+        h.call("toggle_gift_notifications(supergroup)",
+               "toggle_gift_notifications",
+               {"chat_id": sg, "enabled": True}, expect="error")
         h.call("get_chat_info", "get_chat_info", {"chat_id": ch})
 
         # batch paths
