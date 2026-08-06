@@ -65,14 +65,14 @@ rc-service tlgrm-updates start
 rc-update add tlgrm-updates default
 
 curl -s http://127.0.0.1:8083/health     # liveness + what it can see
-curl -s http://127.0.0.1:8083/current4   # the manifest a client would get
+curl -s http://127.0.0.1:8083/current   # the manifest a client would get
 ```
 
 Publishing an update is dropping a file in `/srv/tlgrm-updates/`. The manifest
 is generated per request from what is there, so nothing needs restarting and
 the manifest cannot describe a package that is absent.
 
-`/current4` answers **503** while the directory holds no package. That is
+`/current` answers **503** while the directory holds no package. That is
 deliberate: an empty manifest parses cleanly and reads as *"you are up to
 date"*, which would hide a failed publish for as long as nobody looked.
 

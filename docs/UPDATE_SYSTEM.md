@@ -12,7 +12,7 @@ if **both** fail, so one being unavailable is not an outage.
 ### HTTP
 
 ```
-GET https://updates.71grm.site/current4
+GET https://updates.71grm.site/current
 ```
 
 The path is `{prefix}/current` + `Platform::AutoUpdateVersion()`, which is `4`
@@ -117,7 +117,7 @@ uploads the package to the channel through the running client's MCP bridge
 and posts the feed JSON last.
 
 Upload the same package to the GitHub release as well — the Worker serves
-`/current4` from release assets.
+`/current` from release assets.
 
 ## Current status
 
@@ -128,7 +128,7 @@ Both delivery paths are provisioned and serving.
 | MTProto | `@updates71grm` | channel exists, public, resolving |
 | HTTP | `updates.71grm.site` | ironforge via tunnel, returning a manifest |
 
-Verified end to end: `/current4` returns
+Verified end to end: `/current` returns
 `{"armac":{"stable":{"link":"/tarmacupd7000007","released":"7000007"}}}`, and
 the package downloads over the public tunnel byte-identical to the signed
 original (77,886,744 bytes, matching sha256).

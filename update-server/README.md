@@ -13,14 +13,17 @@ Telegram Desktop's `HttpChecker` asks one question and answers it from one
 document:
 
 ```cpp
-const auto path = Local::readAutoupdatePrefix()
-    + qstr("/current")
-    + (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
+const auto path = Local::readAutoupdatePrefix() + qstr("/current");
 ```
 
-`AutoUpdateVersion()` is `4` on macOS 10.13+, so the request is
-`GET https://updates.71grm.site/current4`. The reply is keyed by platform, then
-by channel:
+So the request is `GET https://updates.71grm.site/current`. Upstream appends
+`AutoUpdateVersion()` here — `4` on macOS 10.13+, `2` below it — so that old
+systems fetch a different document and are never offered a package built
+against a toolchain they cannot run. Tlgrm ships one build, so the suffix was
+removed; the suffixed paths are still routed for installs predating that
+change.
+
+The reply is keyed by platform, then by channel:
 
 ```json
 {
@@ -39,7 +42,8 @@ That is the whole protocol. This server implements it and nothing else.
 
 | Route | Purpose |
 |---|---|
-| `GET /current4`, `/current2`, `/current` | The manifest, generated from disk |
+| `GET /current` | The manifest, generated from disk |
+| `GET /current4`, `/current2` | Same manifest, for installs predating the path change |
 | `GET /tarmacupd<version>` | The Apple Silicon package |
 | `GET /tmacupd<version>` | The Intel package |
 | `GET /health` | Liveness, plus the packages it can currently see |

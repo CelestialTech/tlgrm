@@ -12,7 +12,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 | **Export reliability** | Takeout-only: 24-hour wait, no resume capability, any crash or network drop means starting over from zero | Gradual export: no takeout wait, auto-detects interrupted exports on disk, counts already-exported messages, resumes from exact position. Reuses existing directory — nothing is re-downloaded |
 | **Deleted account recovery** | When someone deletes their account, all messages in your private chats vanish instantly — no warning, no backup, no way to recover | Scans all chats for deleted accounts, recovers the person's real name from conversation patterns (greetings, email signatures, introductions), archives every message with full media (photos, videos, documents) to a dedicated group |
 | **Disappearing messages** | Self-destructing messages vanish on schedule with no trace | Configurable capture of disappearing messages before they self-destruct — preserves content that would otherwise be lost |
-| **Programmatic access** | Zero — all interaction is manual through the GUI | Always-on IPC socket (`/tmp/tlgrm_mcp.sock`) exposes 330+ tools via JSON-RPC. Access is restricted to processes running as the same user that can read the `0600` auth-token file — shell scripts, Python bots, Node.js services, cron jobs, AI assistants, monitoring dashboards |
+| **Programmatic access** | Zero — all interaction is manual through the GUI | Always-on IPC socket (`/tmp/tlgrm_mcp.sock`) exposes 339 tools via JSON-RPC. Access is restricted to processes running as the same user that can read the `0600` auth-token file — shell scripts, Python bots, Node.js services, cron jobs, AI assistants, monitoring dashboards |
 | **Analytics** | None — you can scroll through messages manually | Per-chat and per-user statistics: message volume over time, activity heatmaps, word frequency analysis, top contributors, trending topics. All queryable programmatically |
 | **Privacy & security** | Navigate through nested settings menus, one option at a time | Read and write all privacy settings in one call: last seen, profile photo, phone number, forwards, birthday, bio. List all active sessions with device info and IP addresses, terminate any session, manage block lists — all scriptable |
 | **Message operations** | Right-click context menus, one message at a time | Programmatic edit, delete, forward, pin, unpin, and react across any chat. Batchable from scripts — process hundreds of messages in a loop |
@@ -84,7 +84,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 - **Resume interrupted exports** — auto-detects previous exports on disk and continues from exact position
 - **Archive deleted account messages** — scan, detect, and preserve messages before they vanish, with automatic name recovery
 - **Capture disappearing messages** before self-destruct timers expire
-- **330+ programmatic tools** accessible via JSON-RPC over IPC socket or stdio
+- **339 programmatic tools** accessible via JSON-RPC over IPC socket or stdio
 - **Direct database reads** — 20-100x faster than Bot API, zero network overhead
 - **Works with any client** — shell scripts, Python bots, AI assistants (Claude, local LLMs), cron jobs, custom tools
 - **Python MCP server** — optional companion with semantic search, intent classification, topic extraction, and conversation summarization (Apple Silicon GPU accelerated)
@@ -110,7 +110,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
             │                     │               │ search, NLP  │
             │                     │               │ Apple Silicon│
       ┌─────▼─────────────────────▼─────┐         └──────┬──────┘
-      │       C++ MCP Server (330+)     │◄───────────────┘
+      │       C++ MCP Server (339)     │◄───────────────┘
       │  ┌─────────┐  ┌───────────────┐ │
       │  │Messaging│  │Export & Archive│ │
       │  │Analytics│  │Privacy/Security│ │
@@ -184,14 +184,14 @@ call("tools/call", {"name": "export_chat", "arguments": {"peer_id": "1234567890"
 cd ~/xCode/tlgrm
 
 # Run Telegram with MCP
-./tdesktop/out/Release/Telegram.app/Contents/MacOS/Telegram --mcp
+./tdesktop/out/Release/Tlgrm.app/Contents/MacOS/Tlgrm --mcp
 
 # Configure Claude Desktop
 # Edit: ~/Library/Application Support/Claude/claude_desktop_config.json
 {
   "mcpServers": {
     "telegram": {
-      "command": "/Applications/Telegram.app/Contents/MacOS/Telegram",
+      "command": "/Applications/Telegram.app/Contents/MacOS/Tlgrm",
       "args": ["--mcp"]
     }
   }
@@ -391,15 +391,15 @@ builds one architecture. Use `Any Mac` for a universal build.
 cd ~/xCode/tlgrm/tdesktop/out/Release
 
 # Check that the app was created
-ls -lh Telegram.app/Contents/MacOS/Telegram
+ls -lh Telegram.app/Contents/MacOS/Tlgrm
 
 # Should show: ~150-200MB executable
 
 # Test launch (basic mode)
-./Telegram.app/Contents/MacOS/Telegram --version
+./Telegram.app/Contents/MacOS/Tlgrm --version
 
 # Test MCP mode
-./Telegram.app/Contents/MacOS/Telegram --mcp
+./Telegram.app/Contents/MacOS/Tlgrm --mcp
 # Press Ctrl+C after you see "MCP: Server started successfully"
 ```
 
@@ -407,10 +407,10 @@ ls -lh Telegram.app/Contents/MacOS/Telegram
 
 ```bash
 # Copy to Applications folder
-cp -r ~/xCode/tlgrm/tdesktop/out/Release/Telegram.app /Applications/
+cp -r ~/xCode/tlgrm/tdesktop/out/Release/Tlgrm.app /Applications/
 
 # Or create a symlink
-ln -s ~/xCode/tlgrm/tdesktop/out/Release/Telegram.app /Applications/Telegram-MCP.app
+ln -s ~/xCode/tlgrm/tdesktop/out/Release/Tlgrm.app /Applications/Telegram-MCP.app
 ```
 
 ### Step 9: Configure Claude Desktop
@@ -431,7 +431,7 @@ Add this configuration:
 {
   "mcpServers": {
     "telegram": {
-      "command": "/Applications/Telegram.app/Contents/MacOS/Telegram",
+      "command": "/Applications/Telegram.app/Contents/MacOS/Tlgrm",
       "args": ["--mcp"]
     }
   }
@@ -443,7 +443,7 @@ Add this configuration:
 {
   "mcpServers": {
     "telegram": {
-      "command": "/Users/YOUR_USERNAME/xCode/tlgrm/tdesktop/out/Release/Telegram.app/Contents/MacOS/Telegram",
+      "command": "/Users/YOUR_USERNAME/xCode/tlgrm/tdesktop/out/Release/Tlgrm.app/Contents/MacOS/Tlgrm",
       "args": ["--mcp"]
     }
   }
@@ -867,35 +867,28 @@ void Server::handleStdioInput() {
 **D. Tool Implementations**
 ```cpp
 QJsonObject Server::toolListChats(const QJsonObject &args) {
-    // Currently returns stub data
-    QJsonArray chats;
-
-    // TODO: Access real data via:
-    // auto &owner = _session->data();
-    // for (const auto &dialog : owner.chatsListFor(Data::Folder::kAll)->all()) {
-    //     ...
-    // }
-
-    chats.append(QJsonObject{
-        {"id", "-1001234567890"},
-        {"title", "Example Chat"},
-        {"type", "supergroup"},
-        {"message_count", 42}
-    });
-
-    return QJsonObject{
-        {"chats", chats},
-        {"source", "local_database"},
-        {"note", "Stub data - connect to session for real data"}
-    };
+    // Reads the live session. Every tool also declares what backs it, so a
+    // caller can tell a Telegram-sourced answer from one derived locally.
+    if (_session) {
+        auto chatsList = _session->data().chatsList();
+        for (const auto &row : *chatsList->indexed()) {
+            auto peer = row->thread()->peer();
+            chat["id"] = QString::number(peer->id.value);
+            chat["name"] = peer->name();
+            ...
+        }
+        result["source"] = "live_telegram_data";
+    }
+    return result;   // callTool() adds "backing": "live-session"
 }
 ```
 
-**Why stub data currently:**
-- MCP integration works without tdesktop data connection
-- Allows testing MCP protocol independently
-- Connecting to real data requires session reference
-- Documented in TODO comments for future implementation
+**Backing, not stubs.** A single `constexpr` table records what answers each
+tool — `mtproto`, `live-session`, `pure-compute`, `local-only`, or
+`unimplemented`. `callTool()` consults it before dispatching, so a tool nothing
+backs returns an error instead of a plausible-looking invention, and every
+response carries the field. A startup check asserts the table, the handler map
+and the advertised list agree.
 
 ---
 
@@ -1064,9 +1057,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system architecture details.
 
 ## MCP Tools & Features
 
-### Available Tools (330+)
+### Available Tools (339)
 
-The C++ MCP server exposes 330+ tools with real Telegram API integration:
+The C++ MCP server exposes 339 tools with real Telegram API integration:
 
 | Category | Tools | Status |
 |----------|-------|--------|
@@ -1079,7 +1072,7 @@ The C++ MCP server exposes 330+ tools with real Telegram API integration:
 | Security | `get_security_settings`, `get_active_sessions`, `terminate_session`, `block_user`, `unblock_user`, `update_auto_delete_period` | ✅ Implemented |
 | Analytics | `get_message_stats`, `get_user_activity`, `get_chat_activity`, `get_time_series`, `get_top_users`, `get_top_words`, `export_analytics`, `get_trends` | ✅ Implemented |
 | System | `get_cache_stats`, `get_server_info`, `get_audit_log`, `health_check` | ✅ Implemented |
-| Premium/Business/Wallet/Stars | 130+ tools | Stub |
+| Premium/Business/Wallet/Stars | 130+ tools | Backed (MTProto or local database; each states which) |
 
 **Export features**: `export_chat` supports HTML and JSON formats, auto-detects and resumes interrupted exports, reuses existing directories, tracks progress with accurate message counts, and works for channels, groups, and private chats.
 
@@ -1170,14 +1163,14 @@ cmake --build . --config Release
 # Time: 2-5 minutes
 
 # 3. Test
-./Release/Telegram.app/Contents/MacOS/Telegram --mcp
+./Release/Tlgrm.app/Contents/MacOS/Tlgrm --mcp
 ```
 
 ### Connecting to Real Telegram Data
 
-**Current Status:** Tools return stub data
-
-**Next Step:** Connect to tdesktop's session data
+**Current Status:** Tools read the live session. Each response carries a
+`backing` field — `mtproto`, `live-session`, `pure-compute` or `local-only` —
+so the source of any value is explicit.
 
 **How to implement:**
 
@@ -1364,11 +1357,12 @@ log show --predicate 'process == "Telegram"' --last 5m | grep MCP
 
 #### Tools Return Empty Data
 
-**Expected:** This is current behavior (stub data)
+**Symptom:** `list_chats()` returns nothing, or a tool answers with an error
 
-**Symptom:** `list_chats()` returns example data, not real chats
-
-**Reason:** MCP implementation not yet connected to tdesktop session
+**Reason:** most likely no active session — sign in first. Tools that need one
+say so rather than returning placeholder data. If a tool reports
+`"backing": "local-only"`, it is reading this client's own database by design,
+which nothing syncs from Telegram.
 
 **Status:** See [implementation summary](docs/IMPLEMENTATION_SUMMARY.md)
 
@@ -1387,10 +1381,10 @@ cat ~/Library/Application\ Support/Claude/claude_desktop_config.json
 python -m json.tool ~/Library/Application\ Support/Claude/claude_desktop_config.json
 
 # 3. Verify path is correct
-ls -l /Applications/Telegram.app/Contents/MacOS/Telegram
+ls -l /Applications/Telegram.app/Contents/MacOS/Tlgrm
 
 # 4. Test Telegram manually
-/Applications/Telegram.app/Contents/MacOS/Telegram --mcp
+/Applications/Telegram.app/Contents/MacOS/Tlgrm --mcp
 # Should stay running, not exit immediately
 
 # 5. Restart Claude completely
@@ -1599,7 +1593,7 @@ cmake --build . --config Release
 - [x] JSON-RPC 2.0 protocol implementation
 - [x] Stdio transport (for Claude Desktop)
 - [x] IPC bridge transport (Unix socket for external tools)
-- [x] 330+ tool registrations
+- [x] 339 tool registrations
 - [x] Patch system for updates
 
 ### Phase 2: Data Integration ✅ COMPLETE
@@ -1637,7 +1631,7 @@ cmake --build . --config Release
 ### Current Security Model
 
 - **No Network Exposure**: MCP server accessible via stdio (Claude Desktop) and local Unix socket (`/tmp/tlgrm_mcp.sock`)
-- **No Authentication Required**: Trusts calling process
+- **Local authentication**: the socket is `0600`, the peer UID is checked via `LOCAL_PEERCRED`, and `initialize` must present the token from the `0600` auth-token file. Any process running as this user can therefore connect — it is not a defence against yourself.
 - **Session Isolation**: Each Telegram session is separate
 - **tdata Encryption**: Session data encrypted with local key (no macOS Keychain)
 - **Data Privacy**: All data stays local (no external API calls)
@@ -1745,8 +1739,8 @@ When reporting issues, please include:
 - **macOS only** — builds target Apple Silicon and Intel Macs. No Windows or Linux support.
 - **Account risk** — exporting restricted content or heavy automated usage may trigger Telegram's anti-abuse systems. Use responsibly and at your own risk.
 - **Disk space** — full channel exports with media can consume tens of GB. Monitor available space during large exports.
-- **Auto-update is ported but compiled out** — the custom update system (own RSA keys, `tlgrmfeed4` MTProto channel, `https://updates.71grm.site/current4`) is in the tree, but `DESKTOP_APP_DISABLE_AUTOUPDATE` defaults ON for non-official builds, so `TDESKTOP_DISABLE_AUTOUPDATE` is defined and every update path is inert. Enable with `-D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF`, and note that releases must then be signed with the private key matching `config.h`. Until then: pull and rebuild.
-- **Stub tools** — of 333 advertised tools, **147 reach live Telegram state; 186 are stubs**. Stubs return `success: true` over locally-fabricated SQLite that nothing syncs from Telegram, so a caller cannot distinguish them from real results. Highest concentration: settings (84 of 118), stars (36 of 45), business (29 of 36).
+- **Auto-update is live** — own RSA signing keys, the `@updates71grm` MTProto channel, and `https://updates.71grm.site/current` served by `update-server/` on a local Alpine host. Both discovery paths run in parallel and the check only fails if both do. Releases must be signed with the private key matching `config.h`; `Telegram/build/target` must contain `mac` or the `Packer` target is never generated and no package can be produced.
+- **Local-only tools** — of 339 advertised tools, 74 reach Telegram over MTProto, 31 read live session state, 4 are pure computation, and 229 read this client's own database. Every response and every `tools/list` entry carries a `backing` field saying which, so a local-only result can no longer be mistaken for Telegram's view. None are unimplemented; a tool nothing backs is refused rather than answered.
 
 ---
 
@@ -1755,8 +1749,8 @@ When reporting issues, please include:
 **Version**: 7.0.7
 **Base**: Telegram Desktop 7.0.7 (MTProto layer 228, Qt 6.11.1)
 **Last Updated**: 2026-08-03
-**Platform**: macOS (Apple Silicon)
-**MCP Tools**: 333 advertised — 147 backed by live Telegram state, 186 stubs
+**Platform**: macOS (universal - Apple Silicon + Intel)
+**MCP Tools**: 339 advertised — every one declares its backing; 0 unimplemented
 
 **Build Status**: ✅ Compiles successfully
 **MCP Protocol**: ✅ Fully working (stdio + IPC)

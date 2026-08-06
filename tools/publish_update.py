@@ -7,8 +7,8 @@
 
 Both of the client's update paths read the same release, so both are fed here:
 
-  HTTP     GET https://updates.71grm.site/current4  -> served by the Cloudflare
-           worker straight from the GitHub release assets.
+  HTTP     GET https://updates.71grm.site/current  -> served by update-server
+           on ironforge from the packages it holds on disk.
   MTProto  the latest message in @updates71grm must be the version JSON, and it
            points at a *post* in that channel carrying the package as a
            document.
@@ -76,7 +76,7 @@ class Bridge:
         """
         cfg = Path(
             os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")
-        ) / "tdesktop/mcp_socket_path"
+        ) / "tlgrm/mcp_socket_path"
         if cfg.is_file():
             sock = Path(cfg.read_text().strip())
         else:
@@ -246,7 +246,7 @@ def main() -> None:
     if args.pack_only:
         print(f"\nPackage ready: {package}")
         print("Upload it to the GitHub release as well -- the Cloudflare "
-              "worker serves /current4 from release assets.")
+              "worker serves /current from release assets.")
         return
     publish(args.version, package, args.channel)
 

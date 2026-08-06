@@ -126,7 +126,7 @@ Next steps:
   2. Put at least one package in $TLGRM_DATA:
        tarmacupd<version>   Apple Silicon
        tmacupd<version>     Intel
-     Until one exists, /current4 answers 503 — deliberately, so an empty
+     Until one exists, /current answers 503 — deliberately, so an empty
      manifest never reads as "you are up to date".
 
   3. Start it:

@@ -197,7 +197,7 @@ def main():
                               "no message id came back from read_messages"))
 
         # channel administration
-        h.call("rename_chat_title", "rename_chat_title",
+        h.call("rename_chat", "rename_chat",
                {"chat_id": ch, "title": f"{PREFIX}renamed"})
         h.call("set_reaction_price", "set_reaction_price",
                {"chat_id": sg, "min_stars": 0})
