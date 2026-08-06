@@ -6,6 +6,8 @@
 
 #include "mcp_server_includes.h"
 
+#include "export/export_resume_state.h"
+
 namespace MCP {
 // ===== ARCHIVE TOOL IMPLEMENTATIONS =====
 
@@ -311,18 +313,15 @@ int32 Server::autoDetectResumeId(
 		if (!entry.startsWith(exactPrefix)) continue;
 
 		QDir exportDir(baseDir.absoluteFilePath(entry));
-		QFile stateFile(exportDir.absoluteFilePath("resume_state.json"));
-		if (!stateFile.open(QIODevice::ReadOnly)) continue;
+		// One parser for the record, shared with the writer that produced
+		// it -- this used to pull the two fields it needed straight out of
+		// the JSON, so a change to the format had to be found here as well.
+		const auto state = Export::ReadResumeState(exportDir.absolutePath());
+		if (!state) continue;
 
-		const auto doc = QJsonDocument::fromJson(stateFile.readAll());
-		if (doc.isNull()) continue;
-
-		const auto obj = doc.object();
-		const auto lastMsgId = static_cast<int32>(
-			obj.value("last_message_id").toVariant().toLongLong());
-		const auto written = static_cast<int32>(
-			obj.value("messages_written").toVariant().toLongLong());
-		if (lastMsgId > 0) {
+		const auto lastMsgId = static_cast<int32>(state->lastMessageId);
+		const auto written = static_cast<int32>(state->messagesWritten);
+		if (state->resumable()) {
 			qWarning() << "MCP: Auto-detected resume from resume_state.json"
 			           << entry << "- message ID:" << lastMsgId
 			           << "written:" << written;
