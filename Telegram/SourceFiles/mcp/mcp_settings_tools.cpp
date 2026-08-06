@@ -1984,15 +1984,32 @@ QJsonObject Server::toolToggleGiftNotifications(const QJsonObject &args) {
 	if (!chatId) {
 		return toolError("chat_id is required and must be non-zero");
 	}
-	const auto peer = _session->data().peerLoaded(PeerId(chatId));
-	if (!peer) {
+	const auto peer = resolvePeer(chatId);
+	const auto channel = peer ? peer->asChannel() : nullptr;
+	if (!channel) {
 		return toolError("Chat not found");
 	}
+
+	// Only broadcast channels have this setting. Telegram rejects a megagroup
+	// with PEER_ID_INVALID, which reads as a malformed chat_id and sends the
+	// caller looking at the wrong thing -- measured directly: the same call
+	// succeeds on a broadcast channel and fails on a supergroup created
+	// moments apart. canManageGifts() does not separate them, since it only
+	// asks whether we can post.
+	if (!channel->isBroadcast()) {
+		return toolError(QString(
+			"Chat %1 is a supergroup; gift notifications exist only for "
+			"broadcast channels").arg(chatId));
+	}
+	if (!channel->canManageGifts()) {
+		return toolError("This account cannot manage gifts for that channel");
+	}
+
 	using Flag = MTPpayments_ToggleChatStarGiftNotifications::Flag;
 	return awaitMtp([&](auto done, auto fail) {
 		_session->api().request(MTPpayments_ToggleChatStarGiftNotifications(
 			MTP_flags(enabled ? Flag::f_enabled : Flag(0)),
-			peer->input()
+			channel->input()
 		)).done([=](const MTPBool &result) {
 			QJsonObject value;
 			value["success"] = mtpIsTrue(result);
