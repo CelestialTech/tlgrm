@@ -1365,8 +1365,12 @@ QJsonObject Server::toolGenerateFinancialReport(const QJsonObject &args) {
 	report["spending_by_category"] = spendingResult["by_category"];
 
 	// Budget status
-	QJsonObject budgetResult = toolGetBudgetStatus(QJsonObject());
-	report["budget_status"] = budgetResult;
+	// "all" explicitly: get_budget_status now requires a category, so passing
+	// an empty object returns an error object that would land in the report
+	// where the budget belongs.
+	QJsonObject budgetArgs;
+	budgetArgs["category"] = QStringLiteral("all");
+	report["budget_status"] = toolGetBudgetStatus(budgetArgs);
 
 	QJsonObject result;
 	result["success"] = true;
@@ -2029,13 +2033,59 @@ QJsonObject Server::toolToggleGiftNotifications(const QJsonObject &args) {
 
 QJsonObject Server::toolGetGiftInvestmentAdvice(const QJsonObject &args) {
 	Q_UNUSED(args);
-	QJsonObject portfolioData = toolGetPortfolioValue(QJsonObject());
+
+	// Reports what this client has actually recorded, and nothing else. The
+	// previous version returned a fixed sentence -- "monitor market trends and
+	// diversify" -- alongside real numbers, which reads as analysis of them and
+	// is not. Price movement is a fact we can compute from recorded purchases
+	// and observed prices; advice is not something we are positioned to give.
+	QSqlQuery query(_db);
+	query.prepare("SELECT p.gift_type, p.quantity, p.avg_price, "
+		"p.current_value, "
+		"(SELECT MIN(price) FROM price_history h WHERE h.gift_type = p.gift_type), "
+		"(SELECT MAX(price) FROM price_history h WHERE h.gift_type = p.gift_type), "
+		"(SELECT COUNT(*) FROM price_history h WHERE h.gift_type = p.gift_type) "
+		"FROM portfolio p WHERE p.quantity > 0");
+	if (!query.exec()) {
+		return toolError("Could not read portfolio: "
+			+ query.lastError().text());
+	}
+
+	QJsonArray holdings;
+	auto totalPaid = 0.;
+	auto totalNow = 0.;
+	while (query.next()) {
+		const auto quantity = query.value(1).toInt();
+		const auto avgPrice = query.value(2).toDouble();
+		const auto current = query.value(3).toDouble();
+		const auto samples = query.value(6).toInt();
+		totalPaid += avgPrice * quantity;
+		totalNow += current;
+
+		QJsonObject entry;
+		entry["gift_type"] = query.value(0).toString();
+		entry["quantity"] = quantity;
+		entry["avg_paid"] = avgPrice;
+		entry["current_value"] = current;
+		entry["change"] = current - (avgPrice * quantity);
+		// Only meaningful with recorded history; say how much there is rather
+		// than implying a range exists when we have seen one price.
+		entry["price_samples"] = samples;
+		if (samples > 1) {
+			entry["observed_low"] = query.value(4).toDouble();
+			entry["observed_high"] = query.value(5).toDouble();
+		}
+		holdings.append(entry);
+	}
 
 	QJsonObject result;
 	result["success"] = true;
-	result["portfolio_value"] = portfolioData["current_value"];
-	result["profit_loss"] = portfolioData["profit_loss"];
-	result["advice"] = "Monitor market trends and diversify gift types for optimal returns";
+	result["holdings"] = holdings;
+	result["total_paid"] = totalPaid;
+	result["total_current_value"] = totalNow;
+	result["total_change"] = totalNow - totalPaid;
+	result["note"] = "Observed from locally recorded purchases and prices. "
+		"Not a valuation and not advice.";
 	return result;
 }
 
