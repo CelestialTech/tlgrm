@@ -716,10 +716,15 @@ HttpChecker::HttpChecker(bool testing) : Checker(testing) {
 }
 
 void HttpChecker::start() {
-	const auto updaterVersion = Platform::AutoUpdateVersion();
-	const auto path = Local::readAutoupdatePrefix()
-		+ qstr("/current")
-		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
+	// Plain "/current", with no generation suffix.
+	//
+	// Upstream appends AutoUpdateVersion() -- 4 today, 2 on macOS before
+	// 10.13 -- so that old systems fetch a different document and are never
+	// offered a package built against a toolchain they cannot run. That
+	// matters when you ship builds spanning years of OS versions. Tlgrm
+	// ships one, so the suffix would only make the URL differ from what
+	// anyone would type, exactly as it would have for the feed channel.
+	const auto path = Local::readAutoupdatePrefix() + qstr("/current");
 	auto url = QUrl(path);
 	DEBUG_LOG(("Update Info: requesting update state"));
 	const auto request = QNetworkRequest(url);
