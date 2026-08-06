@@ -16,11 +16,22 @@
 
 **Required xcodebuild flags:**
 ```bash
--arch x86_64 -arch arm64 \
-ONLY_ACTIVE_ARCH=NO \
-MACOSX_DEPLOYMENT_TARGET=13.0 \
-clean build
+xcodebuild -project Telegram.xcodeproj -scheme Telegram \
+  -configuration Release \
+  -destination 'generic/platform=macOS' \
+  build -jobs 24
 ```
+
+**`-destination 'generic/platform=macOS'` is not optional.** Without it,
+`-scheme` makes xcodebuild resolve a concrete destination — "My Mac", which on
+Apple Silicon means arm64 — and build that architecture alone. It does this
+*silently*, ignoring `ARCHS = x86_64 arm64` and `ONLY_ACTIVE_ARCH = NO`, both
+of which are already set correctly by CMake. The build succeeds and the result
+is arm64-only.
+
+That is how 7.0.7 came to be built single-architecture while every setting said
+universal, and it is invisible unless the output is checked. `-target` does not
+have this problem, because no destination is resolved; only `-scheme` does.
 
 ### Verification
 
