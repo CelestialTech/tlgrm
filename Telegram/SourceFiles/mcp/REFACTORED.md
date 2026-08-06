@@ -99,13 +99,39 @@ section comment removed.
 
 | Metric | Before | After |
 |---|---|---|
-| Overall verdict | CRITICAL | MEDIUM |
-| Advertised / callable / recorded | 327 / 335 / — | 335 / 335 / 335 |
+| Overall verdict | CRITICAL | LOW |
+| Advertised / callable / recorded | 327 / 335 / — | 338 / 338 / 338 |
 | Duplicate registrations | 6 | 0 |
 | Invisible tools | 8 | 0 |
 | Unbacked tools reporting success | 39 | 0 |
-| Tools declaring their data source | 0 | 335 |
-| Change-amplification sites | 3, unchecked | 3, checked at startup |
+| Unimplemented tools | 20 | 0 |
+| Schema/implementation mismatches | 61 | 0 |
+| Tools declaring their data source | 0 | 338 |
+| Change-amplification sites | 3, unchecked | 4, checked at startup |
+| Crash-on-missing-argument sites | 19 | 0 |
+
+### Follow-up work, after live testing
+
+The audit above was static. Running every tool against a live session found
+defects no static check had caught, and each is recorded in the commit that
+fixed it:
+
+- `handleCallTool()` reached into `_toolHandlers` directly, making a second
+  dispatch path that bypassed both the backing check and the session guard —
+  the same duplicate-dispatch shape this refactor removed, one layer up.
+- `get_chat_info` with no `chat_id` **crashed the client**. `Session::peer()`
+  is create-or-abort and returns `not_null`, so the `if (!peer)` guards written
+  after it were dead code. 19 call sites shared the pattern.
+- 28 tools ignored their own declared `required` lists; 61 declared arguments
+  their implementation never read. Enforcing the schema turned the second group
+  from silently-ignored into hard rejections, so both had to be fixed together.
+- `ChatArchiver` held a session nothing ever assigned, so `archive_chat` had
+  always failed.
+- Nested event loops in `awaitMtp()` could outlive the objects they stood on.
+
+Of the 229 local-only tools, 225 were already doing their job against our own
+database or a subsystem; 4 asserted from nothing and were implemented. The
+`LocalOnly` label is a statement of where the data comes from, not a defect.
 
 ### Principles Applied
 
