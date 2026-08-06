@@ -185,8 +185,21 @@ Three harnesses ship in `tools/`:
 The fixture harness enforces its scoping: every call passes a guard that
 refuses any argument naming a chat the run did not create.
 
-Current state: **16 of 16 fixture tests passing**, 0 crashes, 0 schema holes,
-0 tools reporting success without backing.
+A fourth suite, `tlgrm_export_tests`, is a headless C++ executable covering
+the gradual export's resume record — the fork's most intricate feature, which
+had no tests at all.
+
+Current state, full suite:
+
+| Suite | Result |
+|---|---|
+| `tlgrm_export_tests` | 90 checks, 0 failed |
+| Full sweep (338 tools) | 0 crashes, 0 schema holes, 0 unbacked success |
+| Fixture (destructive) | 16 passed, 0 failed |
+
+The export tests were verified by mutation, since a test that cannot fail
+proves nothing: changing the peer-id read fails 4 checks, reversing the
+rename arguments fails 6.
 
 ---
 
@@ -204,24 +217,40 @@ a 7.0.7 profile.
   look like a regression until the error text is read.
 - Tools now reject calls missing their declared required arguments.
 - 39 schemas renamed arguments to match their implementations.
-- The IPC socket moved from `/tmp/tdesktop_mcp.sock` to `/tmp/tlgrm_mcp.sock`.
+- The IPC socket moved from `/tmp/tlgrm_mcp.sock` to `/tmp/tlgrm_mcp.sock`.
 
-**Build:** `Telegram/build/target` must contain `mac`, or the `Packer` target is
-not generated and no update package can be produced. That file is gitignored
+**Build:** two things are required and both fail silently if omitted.
+
+`Telegram/build/target` must contain `mac`, or the `Packer` target is not
+generated and no update package can be produced. That file is gitignored
 upstream, so it has to be created per checkout.
+
+`xcodebuild` must be given `-destination 'generic/platform=macOS'`, or it
+builds the host architecture alone and ships a binary half your users cannot
+run. See `BUILD_STANDARDS.md`.
 
 ---
 
 ## Known issues
 
-- **229 tools are local-only.** They read a database nothing syncs from
-  Telegram. They are now labelled rather than silently misleading, but giving
-  them real backing is a separate program.
 - **36 tool names are pass-through aliases.** Removing them is a breaking change
   and needs a deprecation pass.
-- **The gradual export resume path has no tests.** No test writes a partial
-  export and restarts it; `resume_state.json` round-tripping is unverified.
-- **Intel Macs get no updates.** The build is arm64-only; no `tmacupd` package
-  is produced.
 - **The channel `@updates71grm` and DNS for `updates.71grm.site` are not yet
-  provisioned**, so update delivery is not live.
+  provisioned**, so update delivery is not live. The client, the packer and the
+  publishing pipeline are all ready; what is missing is the channel and the DNS
+  record.
+
+### Resolved since the first draft of these notes
+
+- **Intel Macs.** The build was producing an arm64-only binary while every
+  setting said universal. `-scheme` makes xcodebuild resolve a concrete
+  destination — "My Mac" — and build that architecture alone, silently
+  ignoring `ARCHS`. Fixed with `-destination 'generic/platform=macOS'`; both
+  `Tlgrm` and `Updater` are now `x86_64 arm64`.
+- **Export resume tests.** Now covered, and they found that one of three
+  readers used `QJsonValue::toInt()` on a counter stored as a string, so its
+  guard rejected every record — that resume path had never once resumed
+  anything.
+- **"229 local-only tools."** This was a backing label, not a defect count.
+  225 were already doing their job against our own database or a subsystem.
+  Four asserted from nothing and have been implemented.

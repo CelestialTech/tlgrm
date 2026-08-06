@@ -71,7 +71,7 @@ This document outlines **future enhancements** to add advanced MCP features to T
 - `mcp_handlers.cpp` - Command handlers
 
 **Functionality:**
-- Unix domain socket server on `/tmp/tdesktop_mcp.sock`
+- Unix domain socket server on `/tmp/tlgrm_mcp.sock`
 - JSON-RPC style command/response protocol
 - Commands:
   - `get_messages(chat_id, limit, offset)` - Direct DB access
@@ -288,7 +288,7 @@ from typing import Dict, Any, List
 class TDesktopBridge:
     """Bridge to modified Telegram Desktop."""
 
-    def __init__(self, socket_path="/tmp/tdesktop_mcp.sock"):
+    def __init__(self, socket_path="/tmp/tlgrm_mcp.sock"):
         self.socket_path = socket_path
         self._request_id = 0
 

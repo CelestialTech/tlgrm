@@ -12,7 +12,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 | **Export reliability** | Takeout-only: 24-hour wait, no resume capability, any crash or network drop means starting over from zero | Gradual export: no takeout wait, auto-detects interrupted exports on disk, counts already-exported messages, resumes from exact position. Reuses existing directory — nothing is re-downloaded |
 | **Deleted account recovery** | When someone deletes their account, all messages in your private chats vanish instantly — no warning, no backup, no way to recover | Scans all chats for deleted accounts, recovers the person's real name from conversation patterns (greetings, email signatures, introductions), archives every message with full media (photos, videos, documents) to a dedicated group |
 | **Disappearing messages** | Self-destructing messages vanish on schedule with no trace | Configurable capture of disappearing messages before they self-destruct — preserves content that would otherwise be lost |
-| **Programmatic access** | Zero — all interaction is manual through the GUI | Always-on IPC socket (`/tmp/tdesktop_mcp.sock`) exposes 330+ tools via JSON-RPC. Access is restricted to processes running as the same user that can read the `0600` auth-token file — shell scripts, Python bots, Node.js services, cron jobs, AI assistants, monitoring dashboards |
+| **Programmatic access** | Zero — all interaction is manual through the GUI | Always-on IPC socket (`/tmp/tlgrm_mcp.sock`) exposes 330+ tools via JSON-RPC. Access is restricted to processes running as the same user that can read the `0600` auth-token file — shell scripts, Python bots, Node.js services, cron jobs, AI assistants, monitoring dashboards |
 | **Analytics** | None — you can scroll through messages manually | Per-chat and per-user statistics: message volume over time, activity heatmaps, word frequency analysis, top contributors, trending topics. All queryable programmatically |
 | **Privacy & security** | Navigate through nested settings menus, one option at a time | Read and write all privacy settings in one call: last seen, profile photo, phone number, forwards, birthday, bio. List all active sessions with device info and IP addresses, terminate any session, manage block lists — all scriptable |
 | **Message operations** | Right-click context menus, one message at a time | Programmatic edit, delete, forward, pin, unpin, and react across any chat. Batchable from scripts — process hundreds of messages in a loop |
@@ -33,7 +33,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 
 #### Automation and scripting
 
-**Build local bots and tools** — The IPC socket at `/tmp/tdesktop_mcp.sock` accepts JSON-RPC connections from local processes running as the same user. The socket is `0600`, the peer's UID is checked via `LOCAL_PEERCRED`, and `initialize` must present the token from the `0600` auth-token file. No Telegram Bot API token needed, no rate limits on reads, no bot registration. You operate as your own account with full access to your data. Examples:
+**Build local bots and tools** — The IPC socket at `/tmp/tlgrm_mcp.sock` accepts JSON-RPC connections from local processes running as the same user. The socket is `0600`, the peer's UID is checked via `LOCAL_PEERCRED`, and `initialize` must present the token from the `0600` auth-token file. No Telegram Bot API token needed, no rate limits on reads, no bot registration. You operate as your own account with full access to your data. Examples:
 - A Python script that exports a list of channels every night via cron
 - A monitoring daemon that watches specific chats and sends alerts
 - A dashboard that aggregates message statistics across your groups
@@ -127,7 +127,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 ### How It Works
 
 1. **Embedded C++ MCP server** runs inside the Telegram Desktop process with direct memory access to all data
-2. **IPC bridge** (`/tmp/tdesktop_mcp.sock`) — always on; same-user local processes authenticate with the token file, then call tools
+2. **IPC bridge** (`/tmp/tlgrm_mcp.sock`) — always on; same-user local processes authenticate with the token file, then call tools
 3. **Python MCP server** (optional) — connects to C++ server via IPC, adds semantic search, intent classification, topic extraction, conversation summarization with Apple Silicon GPU acceleration
 4. **Stdio transport** (`--mcp` flag) — for Claude Desktop or other MCP clients that use stdin/stdout
 5. **Local reads** hit the database directly (no network, no rate limits)
@@ -148,7 +148,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 import socket, json
 
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-sock.connect("/tmp/tdesktop_mcp.sock")
+sock.connect("/tmp/tlgrm_mcp.sock")
 
 def call(method, params=None, id=1):
     msg = json.dumps({"jsonrpc": "2.0", "id": id, "method": method, "params": params or {}})
@@ -359,12 +359,24 @@ open Telegram.xcodeproj
 ```bash
 cd ~/xCode/tlgrm/tdesktop/out
 
-# Build Release configuration with 24 parallel jobs
-cmake --build . --config Release -j 24
+# Build Release, universal (Intel + Apple Silicon), 24 parallel jobs
+xcodebuild -project Telegram.xcodeproj -scheme Telegram \
+  -configuration Release \
+  -destination 'generic/platform=macOS' \
+  build -jobs 24
 
-# For systems with limited RAM (8GB):
-cmake --build . --config Release -j 4
+# For systems with limited RAM (8GB), lower the job count:
+#   ... build -jobs 4
 ```
+
+**`-destination 'generic/platform=macOS'` is required.** Without it `-scheme`
+resolves a concrete destination — "My Mac" — and builds that architecture
+alone, silently ignoring the universal `ARCHS` that CMake already sets. The
+build succeeds and half your users get a binary they cannot run. Verify with
+`lipo -info` after every build; see `BUILD_STANDARDS.md`.
+
+The Xcode GUI has the same problem: selecting "My Mac" as the destination
+builds one architecture. Use `Any Mac` for a universal build.
 
 **What this compiles:**
 - All tdesktop source files (~2000 files)
@@ -933,7 +945,7 @@ class Bridge : public QObject {
     Q_OBJECT
 public:
     explicit Bridge(QObject *parent = nullptr);
-    bool start(const QString &socketPath = "/tmp/tdesktop_mcp.sock");
+    bool start(const QString &socketPath = "/tmp/tlgrm_mcp.sock");
     void stop();
 
 private Q_SLOTS:  // NOTE: Q_SLOTS, not "slots"
@@ -972,7 +984,7 @@ private Q_SLOTS:  // Uses Q_SLOTS macro
 
 **Why IPC bridge exists:**
 - Allows external Python process to connect to tdesktop
-- Unix domain socket (`/tmp/tdesktop_mcp.sock`)
+- Unix domain socket (`/tmp/tlgrm_mcp.sock`)
 - Not currently used (direct C++ MCP is faster)
 - Useful for future: separate MCP server process
 - Enables updating MCP server without rebuilding tdesktop
@@ -1624,7 +1636,7 @@ cmake --build . --config Release
 
 ### Current Security Model
 
-- **No Network Exposure**: MCP server accessible via stdio (Claude Desktop) and local Unix socket (`/tmp/tdesktop_mcp.sock`)
+- **No Network Exposure**: MCP server accessible via stdio (Claude Desktop) and local Unix socket (`/tmp/tlgrm_mcp.sock`)
 - **No Authentication Required**: Trusts calling process
 - **Session Isolation**: Each Telegram session is separate
 - **tdata Encryption**: Session data encrypted with local key (no macOS Keychain)
