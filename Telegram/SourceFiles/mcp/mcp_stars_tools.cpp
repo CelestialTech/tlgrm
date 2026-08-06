@@ -1163,133 +1163,198 @@ QJsonObject Server::toolGetPricePredictions(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolExportPortfolioReport(const QJsonObject &args) {
-	QJsonObject result;
-	QString format = args.value("format").toString("json");
+	const auto format = args.value("format").toString("json").toLower();
+	if (format != "json" && format != "csv") {
+		return toolError("format must be 'json' or 'csv'");
+	}
 
 	QJsonObject report;
 	report["generated_at"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+	const auto portfolio = toolGetPortfolio(QJsonObject());
+	const auto holdings = portfolio.value("holdings").toArray();
+	report["holdings"] = holdings;
+	const auto value = toolGetPortfolioValue(QJsonObject());
+	report["total_value"] = value.value("current_value");
+	report["profit_loss"] = value.value("profit_loss");
 
-	// Get portfolio data
-	QJsonObject portfolioResult = toolGetPortfolio(QJsonObject());
-	report["holdings"] = portfolioResult["holdings"];
+	// The tool is called export and takes a format, so it writes a file in
+	// that format. It used to accept "csv", ignore it, and hand back the same
+	// JSON object inline -- a caller asking for CSV got JSON and no file.
+	const auto dir = defaultExportDir();
+	QDir().mkpath(dir);
+	const auto stamp = QDateTime::currentDateTimeUtc().toString(
+		u"yyyyMMdd-HHmmss"_q);
+	const auto path = QString("%1/portfolio-%2.%3").arg(dir, stamp, format);
 
-	// Get value data
-	QJsonObject valueResult = toolGetPortfolioValue(QJsonObject());
-	report["total_value"] = valueResult["current_value"];
-	report["profit_loss"] = valueResult["profit_loss"];
+	QFile file(path);
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		return toolError("Could not open " + path + " for writing");
+	}
+	if (format == "json") {
+		file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+	} else {
+		QTextStream out(&file);
+		out << "gift_type,quantity,avg_price,current_value\n";
+		for (const auto &entry : holdings) {
+			const auto row = entry.toObject();
+			// Quote the one free-text column: a gift type containing a comma
+			// would otherwise shift every following column.
+			auto type = row.value("gift_type").toString();
+			type.replace('"', u"\"\""_q);
+			out << '"' << type << '"' << ','
+				<< row.value("quantity").toInt() << ','
+				<< row.value("avg_price").toDouble() << ','
+				<< row.value("current_value").toDouble() << '\n';
+		}
+	}
+	file.close();
 
+	QJsonObject result;
 	result["success"] = true;
 	result["format"] = format;
+	result["path"] = path;
+	result["holdings_count"] = holdings.size();
 	result["report"] = report;
-
 	return result;
 }
 
 // Achievement System
 QJsonObject Server::toolListAchievements(const QJsonObject &args) {
 	Q_UNUSED(args);
-	QJsonObject result;
 
-	// Define available achievements
+	// The catalogue and get_achievement_progress must agree on the ids, so
+	// this reports each one's live progress rather than a static list. The
+	// previous version returned three hardcoded entries with no progress at
+	// all, one of which could never be completed.
+	static const auto ids = std::array<const char*, 5>{
+		"first_gift", "generous_giver", "archivist", "librarian", "collector" };
+
 	QJsonArray achievements;
+	auto completed = 0;
+	for (const auto id : ids) {
+		QJsonObject query;
+		query["achievement_id"] = QString::fromLatin1(id);
+		const auto entry = toolGetAchievementProgress(query);
+		if (entry.value("completed").toBool()) {
+			++completed;
+		}
+		achievements.append(entry);
+	}
 
-	QJsonObject ach1;
-	ach1["id"] = "first_gift";
-	ach1["name"] = "First Gift";
-	ach1["description"] = "Send your first gift";
-	ach1["reward_stars"] = 10;
-	achievements.append(ach1);
-
-	QJsonObject ach2;
-	ach2["id"] = "star_collector";
-	ach2["name"] = "Star Collector";
-	ach2["description"] = "Collect 1000 stars";
-	ach2["reward_stars"] = 100;
-	achievements.append(ach2);
-
-	QJsonObject ach3;
-	ach3["id"] = "generous_giver";
-	ach3["name"] = "Generous Giver";
-	ach3["description"] = "Send 100 gifts";
-	ach3["reward_stars"] = 500;
-	achievements.append(ach3);
-
+	QJsonObject result;
 	result["success"] = true;
 	result["achievements"] = achievements;
-
+	result["count"] = achievements.size();
+	result["completed_count"] = completed;
 	return result;
 }
 
 QJsonObject Server::toolGetAchievementProgress(const QJsonObject &args) {
-	QJsonObject result;
-	QString achievementId = args["achievement_id"].toString();
-
-	int progress = 0;
-	int target = 0;
-	QString description;
-
-	if (achievementId == "first_gift") {
-		// Check if any gifts have been sent
-		QSqlQuery query(_db);
-		query.prepare("SELECT COUNT(*) FROM gift_transfers WHERE direction = 'sent'");
-		if (query.exec() && query.next()) progress = query.value(0).toInt();
-		target = 1;
-		description = "Send your first gift";
-	} else if (achievementId == "star_collector") {
-		// Credits API not available in this version
-		progress = 0;
-		target = 1000;
-		description = "Collect 1000 stars";
-	} else if (achievementId == "generous_giver") {
-		QSqlQuery query(_db);
-		query.prepare("SELECT COUNT(*) FROM gift_transfers WHERE direction = 'sent'");
-		if (query.exec() && query.next()) progress = query.value(0).toInt();
-		target = 100;
-		description = "Send 100 gifts";
-	} else {
-		// Generic achievement
-		target = 100;
-		description = "Unknown achievement";
+	const auto achievementId = args["achievement_id"].toString();
+	if (achievementId.isEmpty()) {
+		return toolError("achievement_id is required");
 	}
 
+	// Achievements track use of *this client*, measured from what it actually
+	// records: gifts it sent, messages it archived, gift types it holds. The
+	// earlier set included "collect 1000 stars", which reported 0 forever
+	// under a comment saying the credits API was unavailable -- a target that
+	// cannot move is not an achievement.
+	const auto count = [&](const char *sql) {
+		QSqlQuery query(_db);
+		query.prepare(QString::fromLatin1(sql));
+		return (query.exec() && query.next()) ? query.value(0).toInt() : 0;
+	};
+
+	auto progress = 0;
+	auto target = 0;
+	auto description = QString();
+	if (achievementId == u"first_gift"_q) {
+		progress = count("SELECT COUNT(*) FROM gift_transfers WHERE direction = 'sent'");
+		target = 1;
+		description = u"Send a gift"_q;
+	} else if (achievementId == u"generous_giver"_q) {
+		progress = count("SELECT COUNT(*) FROM gift_transfers WHERE direction = 'sent'");
+		target = 100;
+		description = u"Send 100 gifts"_q;
+	} else if (achievementId == u"archivist"_q) {
+		progress = count("SELECT COUNT(*) FROM messages");
+		target = 10000;
+		description = u"Archive 10,000 messages"_q;
+	} else if (achievementId == u"librarian"_q) {
+		progress = count("SELECT COUNT(DISTINCT chat_id) FROM messages");
+		target = 50;
+		description = u"Archive messages from 50 chats"_q;
+	} else if (achievementId == u"collector"_q) {
+		progress = count("SELECT COUNT(*) FROM portfolio WHERE quantity > 0");
+		target = 10;
+		description = u"Hold 10 different gift types"_q;
+	} else {
+		return toolError(QString("Unknown achievement '%1'; call "
+			"list_achievements for the available ones").arg(achievementId));
+	}
+
+	QSqlQuery claimed(_db);
+	claimed.prepare("SELECT claimed_at FROM achievement_claims "
+		"WHERE achievement_id = ?");
+	claimed.addBindValue(achievementId);
+	const auto alreadyClaimed = (claimed.exec() && claimed.next());
+
+	QJsonObject result;
 	result["success"] = true;
 	result["achievement_id"] = achievementId;
 	result["description"] = description;
 	result["progress"] = progress;
 	result["target"] = target;
 	result["completed"] = (progress >= target);
-
+	result["claimed"] = alreadyClaimed;
+	if (alreadyClaimed) {
+		result["claimed_at"] = claimed.value(0).toString();
+	}
 	return result;
 }
 
 QJsonObject Server::toolClaimAchievementReward(const QJsonObject &args) {
-	QJsonObject result;
-	QString achievementId = args["achievement_id"].toString();
-
+	const auto achievementId = args["achievement_id"].toString();
 	if (achievementId.isEmpty()) {
-		result["error"] = "Missing achievement_id";
-		result["success"] = false;
-		return result;
+		return toolError("achievement_id is required");
 	}
 
-	// Check achievement progress
-	QJsonObject progressResult = toolGetAchievementProgress(args);
-	bool completed = progressResult["completed"].toBool();
-
-	if (!completed) {
-		result["success"] = false;
-		result["error"] = "Achievement not yet completed";
-		result["achievement_id"] = achievementId;
-		result["progress"] = progressResult["progress"];
-		result["target"] = progressResult["target"];
-		return result;
+	// A claim has to be recorded, or it is not a claim. This used to answer
+	// "reward_claimed" and write nothing, so the same achievement could be
+	// claimed without limit and no later call could tell it ever had been.
+	QSqlQuery existing(_db);
+	existing.prepare("SELECT claimed_at FROM achievement_claims "
+		"WHERE achievement_id = ?");
+	existing.addBindValue(achievementId);
+	if (existing.exec() && existing.next()) {
+		return toolError(QString("Achievement '%1' was already claimed at %2")
+			.arg(achievementId, existing.value(0).toString()));
 	}
 
+	const auto progressResult = toolGetAchievementProgress(args);
+	if (!progressResult.value("completed").toBool()) {
+		auto error = toolError(QString("Achievement '%1' is not complete")
+			.arg(achievementId));
+		error["progress"] = progressResult.value("progress");
+		error["target"] = progressResult.value("target");
+		return error;
+	}
+
+	QSqlQuery insert(_db);
+	insert.prepare("INSERT INTO achievement_claims "
+		"(achievement_id, progress_at_claim) VALUES (?, ?)");
+	insert.addBindValue(achievementId);
+	insert.addBindValue(progressResult.value("progress").toInt());
+	if (!insert.exec()) {
+		return toolError("Could not record the claim: "
+			+ insert.lastError().text());
+	}
+
+	QJsonObject result;
 	result["success"] = true;
 	result["achievement_id"] = achievementId;
-	result["status"] = "reward_claimed";
-	result["note"] = "Achievement reward claim recorded";
-
+	result["progress_at_claim"] = progressResult.value("progress");
 	return result;
 }
 
