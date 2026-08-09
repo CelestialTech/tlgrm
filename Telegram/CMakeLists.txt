@@ -1451,13 +1451,16 @@ PRIVATE
     mcp/mcp_bridge.cpp
     mcp/mcp_bridge.h
     mcp/mcp_business_tools.cpp
+    mcp/mcp_community_tools.cpp
     mcp/mcp_core_tools.cpp
     mcp/mcp_deleted_account_tools.cpp
+    mcp/mcp_download_tools.cpp
     mcp/mcp_gradual_tools.cpp
     mcp/mcp_helpers.h
     mcp/mcp_message_ops.cpp
     mcp/mcp_premium_tools.cpp
     mcp/mcp_resource_handlers.cpp
+    mcp/mcp_rich_message_tools.cpp
     mcp/mcp_scheduler_tools.cpp
     mcp/mcp_search_tools.cpp
     mcp/mcp_server.h
@@ -1469,6 +1472,7 @@ PRIVATE
     mcp/mcp_tool_backing.cpp
     mcp/mcp_tool_backing.h
     mcp/mcp_tool_registry.cpp
+    mcp/mcp_topic_tools.cpp
     mcp/mcp_extra_tools.cpp
     mcp/mcp_wallet_tools.cpp
     mcp/message_scheduler.cpp

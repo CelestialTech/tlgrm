@@ -1490,6 +1490,30 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["get_audit_log"] = [this](const QJsonObject &args) { return toolGetAuditLog(args); };
 	_toolHandlers["health_check"] = [this](const QJsonObject &args) { return toolHealthCheck(args); };
 
+	// COMMUNITY TOOLS
+	_toolHandlers["list_communities"] = [this](const QJsonObject &args) { return toolListCommunities(args); };
+	_toolHandlers["get_community"] = [this](const QJsonObject &args) { return toolGetCommunity(args); };
+	_toolHandlers["create_community"] = [this](const QJsonObject &args) { return toolCreateCommunity(args); };
+	_toolHandlers["add_chat_to_community"] = [this](const QJsonObject &args) { return toolAddChatToCommunity(args); };
+	_toolHandlers["remove_chat_from_community"] = [this](const QJsonObject &args) { return toolRemoveChatFromCommunity(args); };
+	_toolHandlers["set_community_collapsed"] = [this](const QJsonObject &args) { return toolSetCommunityCollapsed(args); };
+	_toolHandlers["list_community_join_requests"] = [this](const QJsonObject &args) { return toolListCommunityJoinRequests(args); };
+	_toolHandlers["review_community_join_request"] = [this](const QJsonObject &args) { return toolReviewCommunityJoinRequest(args); };
+
+	// DOWNLOAD TOOLS
+	_toolHandlers["list_downloads"] = [this](const QJsonObject &args) { return toolListDownloads(args); };
+	_toolHandlers["clear_finished_downloads"] = [this](const QJsonObject &args) { return toolClearFinishedDownloads(args); };
+	_toolHandlers["delete_downloaded_files"] = [this](const QJsonObject &args) { return toolDeleteDownloadedFiles(args); };
+	_toolHandlers["get_auto_download_settings"] = [this](const QJsonObject &args) { return toolGetAutoDownloadSettings(args); };
+	_toolHandlers["set_auto_download_settings"] = [this](const QJsonObject &args) { return toolSetAutoDownloadSettings(args); };
+
+	// RICH MESSAGE TOOLS
+	_toolHandlers["list_rich_messages"] = [this](const QJsonObject &args) { return toolListRichMessages(args); };
+	_toolHandlers["save_rich_message_html"] = [this](const QJsonObject &args) { return toolSaveRichMessageHtml(args); };
+
+	// FORUM TOPIC TOOLS
+	_toolHandlers["list_topics"] = [this](const QJsonObject &args) { return toolListTopics(args); };
+
 	// VOICE TOOLS
 	_toolHandlers["transcribe_voice"] = [this](const QJsonObject &args) { return toolTranscribeVoice(args); };
 	_toolHandlers["get_transcription"] = [this](const QJsonObject &args) { return toolGetTranscription(args); };

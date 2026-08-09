@@ -3239,6 +3239,86 @@ void Server::registerTools() {
 			{"username", QJsonObject{{"type", "string"}, {"description", "Username to test, without the @"}}}
 		}}, {"required", QJsonArray{"chat_id", "username"}}}},
 
+		// COMMUNITY TOOLS -- a community is a channel that groups other chats
+		// under one dialogs row. `chat_id` always names the community itself;
+		// `member_chat_id` names a chat inside it.
+		Tool{"list_communities", "List the communities this account has joined", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"get_community", "Get a community's details and the chats linked into it", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "The community channel"}}}
+		}}, {"required", QJsonArray{"chat_id"}}}},
+
+		Tool{"create_community", "Create a community around a first chat and return its chat_id", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"title", QJsonObject{{"type", "string"}, {"description", "Community title"}}},
+			{"first_chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat to link in at creation; Telegram requires one"}}},
+			{"about", QJsonObject{{"type", "string"}, {"description", "Community description"}}},
+			{"hidden", QJsonObject{{"type", "boolean"}, {"description", "Create it hidden rather than publicly listed"}, {"default", false}}}
+		}}, {"required", QJsonArray{"title", "first_chat_id"}}}},
+
+		Tool{"add_chat_to_community", "Link a chat into a community. Returns pending_approval when the community's admins have to approve the link", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "The community channel"}}},
+			{"member_chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat to link in"}}},
+			{"visible", QJsonObject{{"type", "boolean"}, {"description", "Show the chat to everyone rather than only to members"}, {"default", true}}}
+		}}, {"required", QJsonArray{"chat_id", "member_chat_id"}}}},
+
+		Tool{"remove_chat_from_community", "Unlink a chat from a community", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "The community channel"}}},
+			{"member_chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat to unlink"}}}
+		}}, {"required", QJsonArray{"chat_id", "member_chat_id"}}}},
+
+		Tool{"set_community_collapsed", "Collapse or expand a community's row in the chats list", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "The community channel"}}},
+			{"collapsed", QJsonObject{{"type", "boolean"}, {"description", "True to collapse the group of chats into one row"}}}
+		}}, {"required", QJsonArray{"chat_id", "collapsed"}}}},
+
+		Tool{"list_community_join_requests", "List chats waiting for approval to join a community", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "The community channel"}}},
+			{"limit", QJsonObject{{"type", "integer"}, {"description", "How many requests to return"}, {"default", 50}}},
+			{"offset", QJsonObject{{"type", "string"}, {"description", "next_offset from a previous call, to page through"}}}
+		}}, {"required", QJsonArray{"chat_id"}}}},
+
+		Tool{"review_community_join_request", "Approve or reject a pending community join request, or every pending one at once", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "The community channel"}}},
+			{"approve", QJsonObject{{"type", "boolean"}, {"description", "True to approve, false to reject"}}},
+			{"member_chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat whose request to decide; ignored when all is true"}}},
+			{"all", QJsonObject{{"type", "boolean"}, {"description", "Decide every pending request at once"}, {"default", false}}}
+		}}, {"required", QJsonArray{"chat_id", "approve"}}}},
+
+		// DOWNLOAD TOOLS
+		Tool{"list_downloads", "List what this account is downloading and what it has downloaded", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"clear_finished_downloads", "Remove finished downloads from the downloads list, leaving the files on disk", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"delete_downloaded_files", "Delete downloaded files from disk and clear the downloads list", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"get_auto_download_settings", "Read the auto-download limits for private chats, groups and channels", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+
+		Tool{"set_auto_download_settings", "Turn auto-download on or off for a source, either wholesale or for one media type", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"source", QJsonObject{{"type", "string"}, {"description", "private_chats, groups or channels"}}},
+			{"enabled", QJsonObject{{"type", "boolean"}, {"description", "True to enable, false to disable"}}},
+			{"type", QJsonObject{{"type", "string"}, {"description", "photo, video, voice_message, video_message, music, gif or file. Omit to set the whole source at once"}}},
+			{"bytes_limit", QJsonObject{{"type", "integer"}, {"description", "Largest file to fetch automatically, in bytes. Only with type; defaults to no limit"}}}
+		}}, {"required", QJsonArray{"source", "enabled"}}}},
+
+		// RICH MESSAGE TOOLS
+		Tool{"list_rich_messages", "Find messages in a chat that carry a rich page rather than plain text", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat to scan"}}},
+			{"limit", QJsonObject{{"type", "integer"}, {"description", "How many to return"}, {"default", 50}}}
+		}}, {"required", QJsonArray{"chat_id"}}}},
+
+		Tool{"save_rich_message_html", "Write a rich message out as a self-contained HTML folder. Starts the work and returns; media is fetched in the background", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat holding the message"}}},
+			{"message_id", QJsonObject{{"type", "integer"}, {"description", "The rich message"}}},
+			{"path", QJsonObject{{"type", "string"}, {"description", "Directory to write into; defaults to the export directory"}}}
+		}}, {"required", QJsonArray{"chat_id", "message_id"}}}},
+
+		// FORUM TOPIC TOOLS
+		Tool{"list_topics", "List a forum's topics with their unread counts", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "The forum supergroup"}}},
+			{"unread_only", QJsonObject{{"type", "boolean"}, {"description", "Return only topics with something unread"}, {"default", false}}},
+			{"limit", QJsonObject{{"type", "integer"}, {"description", "How many topics to return"}, {"default", 100}}}
+		}}, {"required", QJsonArray{"chat_id"}}}},
+
 		Tool{"create_giveaway", "Create a Telegram Stars giveaway in a channel", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"channel_id", QJsonObject{{"type", "integer"}, {"description", "Channel to host the giveaway"}}},
 			{"stars_amount", QJsonObject{{"type", "integer"}, {"description", "Total stars to give away"}}},

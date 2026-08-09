@@ -230,6 +230,42 @@ private:
 	QJsonObject toolTranscribeVoice(const QJsonObject &args);
 	QJsonObject toolGetTranscription(const QJsonObject &args);
 
+	// Community tools (8 tools)
+	//
+	// A community is a channel that groups other chats under one dialogs
+	// row. Every one of these takes a chat_id naming the community itself.
+	struct CommunityLookup {
+		ChannelData *channel = nullptr;
+		QJsonObject error;
+	};
+	// Resolves chat_id to a community, or fills in the error to return.
+	// Returned by value so a caller cannot reach the channel without having
+	// passed the error, which is how the three distinct failures -- unknown
+	// peer, not a channel, not a community -- stay worded consistently.
+	[[nodiscard]] CommunityLookup resolveCommunity(const QJsonObject &args);
+	QJsonObject toolListCommunities(const QJsonObject &args);
+	QJsonObject toolGetCommunity(const QJsonObject &args);
+	QJsonObject toolCreateCommunity(const QJsonObject &args);
+	QJsonObject toolAddChatToCommunity(const QJsonObject &args);
+	QJsonObject toolRemoveChatFromCommunity(const QJsonObject &args);
+	QJsonObject toolSetCommunityCollapsed(const QJsonObject &args);
+	QJsonObject toolListCommunityJoinRequests(const QJsonObject &args);
+	QJsonObject toolReviewCommunityJoinRequest(const QJsonObject &args);
+
+	// Download tools (5 tools)
+	QJsonObject toolListDownloads(const QJsonObject &args);
+	QJsonObject toolClearFinishedDownloads(const QJsonObject &args);
+	QJsonObject toolDeleteDownloadedFiles(const QJsonObject &args);
+	QJsonObject toolGetAutoDownloadSettings(const QJsonObject &args);
+	QJsonObject toolSetAutoDownloadSettings(const QJsonObject &args);
+
+	// Rich message tools (2 tools)
+	QJsonObject toolListRichMessages(const QJsonObject &args);
+	QJsonObject toolSaveRichMessageHtml(const QJsonObject &args);
+
+	// Forum topic tools (1 tool)
+	QJsonObject toolListTopics(const QJsonObject &args);
+
 	// Bot framework tools (8 tools)
 	QJsonObject toolListBots(const QJsonObject &args);
 	QJsonObject toolGetBotInfo(const QJsonObject &args);

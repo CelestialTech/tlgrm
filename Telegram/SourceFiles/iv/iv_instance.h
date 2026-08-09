@@ -81,6 +81,13 @@ public:
 	void exportRichMessageHtml(
 		not_null<Window::SessionController*> controller,
 		FullMsgId itemId);
+	// Same export, with the destination named instead of asked for. Public
+	// so a caller with no one to ask -- the MCP server -- can still run it;
+	// the overload above is this one plus a folder dialog.
+	void exportRichMessageHtml(
+		not_null<Window::SessionController*> controller,
+		FullMsgId itemId,
+		const QString &basePath);
 
 	bool showMarkdown(
 		const QString &path,
@@ -152,10 +159,6 @@ private:
 		std::shared_ptr<const RichPage> page,
 		bool notifyCallbacks = true);
 
-	void exportRichMessageHtml(
-		not_null<Window::SessionController*> controller,
-		FullMsgId itemId,
-		const QString &basePath);
 	void eraseSettledHtmlExports();
 
 	void trackSession(not_null<Main::Session*> session);
