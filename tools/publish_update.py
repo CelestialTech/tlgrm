@@ -231,10 +231,25 @@ def resolve_channel(bridge: Bridge, username: str) -> int:
     )
 
 
+def version_string(version: int) -> str:
+    """7000009 -> "7.0.9". The integer is what the client compares; this is
+    only for the human-readable caption."""
+    return f"{version // 1000000}.{version // 1000 % 1000}.{version % 1000}"
+
+
 def latest_post_id(bridge: Bridge, chat_id: int) -> int | None:
+    """Newest post id in the channel, or None if the channel is empty.
+
+    read_messages returns newest-first and names the field "message_id", as a
+    string. Reading it as "id" -- which is what this did -- yielded None every
+    time, so the wait below could never see the post land and every publish
+    timed out after the upload had actually succeeded.
+    """
     msgs = bridge.tool("read_messages", {"chat_id": chat_id, "limit": 1})
     items = msgs.get("messages") or []
-    return int(items[0]["id"]) if items and "id" in items[0] else None
+    if not items or "message_id" not in items[0]:
+        return None
+    return int(items[0]["message_id"])
 
 
 def post_package(bridge: Bridge, chat_id: int, package: Path, label: str) -> int:
@@ -282,32 +297,49 @@ def publish_http(packages: list[Path], host: str, directory: str) -> None:
         print(f"  {package.name} -> {host}:{directory}/{package.name}")
 
 
-def publish(version: int, packages: dict[str, Path], channel: str) -> None:
-    """Post every package, then one feed JSON naming all of them.
+def publish(
+        version: int,
+        packages: dict[str, Path],
+        channel: str,
+        post_id: int | None = None) -> None:
+    """Post the package once, then a feed JSON naming it for every platform.
 
-    Order matters twice over. Each package must be posted before the JSON can
-    name its post id, and the JSON must end up as the channel's *latest*
-    message, because MtpChecker reads history with limit=1. So all packages go
-    first and the single JSON goes last -- one JSON covering every platform,
-    not one per platform, or only the last would ever be read.
+    Packer's -arch only picks the output filename: the payload is the same
+    universal bundle either way, and the two files are byte-identical. So one
+    post serves both platform keys, and the client is happy to take it --
+    FindUpdateFile() accepts any of the known prefixes, not just the one
+    matching its own AutoUpdateKey(). Posting both would upload 110 MB twice
+    to say the same thing.
+
+    Order matters: the package must be posted before the JSON can name its
+    post id, and the JSON must end up as the channel's *latest* message,
+    because MtpChecker reads history with limit=1.
     """
     bridge = Bridge()
     bridge.connect()
     chat_id = resolve_channel(bridge, channel)
     print(f"Channel @{channel} -> chat_id {chat_id}")
 
-    feed = {}
-    for key, arch, _prefix in PLATFORMS:
-        package = packages[key]
-        post_id = post_package(
-            bridge, chat_id, package, f"Tlgrm {version} ({arch})")
-        feed[key] = {"stable": {"released": f"{version}:{channel}#{post_id}"}}
+    keys = [key for key, _arch, _prefix in PLATFORMS]
+    arches = ", ".join(arch for _key, arch, _prefix in PLATFORMS)
+    caption = f"Tlgrm {version_string(version)} — universal ({arches})"
+    if post_id is None:
+        post_id = post_package(bridge, chat_id, packages[keys[0]], caption)
+    else:
+        # Resuming after the JSON half failed: the package is already up
+        # there, and re-posting it would leave two copies of the same 110 MB
+        # and an older one the feed does not name.
+        print(f"Using the package already posted as #{post_id}")
 
+    feed = {
+        key: {"stable": {"released": f"{version}:{channel}#{post_id}"}}
+        for key in keys
+    }
     bridge.tool("send_message", {
         "chat_id": chat_id,
         "text": json.dumps(feed, separators=(",", ":")),
     })
-    print("\nFeed JSON posted, covering: " + ", ".join(feed))
+    print(f"\nFeed JSON posted, pointing {', '.join(keys)} at #{post_id}.")
     print("It must remain the channel's latest message.")
 
 
@@ -329,14 +361,24 @@ def main() -> None:
                     help="Package directory the origin serves from")
     ap.add_argument("--no-strip", action="store_true",
                     help="Pack the bundle as built, without stripping it")
+    ap.add_argument("--post-id", type=int,
+                    help="Package already posted as this id; post only the "
+                         "feed JSON naming it")
     args = ap.parse_args()
 
-    if not args.no_strip:
-        strip_and_sign(args.app)
-    packages = {
-        key: pack(args.version, args.app, args.outdir, arch, prefix)
-        for key, arch, prefix in PLATFORMS
-    }
+    # Nothing to build when the package is already posted and the HTTP origin
+    # is being skipped: the only thing left is the feed JSON. Packing anyway
+    # cost two 110 MB builds to post one short message.
+    needs_packages = not (args.post_id is not None and args.skip_http)
+
+    packages: dict[str, Path] = {}
+    if needs_packages:
+        if not args.no_strip:
+            strip_and_sign(args.app)
+        packages = {
+            key: pack(args.version, args.app, args.outdir, arch, prefix)
+            for key, arch, prefix in PLATFORMS
+        }
     if args.pack_only:
         print("\nPackages ready:")
         for key, package in packages.items():
@@ -349,7 +391,7 @@ def main() -> None:
     # unposted.
     if not args.skip_http:
         publish_http(list(packages.values()), args.http_host, args.http_dir)
-    publish(args.version, packages, args.channel)
+    publish(args.version, packages, args.channel, args.post_id)
 
 
 if __name__ == "__main__":
