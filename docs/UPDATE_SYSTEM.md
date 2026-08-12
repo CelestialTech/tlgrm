@@ -116,25 +116,37 @@ uploads the package to the channel through the running client's MCP bridge
 (packages are ~74 MB, past the Bot API's 50 MB ceiling), reads back the post id,
 and posts the feed JSON last.
 
-Upload the same package to the GitHub release as well — the Worker serves
-`/current` from release assets.
+The GitHub release carries the **DMG**, for people downloading the app by
+hand. It plays no part in updates: `/current` is served by the update-server
+from `/srv/tlgrm-updates` on ironforge, not from release assets. The
+Cloudflare Worker that once read release assets is superseded and no longer
+bound to this hostname.
 
 ## Current status
 
-Both delivery paths are provisioned and serving.
+Both delivery paths are provisioned, serving, and carrying a release.
 
 | Path | Where | State |
 |---|---|---|
-| MTProto | `@updates71grm` | channel exists, public, resolving |
-| HTTP | `updates.71grm.site` | ironforge via tunnel, returning a manifest |
+| MTProto | `@updates71grm` | feed JSON is the channel's latest message |
+| HTTP | `updates.71grm.site` | ironforge via tunnel, serving both platform keys |
 
-Verified end to end: `/current` returns
-`{"armac":{"stable":{"link":"/tarmacupd7000007","released":"7000007"}}}`, and
-the package downloads over the public tunnel byte-identical to the signed
-original (77,886,744 bytes, matching sha256).
+Verified end to end on 11 August 2026 with 7.0.9. `/current` returns:
 
-What remains is publishing a release: the packages are served from
-`/srv/tlgrm-updates` on ironforge, and the channel still needs its first post.
+```json
+{"armac":{"stable":{"link":"/tarmacupd7000009","released":"7000009"}},
+ "mac":{"stable":{"link":"/tmacupd7000009","released":"7000009"}}}
+```
+
+and the channel's latest message is the matching feed JSON, pointing both
+platform keys at the post carrying the package.
+
+**Both keys must always be present.** The binary is universal; publishing only
+`armac` tells every Intel Mac that no update exists while one does. Packer's
+`-arch` selects only the output *filename* — the two packages are
+byte-identical — so a single channel post can back both keys, because
+`FindUpdateFile()` accepts any known prefix regardless of the running
+architecture.
 
 ## Things that failed silently here before
 

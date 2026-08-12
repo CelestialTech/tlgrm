@@ -369,6 +369,11 @@ xcodebuild -project Telegram.xcodeproj -scheme Telegram \
 #   ... build -jobs 4
 ```
 
+> **Packaging and publishing a build is a separate stage with its own
+> scripts** — `create_dmg.sh` for the DMG and `tools/publish_update.py` for the
+> signed update packages and both delivery paths. The full sequence, and the
+> traps in it, are in [AGENTS.md](AGENTS.md).
+
 **`-destination 'generic/platform=macOS'` is required.** Without it `-scheme`
 resolves a concrete destination — "My Mac" — and builds that architecture
 alone, silently ignoring the universal `ARCHS` that CMake already sets. The
@@ -1460,7 +1465,13 @@ cd Telegram
 ./build/prepare/mac.sh silent
 ./configure.sh -D TDESKTOP_API_ID=... -D TDESKTOP_API_HASH=...
 cd ../out
-cmake --build . --config Release
+xcodebuild -project Telegram.xcodeproj -scheme Telegram \
+  -configuration Release -destination 'generic/platform=macOS' \
+  build -jobs 24
+
+# Verify it is actually universal — a build without -destination is host-only
+# and ships nothing to half the users:
+lipo -info Release/Tlgrm.app/Contents/MacOS/Tlgrm   # expect: x86_64 arm64
 ```
 
 ---

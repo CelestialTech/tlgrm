@@ -155,6 +155,11 @@ def strip_and_sign(app: Path) -> None:
 
     Stripping invalidates the code signature, so the bundle is re-signed
     ad-hoc -- the same signature it was built with.
+
+    NOTE: this mutates the built bundle in place, and create_dmg.sh copies
+    that same bundle. Run this BEFORE building the DMG and the DMG carries the
+    stripped 491 MB app; run it after and the DMG carries the 1.56 GB one. The
+    order is not enforceable from here, so it is stated in AGENTS.md.
     """
     binary = app / "Contents/MacOS" / app.stem
     if not binary.exists():
@@ -278,11 +283,16 @@ def post_package(bridge: Bridge, chat_id: int, package: Path, label: str) -> int
     )
 
 
-def publish_http(packages: list[Path], host: str, directory: str) -> None:
-    """Copy the packages to the HTTP origin.
+def publish_http(packages: list[Path], host: str, directory: str) -> bool:
+    """Copy the packages to the HTTP origin. Returns whether it succeeded.
 
     The origin derives its manifest from what is on disk, so publishing over
     HTTP is exactly this copy -- there is nothing else to poke afterwards.
+
+    A failure here does NOT abort the run. The two update paths are
+    independent: ironforge being unreachable (it is a machine on the local
+    network) is no reason to skip the MTProto half, and aborting meant one
+    unplugged host left every client with no update at all.
     """
     print(f"\nHTTP origin: copying {len(packages)} package(s) to {host}:{directory}")
     proc = subprocess.run(
@@ -290,11 +300,14 @@ def publish_http(packages: list[Path], host: str, directory: str) -> None:
         capture_output=True, text=True,
     )
     if proc.returncode != 0:
-        raise SystemExit(
-            f"scp to {host} failed:\n{(proc.stdout + proc.stderr).strip()}"
-        )
+        print(f"  FAILED: scp to {host}: "
+              f"{(proc.stdout + proc.stderr).strip().splitlines()[-1] if (proc.stdout + proc.stderr).strip() else 'no output'}")
+        print("  Continuing with the MTProto half; re-run with --skip-http "
+              "once the host is reachable to finish the HTTP side.")
+        return False
     for package in packages:
         print(f"  {package.name} -> {host}:{directory}/{package.name}")
+    return True
 
 
 def publish(
@@ -389,9 +402,19 @@ def main() -> None:
     # fed. HTTP goes first: it is the recoverable half -- a bad copy can be
     # replaced in place, while a channel post that has been read cannot be
     # unposted.
+    http_ok = True
     if not args.skip_http:
-        publish_http(list(packages.values()), args.http_host, args.http_dir)
+        http_ok = publish_http(
+            list(packages.values()), args.http_host, args.http_dir)
     publish(args.version, packages, args.channel, args.post_id)
+
+    # Exit non-zero if only half the release landed, so a caller (or a human
+    # skimming the tail of the output) cannot read partial success as success.
+    if not http_ok:
+        raise SystemExit(
+            "\nMTProto half published; HTTP half did NOT. The release is only "
+            "reachable by clients using the MTProto feed until the packages "
+            "are copied to the origin.")
 
 
 if __name__ == "__main__":

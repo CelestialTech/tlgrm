@@ -40,11 +40,19 @@ If an artifact of that kind already exists in the tree, something produced it.
    iconutil --convert icns --output out/Release/Tlgrm.app/Contents/Resources/AppIcon.icns \
      Telegram/Telegram/Images.xcassets/Icon.iconset/
    ```
-3. **DMG** — `./create_dmg.sh` → `dmg_build/Tlgrm_<version>.dmg`.
+3. **Strip before the DMG** — `publish_update.py` strips and re-signs the
+   bundle *in place*, and `create_dmg.sh` copies that same bundle. Either run
+   `publish_update.py --pack-only` first, or strip by hand, before step 4 —
+   otherwise the DMG ships the 1.56 GB unstripped app instead of the 491 MB
+   one. This ordering is not enforced by either script.
+4. **DMG** — `./create_dmg.sh` → `dmg_build/Tlgrm_<version>.dmg`.
    `create_beautiful_dmg.sh` is the fuller variant; see the warning below.
-4. **Update packages** — `uv run tools/publish_update.py --version 7000009`.
-   It strips + re-signs the bundle, packs both platform keys, copies to the
-   HTTP origin, and posts to the MTProto channel.
+   Verify before publishing: `hdiutil attach`, confirm the volume holds only
+   `Tlgrm.app` + `Applications`, and `lipo -info` says `x86_64 arm64`.
+5. **Update packages** — `uv run tools/publish_update.py --version 7000009`.
+   It packs both platform keys, copies to the HTTP origin (ironforge must be
+   reachable, or the HTTP half is skipped and the run exits non-zero), and
+   posts to the MTProto channel.
 5. **GitHub release** (still manual — no automation exists):
    ```bash
    gh release create v7.0.9 --repo CelestialTech/tlgrm \

@@ -197,3 +197,11 @@ dmg_build/
 # previously untracked but not ignored, so any `git add -A` would have
 # published them to the public remote.
 DesktopPrivate/
+
+# ...except custom_api_id.h, which is tracked deliberately: it holds the public
+# tdesktop ApiId/ApiHash pair (2040), not a secret, and the build needs it.
+# Stating that here rather than leaving a tracked file sitting inside an
+# ignored directory, which reads as an accident and hides the real rule: the
+# *_private.h key files must never be tracked. Verify with
+# `git ls-files DesktopPrivate/` -- custom_api_id.h must be the only entry.
+!DesktopPrivate/custom_api_id.h
