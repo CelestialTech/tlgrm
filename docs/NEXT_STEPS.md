@@ -92,7 +92,6 @@ cd build
 # Configure with CMake
 cmake -G Ninja .. \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_OSX_ARCHITECTURES=arm64 \
     -DDESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
 
 # Build (this will take 15-30 minutes)

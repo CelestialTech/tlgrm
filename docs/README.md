@@ -248,7 +248,7 @@ cd /Users/pasha/xCode/tlgrm/tdesktop
 
 # Configure and build
 mkdir -p build && cd build
-cmake -G Ninja .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+cmake -G Ninja .. -DCMAKE_BUILD_TYPE=Release
 ninja 2>&1 | tee build.log
 
 # Launch

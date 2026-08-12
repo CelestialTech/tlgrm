@@ -12,7 +12,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 | **Export reliability** | Takeout-only: 24-hour wait, no resume capability, any crash or network drop means starting over from zero | Gradual export: no takeout wait, auto-detects interrupted exports on disk, counts already-exported messages, resumes from exact position. Reuses existing directory — nothing is re-downloaded |
 | **Deleted account recovery** | When someone deletes their account, all messages in your private chats vanish instantly — no warning, no backup, no way to recover | Scans all chats for deleted accounts, recovers the person's real name from conversation patterns (greetings, email signatures, introductions), archives every message with full media (photos, videos, documents) to a dedicated group |
 | **Disappearing messages** | Self-destructing messages vanish on schedule with no trace | Configurable capture of disappearing messages before they self-destruct — preserves content that would otherwise be lost |
-| **Programmatic access** | Zero — all interaction is manual through the GUI | Always-on IPC socket (`/tmp/tlgrm_mcp.sock`) exposes 339 tools via JSON-RPC. Access is restricted to processes running as the same user that can read the `0600` auth-token file — shell scripts, Python bots, Node.js services, cron jobs, AI assistants, monitoring dashboards |
+| **Programmatic access** | Zero — all interaction is manual through the GUI | Always-on IPC socket (`/tmp/tlgrm_mcp.sock`) exposes 355 tools via JSON-RPC. Access is restricted to processes running as the same user that can read the `0600` auth-token file — shell scripts, Python bots, Node.js services, cron jobs, AI assistants, monitoring dashboards |
 | **Analytics** | None — you can scroll through messages manually | Per-chat and per-user statistics: message volume over time, activity heatmaps, word frequency analysis, top contributors, trending topics. All queryable programmatically |
 | **Privacy & security** | Navigate through nested settings menus, one option at a time | Read and write all privacy settings in one call: last seen, profile photo, phone number, forwards, birthday, bio. List all active sessions with device info and IP addresses, terminate any session, manage block lists — all scriptable |
 | **Message operations** | Right-click context menus, one message at a time | Programmatic edit, delete, forward, pin, unpin, and react across any chat. Batchable from scripts — process hundreds of messages in a loop |
@@ -56,7 +56,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 [![MCP](https://img.shields.io/badge/MCP-1.0-green.svg)](https://modelcontextprotocol.io/)
 [![C++20](https://img.shields.io/badge/C++-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
-[![Base](https://img.shields.io/badge/base-tdesktop%207.0.7-blue.svg)](https://github.com/telegramdesktop/tdesktop)
+[![Base](https://img.shields.io/badge/base-tdesktop%207.0.9-blue.svg)](https://github.com/telegramdesktop/tdesktop)
 
 ---
 
@@ -84,7 +84,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 - **Resume interrupted exports** — auto-detects previous exports on disk and continues from exact position
 - **Archive deleted account messages** — scan, detect, and preserve messages before they vanish, with automatic name recovery
 - **Capture disappearing messages** before self-destruct timers expire
-- **339 programmatic tools** accessible via JSON-RPC over IPC socket or stdio
+- **355 programmatic tools** accessible via JSON-RPC over IPC socket or stdio
 - **Direct database reads** — 20-100x faster than Bot API, zero network overhead
 - **Works with any client** — shell scripts, Python bots, AI assistants (Claude, local LLMs), cron jobs, custom tools
 - **Python MCP server** — optional companion with semantic search, intent classification, topic extraction, and conversation summarization (Apple Silicon GPU accelerated)
@@ -110,7 +110,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
             │                     │               │ search, NLP  │
             │                     │               │ Apple Silicon│
       ┌─────▼─────────────────────▼─────┐         └──────┬──────┘
-      │       C++ MCP Server (339)     │◄───────────────┘
+      │       C++ MCP Server (355)     │◄───────────────┘
       │  ┌─────────┐  ┌───────────────┐ │
       │  │Messaging│  │Export & Archive│ │
       │  │Analytics│  │Privacy/Security│ │
@@ -1062,9 +1062,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system architecture details.
 
 ## MCP Tools & Features
 
-### Available Tools (339)
+### Available Tools (355)
 
-The C++ MCP server exposes 339 tools with real Telegram API integration:
+The C++ MCP server exposes 355 tools with real Telegram API integration:
 
 | Category | Tools | Status |
 |----------|-------|--------|
@@ -1604,7 +1604,7 @@ lipo -info Release/Tlgrm.app/Contents/MacOS/Tlgrm   # expect: x86_64 arm64
 - [x] JSON-RPC 2.0 protocol implementation
 - [x] Stdio transport (for Claude Desktop)
 - [x] IPC bridge transport (Unix socket for external tools)
-- [x] 339 tool registrations
+- [x] 355 tool registrations
 - [x] Patch system for updates
 
 ### Phase 2: Data Integration ✅ COMPLETE
@@ -1751,7 +1751,7 @@ When reporting issues, please include:
 - **Account risk** — exporting restricted content or heavy automated usage may trigger Telegram's anti-abuse systems. Use responsibly and at your own risk.
 - **Disk space** — full channel exports with media can consume tens of GB. Monitor available space during large exports.
 - **Auto-update is live** — own RSA signing keys, the `@updates71grm` MTProto channel, and `https://updates.71grm.site/current` served by `update-server/` on a local Alpine host. Both discovery paths run in parallel and the check only fails if both do. Releases must be signed with the private key matching `config.h`; `Telegram/build/target` must contain `mac` or the `Packer` target is never generated and no package can be produced.
-- **Local-only tools** — of 339 advertised tools, 74 reach Telegram over MTProto, 31 read live session state, 4 are pure computation, and 229 read this client's own database. Every response and every `tools/list` entry carries a `backing` field saying which, so a local-only result can no longer be mistaken for Telegram's view. None are unimplemented; a tool nothing backs is refused rather than answered.
+- **Local-only tools** — of 355 advertised tools, 81 reach Telegram over MTProto, 41 read live session state, 4 are pure computation, and 229 read this client's own database. Every response and every `tools/list` entry carries a `backing` field saying which, so a local-only result can no longer be mistaken for Telegram's view. None are unimplemented; a tool nothing backs is refused rather than answered.
 
 ---
 
@@ -1761,7 +1761,7 @@ When reporting issues, please include:
 **Base**: Telegram Desktop 7.0.7 (MTProto layer 228, Qt 6.11.1)
 **Last Updated**: 2026-08-03
 **Platform**: macOS (universal - Apple Silicon + Intel)
-**MCP Tools**: 339 advertised — every one declares its backing; 0 unimplemented
+**MCP Tools**: 355 advertised — every one declares its backing; 0 unimplemented
 
 **Build Status**: ✅ Compiles successfully
 **MCP Protocol**: ✅ Fully working (stdio + IPC)

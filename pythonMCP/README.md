@@ -140,7 +140,7 @@ TELEGRAM_API_HASH=your_api_hash
 TELEGRAM_BOT_TOKEN=your_bot_token
 
 # IPC configuration
-IPC_SOCKET_PATH=/tmp/telegram_mcp.sock
+IPC_SOCKET_PATH=/tmp/tlgrm_mcp.sock
 
 # AI/ML settings (optional)
 EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
@@ -162,7 +162,7 @@ server_name = "Telegram MCP"
 mode = "hybrid"
 
 [ipc]
-cpp_socket_path = "/tmp/telegram_mcp.sock"
+cpp_socket_path = "/tmp/tlgrm_mcp.sock"
 
 [aiml]
 enabled = true
@@ -583,7 +583,7 @@ pip install -r requirements.txt
 
 **Solution**:
 1. Ensure C++ MCP server is running
-2. Check socket path: `ls -la /tmp/telegram_mcp.sock`
+2. Check socket path: `ls -la /tmp/tlgrm_mcp.sock`
 3. Try standalone mode: `--mode standalone`
 
 ### "Configuration validation failed"

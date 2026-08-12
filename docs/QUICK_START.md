@@ -30,7 +30,7 @@ cd /Users/pasha/xCode/tlgrm/tdesktop
 
 # 3. Configure build
 mkdir -p build && cd build
-cmake -G Ninja .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+cmake -G Ninja .. -DCMAKE_BUILD_TYPE=Release
 
 # 4. Compile
 ninja 2>&1 | tee build.log

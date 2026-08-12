@@ -1,5 +1,10 @@
 # Telegram Desktop MCP - Complete Build Guide
 
+
+> **Universal binary:** any recipe that pins one architecture, or that
+> omits `-destination 'generic/platform=macOS'` from xcodebuild, produces a
+> host-only build and ships nothing to half the users. See AGENTS.md.
+
 **Platform:** macOS (Apple Silicon + Intel)
 **Build System:** CMake + Ninja / Xcode
 **Status:** ✅ Validated and ready to compile
@@ -53,7 +58,7 @@ mkdir -p build && cd build
 # Configure for Release
 cmake -G Ninja .. \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_OSX_ARCHITECTURES=arm64  # or x86_64 for Intel
+  # Do NOT pin CMAKE_OSX_ARCHITECTURES -- the build is universal
 ```
 
 ### Step 4: Compile
@@ -117,6 +122,7 @@ cmake -G Xcode .. -DCMAKE_BUILD_TYPE=Release
 xcodebuild -project Telegram.xcodeproj \
   -scheme Telegram \
   -configuration Release \
+  -destination 'generic/platform=macOS' \
   build
 
 # Or open in Xcode GUI
@@ -249,7 +255,7 @@ Undefined symbols for architecture arm64
 # Clean build and reconfigure
 rm -rf build
 mkdir build && cd build
-cmake -G Ninja .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+cmake -G Ninja .. -DCMAKE_BUILD_TYPE=Release
 ninja
 ```
 
@@ -392,7 +398,7 @@ ninja
 
 ```bash
 # Apple Silicon (arm64)
-cmake -G Ninja .. -DCMAKE_OSX_ARCHITECTURES=arm64
+cmake -G Ninja ..
 
 # Intel (x86_64)
 cmake -G Ninja .. -DCMAKE_OSX_ARCHITECTURES=x86_64

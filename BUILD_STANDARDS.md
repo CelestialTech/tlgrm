@@ -55,13 +55,18 @@ Architectures in the fat file: ... are: x86_64 arm64
 | macOS Sequoia (current host) | arm64 | Launch test, MCP mode |
 | macOS Ventura 13.x | x86_64 | Launch test, MCP mode |
 
-### Automated Build Script
+### Build and verify
 
-Use `/Users/pasha/xCode/tlgrm/build_with_extracted_api.sh` which:
-1. Configures with extracted API credentials
-2. Builds Universal binary with correct flags
-3. Automatically verifies architectures
-4. Reports any missing architecture
+There is no automated build script -- this document used to point at
+`build_with_extracted_api.sh`, which does not exist in the repository. Build
+with the command in the section above, then verify before doing anything else:
+
+```bash
+lipo -info out/Release/Tlgrm.app/Contents/MacOS/Tlgrm   # expect: x86_64 arm64
+```
+
+`tools/publish_update.py` refuses to pack a bundle that is not universal, so a
+host-only build fails at packaging rather than shipping.
 
 ### Non-Compliance
 

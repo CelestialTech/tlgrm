@@ -188,6 +188,32 @@ def strip_and_sign(app: Path) -> None:
     print(f"  {before / 1e6:.0f} MB -> {after / 1e6:.0f} MB, re-signed ad-hoc")
 
 
+def require_universal(app: Path) -> None:
+    """Refuse to publish a bundle that is not universal.
+
+    `xcodebuild -scheme ... build` without a destination emits a host-only
+    binary, and nothing downstream notices: Packer signs it happily, the feed
+    advertises both platform keys, and every Mac of the other architecture
+    downloads a package it cannot run. The check is one `lipo` call, so there
+    is no reason for that failure to be discoverable only by a user.
+    """
+    binary = app / "Contents/MacOS" / app.stem
+    proc = subprocess.run(["lipo", "-info", str(binary)],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise SystemExit(f"lipo could not read {binary}:\n{proc.stderr.strip()}")
+    found = proc.stdout.strip()
+    missing = [a for a in ("x86_64", "arm64") if a not in found]
+    if missing:
+        raise SystemExit(
+            f"{binary.name} is not universal -- missing {', '.join(missing)}.\n"
+            f"  lipo says: {found}\n"
+            "Rebuild with -destination 'generic/platform=macOS'. Publishing "
+            "this would tell every Mac of the missing architecture that an "
+            "update exists and then hand it one it cannot run.")
+    print(f"Universal check: {found.split(':')[-1].strip()}")
+
+
 def pack(version: int, app: Path, outdir: Path, arch: str, prefix: str) -> Path:
     """Run Packer for one architecture and return the produced package path."""
     if not PACKER.exists():
@@ -386,6 +412,7 @@ def main() -> None:
 
     packages: dict[str, Path] = {}
     if needs_packages:
+        require_universal(args.app)
         if not args.no_strip:
             strip_and_sign(args.app)
         packages = {

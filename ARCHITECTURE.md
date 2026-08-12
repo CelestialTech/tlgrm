@@ -102,7 +102,7 @@ This project uses a **complementary dual-language architecture** where C++ and P
 
 ### IPC Mechanism: Unix Domain Socket (JSON-RPC)
 
-**Socket Path**: `/tmp/telegram_mcp.sock`
+**Socket Path**: `/tmp/tlgrm_mcp.sock`
 
 **Message Format**:
 ```json
@@ -260,7 +260,7 @@ TELEGRAM_API_HASH=abcdef...
 TELEGRAM_BOT_TOKEN=1234567890:ABC...
 
 # IPC configuration (shared)
-IPC_SOCKET_PATH=/tmp/telegram_mcp.sock
+IPC_SOCKET_PATH=/tmp/tlgrm_mcp.sock
 SQLITE_DB_PATH=/Users/pasha/Library/Application Support/Telegram Desktop/tdata/user.db
 
 # C++ specific
@@ -421,7 +421,7 @@ python src/mcp_server.py --mode standalone
 ```bash
 python src/mcp_server.py --mode bridge
 ```
-- Connects to C++ server via `/tmp/telegram_mcp.sock`
+- Connects to C++ server via `/tmp/tlgrm_mcp.sock`
 - Fast database access via IPC
 - Unlimited queries
 - Use case: Fast queries without AI
@@ -477,7 +477,7 @@ mode = "hybrid"  # standalone | bridge | hybrid
 transport = "stdio"
 
 [ipc]
-cpp_socket_path = "/tmp/telegram_mcp.sock"
+cpp_socket_path = "/tmp/tlgrm_mcp.sock"
 enabled = true
 
 [aiml]

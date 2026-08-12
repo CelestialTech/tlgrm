@@ -101,7 +101,7 @@ cp src/tdesktop_bridge.py src/ipc_client.py
 
 **Changes**:
 - Remove subprocess approach (keep Unix socket only)
-- Align with `/tmp/telegram_mcp.sock` path from C++ server
+- Align with `/tmp/tlgrm_mcp.sock` path from C++ server
 - Add async/await throughout
 
 #### 3.3: Create Main MCP Server
@@ -171,7 +171,7 @@ server_name = "Telegram AI/ML"
 transport = "stdio"
 
 [ipc]
-cpp_socket_path = "/tmp/telegram_mcp.sock"
+cpp_socket_path = "/tmp/tlgrm_mcp.sock"
 timeout_ms = 5000
 ```
 
@@ -198,7 +198,7 @@ python src/mcp_server_aiml.py
 \`\`\`
 
 ## Integration with C++
-Communicates with C++ MCP server via Unix socket (`/tmp/telegram_mcp.sock`)
+Communicates with C++ MCP server via Unix socket (`/tmp/tlgrm_mcp.sock`)
 for fast message retrieval.
 
 ## MCP Tools
