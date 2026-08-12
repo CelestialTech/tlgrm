@@ -53,7 +53,26 @@ mkdir -p "$DMG_OUTPUT_DIR"
 TDATA_ZIP="$HOME/tdata.zip"
 TDATA_TEMP="$DMG_OUTPUT_DIR/tdata_temp"
 
-if [ -f "$TDATA_ZIP" ]; then
+# A tdata directory IS a logged-in Telegram session. Embedding one puts that
+# account into the installer, and postinstall copies it into the home
+# directory of whoever installs the DMG. That is intended only for seeding a
+# specific machine on purpose -- it must never happen because a leftover
+# ~/tdata.zip happened to be sitting there when a release was built.
+#
+# So the presence of the file is no longer enough: say INCLUDE_TDATA=1
+# explicitly, and the DMG that results must not be published.
+if [ -f "$TDATA_ZIP" ] && [ "${INCLUDE_TDATA:-0}" != "1" ]; then
+    echo "========================================="
+    echo "SKIPPING initiate.pkg"
+    echo "========================================="
+    echo "$TDATA_ZIP exists, but embedding it would ship a logged-in"
+    echo "Telegram session to everyone who installs this DMG."
+    echo "Re-run with INCLUDE_TDATA=1 if that is genuinely what you want,"
+    echo "and do NOT publish the resulting DMG."
+    echo ""
+fi
+
+if [ -f "$TDATA_ZIP" ] && [ "${INCLUDE_TDATA:-0}" = "1" ]; then
     echo "========================================="
     echo "Creating initiate.pkg from tdata.zip"
     echo "========================================="
