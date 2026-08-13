@@ -176,13 +176,44 @@ def strip_and_sign(app: Path) -> None:
     if proc.returncode != 0:
         raise SystemExit(f"strip failed:\n{proc.stderr.strip()}")
 
-    proc = subprocess.run(
-        ["codesign", "--force", "--sign", "-", "--options", "runtime",
-         str(app)],
+    # Re-signing REPLACES the entitlements; it does not inherit them. Signing
+    # without --entitlements silently drops camera, microphone and location,
+    # and because --options runtime keeps the hardened runtime on, the OS then
+    # denies exactly those things: voice messages and calls fail on the
+    # shipped build while the developer's own build works. Read the current
+    # entitlements back out of the bundle and sign with them.
+    ents = subprocess.run(
+        ["codesign", "-d", "--entitlements", ":-", str(app)],
         capture_output=True, text=True,
     )
+    entitlements_path = None
+    if ents.returncode == 0 and ents.stdout.strip().startswith("<"):
+        entitlements_path = app.parent / f"{app.stem}.preserved.entitlements"
+        entitlements_path.write_text(ents.stdout)
+        print(f"  preserving {ents.stdout.count('<key>')} entitlement(s)")
+    else:
+        print("  WARNING: could not read entitlements from the bundle; "
+              "signing without them")
+
+    sign = ["codesign", "--force", "--sign", "-", "--options", "runtime"]
+    if entitlements_path:
+        sign += ["--entitlements", str(entitlements_path)]
+    sign.append(str(app))
+    proc = subprocess.run(sign, capture_output=True, text=True)
+    if entitlements_path:
+        entitlements_path.unlink(missing_ok=True)
     if proc.returncode != 0:
         raise SystemExit(f"codesign failed:\n{proc.stderr.strip()}")
+
+    # Prove it rather than assume it: a silent drop here is the whole bug.
+    after = subprocess.run(
+        ["codesign", "-d", "--entitlements", ":-", str(app)],
+        capture_output=True, text=True,
+    )
+    if entitlements_path is not None and "<key>" not in after.stdout:
+        raise SystemExit(
+            "Re-signing dropped the entitlements. Refusing to continue: the "
+            "resulting build would be denied camera, microphone and location.")
 
     after = binary.stat().st_size
     print(f"  {before / 1e6:.0f} MB -> {after / 1e6:.0f} MB, re-signed ad-hoc")
