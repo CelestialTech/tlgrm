@@ -524,6 +524,10 @@ void rewriteSettingsIfNeeded() {
 	}
 }
 
+// Where this client fetches updates over HTTP. Not a default that something
+// else may replace -- the only value, see writeAutoupdatePrefix().
+const auto kUpdateOrigin = "https://updates.71grm.site"_cs;
+
 const QString &AutoupdatePrefix(const QString &replaceWith = {}) {
 	Expects(!Core::UpdaterDisabled());
 
@@ -547,18 +551,54 @@ const QString &readAutoupdatePrefixRaw() {
 	if (!result.isEmpty()) {
 		return result;
 	}
+	// A prefix file written before the origin was pinned holds whatever
+	// Telegram's config said -- td.telegram.org on every existing install.
+	// Reading it back would keep the HTTP checker pointed at the wrong feed
+	// forever, so a foreign value is discarded rather than trusted.
 	QFile f(autoupdatePrefixFile());
 	if (f.open(QIODevice::ReadOnly)) {
-		const auto value = QString::fromUtf8(f.readAll());
-		if (!value.isEmpty()) {
+		static const auto RegExp = QRegularExpression("/+$");
+		auto value = QString::fromUtf8(f.readAll());
+		const auto trimmed = QString(value).replace(RegExp, QString());
+		if (!trimmed.isEmpty() && trimmed == kUpdateOrigin.utf16()) {
 			return AutoupdatePrefix(value);
+		} else if (!trimmed.isEmpty()) {
+			f.close();
+			QFile::remove(autoupdatePrefixFile());
 		}
 	}
-	return AutoupdatePrefix("https://updates.71grm.site");
+	return AutoupdatePrefix(kUpdateOrigin.utf16());
 }
 
+// Upstream lets the server choose where updates come from: every config load
+// carries an `autoupdate_url_prefix`, and Instance::configLoadDone() hands it
+// straight to this function.
+//
+// For this client that is not a setting to accept. Telegram's config names
+// td.telegram.org, which serves Telegram Desktop's releases and will never
+// list a Tlgrm version -- so honouring it silently pointed the HTTP checker at
+// a feed that could only ever answer "no update", while updates.71grm.site was
+// never contacted. It was not visible as a failure: the check succeeded, found
+// nothing, and said nothing. The MTProto path kept working, which is why this
+// survived a live end-to-end verification of the server side.
+//
+// The prefix is therefore pinned. A foreign value is ignored rather than
+// stored, and any prefix file left behind by an earlier build is corrected on
+// the next read.
 void writeAutoupdatePrefix(const QString &prefix) {
 	if (Core::UpdaterDisabled()) {
+		return;
+	}
+	if (prefix.trimmed().isEmpty()) {
+		return;
+	}
+
+	static const auto RegExp = QRegularExpression("/+$");
+	auto pinned = kUpdateOrigin.utf16();
+	auto incoming = QString(prefix).replace(RegExp, QString());
+	if (incoming != pinned) {
+		DEBUG_LOG(("Update Info: ignoring server autoupdate prefix '%1', "
+			"this client updates from %2.").arg(prefix, pinned));
 		return;
 	}
 
