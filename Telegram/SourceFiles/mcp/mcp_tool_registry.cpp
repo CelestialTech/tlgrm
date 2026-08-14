@@ -177,7 +177,8 @@ void Server::registerTools() {
 					{"resume_from_message_id", QJsonObject{
 						{"type", "integer"},
 						{"description", "Resume from this message ID. If omitted, auto-detects from previous export."}
-					}}
+					}},
+					{"messages_written", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{"chat_id"}},
 			}
@@ -418,7 +419,9 @@ void Server::registerTools() {
 					{"output_path", QJsonObject{
 						{"type", "string"},
 						{"description", "Output CSV file path"}
-					}}
+					}},
+					{"format", QJsonObject{{"type", "string"}}},
+					{"period", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"chat_id", "output_path"}},
 			}
@@ -432,7 +435,9 @@ void Server::registerTools() {
 					{"chat_id", QJsonObject{
 						{"type", "integer"},
 						{"description", "Chat ID"}
-					}}
+					}},
+					{"days_back", QJsonObject{{"type", "integer"}}},
+					{"metric", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"chat_id"}},
 			}
@@ -479,7 +484,8 @@ void Server::registerTools() {
 						{"type", "integer"},
 						{"description", "Max messages to index (-1 = all)"},
 						{"default", 1000}
-					}}
+					}},
+					{"rebuild", QJsonObject{{"type", "boolean"}}},
 				}},
 				{"required", QJsonArray{"chat_id"}},
 			}
@@ -497,7 +503,8 @@ void Server::registerTools() {
 					{"num_topics", QJsonObject{
 						{"type", "integer"},
 						{"default", 5}
-					}}
+					}},
+					{"message_limit", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{"chat_id"}},
 			}
@@ -567,7 +574,8 @@ void Server::registerTools() {
 					{"message_id", QJsonObject{
 						{"type", "integer"},
 						{"description", "Message ID to delete"}
-					}}
+					}},
+					{"revoke", QJsonObject{{"type", "boolean"}}},
 				}},
 				{"required", QJsonArray{"chat_id", "message_id"}},
 			}
@@ -710,7 +718,8 @@ void Server::registerTools() {
 						{"type", "array"},
 						{"items", QJsonObject{{"type", "integer"}}},
 						{"description", "List of message IDs"}
-					}}
+					}},
+					{"revoke", QJsonObject{{"type", "boolean"}}},
 				}},
 				{"required", QJsonArray{"chat_id", "message_ids"}},
 			}
@@ -752,7 +761,8 @@ void Server::registerTools() {
 						{"type", "array"},
 						{"items", QJsonObject{{"type", "integer"}}},
 						{"description", "List of message IDs"}
-					}}
+					}},
+					{"notify", QJsonObject{{"type", "boolean"}}},
 				}},
 				{"required", QJsonArray{"chat_id", "message_ids"}},
 			}
@@ -854,7 +864,9 @@ void Server::registerTools() {
 					{"new_text", QJsonObject{
 						{"type", "string"},
 						{"description", "New message text"}
-					}}
+					}},
+					{"new_pattern", QJsonObject{{"type", "string"}}},
+					{"new_time", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"schedule_id", "new_text"}},
 			}
@@ -1089,7 +1101,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"transcription_id", QJsonObject{{"type", "string"}, {"description", "Transcription job ID"}}}
+					{"transcription_id", QJsonObject{{"type", "string"}, {"description", "Transcription job ID"}}},
+					{"message_id", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{"transcription_id"}}
 			}
@@ -1104,7 +1117,8 @@ void Server::registerTools() {
 				{"properties", QJsonObject{
 					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID"}}},
 					{"message_id", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Message IDs to translate"}}},
-					{"target_language", QJsonObject{{"type", "string"}, {"description", "Target language code"}}}
+					{"target_language", QJsonObject{{"type", "string"}, {"description", "Target language code"}}},
+					{"source_language", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"chat_id", "message_id", "target_language"}}
 			}
@@ -1137,7 +1151,8 @@ void Server::registerTools() {
 				{"properties", QJsonObject{
 					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID"}}},
 					{"message_id", QJsonObject{{"type", "integer"}, {"description", "Message ID"}}},
-					{"tag", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "string"}}}, {"description", "Tags to add"}}}
+					{"tag", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "string"}}}, {"description", "Tags to add"}}},
+					{"color", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"chat_id", "message_id", "tag"}}
 			}
@@ -1157,7 +1172,10 @@ void Server::registerTools() {
 		Tool{
 			"list_tags",
 			"List all tags with usage counts",
-			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}}},
+					{"message_id", QJsonObject{{"type", "integer"}}},
+				}}}
 		},
 		Tool{
 			"delete_tag",
@@ -1165,7 +1183,9 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"tag", QJsonObject{{"type", "string"}, {"description", "Tag to delete"}}}
+					{"tag", QJsonObject{{"type", "string"}, {"description", "Tag to delete"}}},
+					{"chat_id", QJsonObject{{"type", "integer"}}},
+					{"message_id", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{"tag"}}
 			}
@@ -1178,8 +1198,9 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"hide_sponsored", QJsonObject{{"type", "boolean"}, {"default", true}}},
-					{"hide_promoted", QJsonObject{{"type", "boolean"}, {"default", true}}}
+					{"enabled", QJsonObject{{"type", "boolean"}}},
+					{"exclude_chats", QJsonObject{{"type", "array"}}},
+					{"keywords", QJsonObject{{"type", "array"}}},
 				}}
 			}
 		},
@@ -1189,7 +1210,6 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 100}}}
 				}}
 			}
 		},
@@ -1203,7 +1223,9 @@ void Server::registerTools() {
 				{"properties", QJsonObject{
 					{"rule_name", QJsonObject{{"type", "string"}, {"description", "Rule name"}}},
 					{"conditions", QJsonObject{{"type", "object"}, {"description", "Conditions JSON"}}},
-					{"actions", QJsonObject{{"type", "object"}, {"description", "Actions JSON"}}}
+					{"actions", QJsonObject{{"type", "object"}, {"description", "Actions JSON"}}},
+					{"chat_id", QJsonObject{{"type", "integer"}}},
+					{"rule_type", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"rule_name", "conditions", "actions"}}
 			}
@@ -1211,12 +1233,17 @@ void Server::registerTools() {
 		Tool{
 			"list_chat_rules",
 			"List all chat management rules",
-			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}}},
+				}}}
 		},
 		Tool{
 			"execute_chat_rules",
 			"Manually execute chat rules",
-			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}}},
+					{"test_message", QJsonObject{{"type", "string"}}},
+				}}}
 		},
 		Tool{
 			"delete_chat_rule",
@@ -1224,7 +1251,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"rule_id", QJsonObject{{"type", "integer"}, {"description", "Rule ID"}}}
+					{"rule_id", QJsonObject{{"type", "integer"}, {"description", "Rule ID"}}},
+					{"rule_name", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"rule_id"}}
 			}
@@ -1240,7 +1268,8 @@ void Server::registerTools() {
 					{"title", QJsonObject{{"type", "string"}, {"description", "Task title"}}},
 					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Associated chat ID"}}},
 					{"message_id", QJsonObject{{"type", "integer"}, {"description", "Associated message ID"}}},
-					{"due_date", QJsonObject{{"type", "integer"}, {"description", "Due date (Unix timestamp)"}}}
+					{"due_date", QJsonObject{{"type", "integer"}, {"description", "Due date (Unix timestamp)"}}},
+					{"priority", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{"title"}}
 			}
@@ -1252,7 +1281,8 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"status", QJsonObject{{"type", "string"}, {"description", "Filter by status (pending, completed)"}}},
-					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Filter by chat"}}}
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Filter by chat"}}},
+					{"limit", QJsonObject{{"type", "integer"}}},
 				}}
 			}
 		},
@@ -1279,7 +1309,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"category", QJsonObject{{"type", "string"}, {"description", "Filter by category"}}}
+					{"category", QJsonObject{{"type", "string"}, {"description", "Filter by category"}}},
+					{"limit", QJsonObject{{"type", "integer"}}},
 				}}
 			}
 		},
@@ -1331,7 +1362,7 @@ void Server::registerTools() {
 					{"enabled", QJsonObject{{"type", "boolean"}}},
 					{"message", QJsonObject{{"type", "string"}, {"description", "Greeting message text"}}},
 					{"delay_seconds", QJsonObject{{"type", "integer"}, {"default", 0}}},
-					{"only_first_message", QJsonObject{{"type", "boolean"}, {"default", true}}}
+					{"trigger_chats", QJsonObject{{"type", "array"}}},
 				}},
 				{"required", QJsonArray{"enabled", "message"}}
 			}
@@ -1344,7 +1375,9 @@ void Server::registerTools() {
 		Tool{
 			"test_greeting",
 			"Test the greeting message (send to yourself)",
-			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}}},
+				}}}
 		},
 		Tool{
 			"get_greeting_stats",
@@ -1379,7 +1412,6 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"message", QJsonObject{{"type", "string"}, {"description", "Away message"}}},
-					{"duration_hours", QJsonObject{{"type", "integer"}, {"description", "Duration in hours"}}}
 				}},
 				{"required", QJsonArray{"message"}}
 			}
@@ -1446,10 +1478,10 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"enabled", QJsonObject{{"type", "boolean"}}},
-					{"system_prompt", QJsonObject{{"type", "string"}, {"description", "System prompt for AI"}}},
-					{"model", QJsonObject{{"type", "string"}, {"default", "claude"}}},
-					{"max_tokens", QJsonObject{{"type", "integer"}, {"default", 1000}}}
+					{"name", QJsonObject{{"type", "string"}}},
+					{"personality", QJsonObject{{"type", "string"}}},
+					{"response_style", QJsonObject{{"type", "string"}}},
+					{"trigger_keywords", QJsonObject{{"type", "array"}}},
 				}},
 				{"required", QJsonArray{}}
 			}
@@ -1491,7 +1523,9 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"training_data", QJsonObject{{"type", "array"}, {"description", "Array of {input, output} examples"}}}
+					{"training_data", QJsonObject{{"type", "array"}, {"description", "Array of {input, output} examples"}}},
+					{"category", QJsonObject{{"type", "string"}}},
+					{"test_after_train", QJsonObject{{"type", "boolean"}}},
 				}},
 				{"required", QJsonArray{"training_data"}}
 			}
@@ -1505,9 +1539,9 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"name", QJsonObject{{"type", "string"}, {"description", "Persona name"}}},
-					{"provider", QJsonObject{{"type", "string"}, {"description", "TTS provider (elevenlabs, coqui)"}}},
 					{"voice_id", QJsonObject{{"type", "string"}, {"description", "Voice ID"}}},
-					{"settings", QJsonObject{{"type", "object"}, {"description", "Voice settings"}}}
+					{"pitch", QJsonObject{{"type", "number"}}},
+					{"speed", QJsonObject{{"type", "number"}}},
 				}},
 				{"required", QJsonArray{"name", "voice_id"}}
 			}
@@ -1519,7 +1553,9 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"text", QJsonObject{{"type", "string"}, {"description", "Text to speak"}}},
-					{"preset", QJsonObject{{"type", "string"}, {"description", "Voice preset name"}}}
+					{"pitch", QJsonObject{{"type", "number"}}},
+					{"speed", QJsonObject{{"type", "number"}}},
+					{"voice", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"text"}}
 			}
@@ -1531,7 +1567,8 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID"}}},
-					{"text", QJsonObject{{"type", "string"}, {"description", "Text to speak"}}}
+					{"text", QJsonObject{{"type", "string"}, {"description", "Text to speak"}}},
+					{"persona", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"chat_id", "text"}}
 			}
@@ -1548,7 +1585,8 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"name", QJsonObject{{"type", "string"}, {"description", "Clone name"}}},
-					{"audio_path", QJsonObject{{"type", "string"}, {"description", "Path to audio sample"}}}
+					{"audio_path", QJsonObject{{"type", "string"}, {"description", "Path to audio sample"}}},
+					{"audio_sample", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"name", "audio_path"}}
 			}
@@ -1562,9 +1600,7 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"name", QJsonObject{{"type", "string"}, {"description", "Avatar name"}}},
-					{"provider", QJsonObject{{"type", "string"}, {"description", "TTV provider (heygen, d-id)"}}},
 					{"file_path", QJsonObject{{"type", "string"}, {"description", "Avatar image/video path"}}},
-					{"settings", QJsonObject{{"type", "object"}, {"description", "Avatar settings"}}}
 				}},
 				{"required", QJsonArray{"name", "file_path"}}
 			}
@@ -1576,7 +1612,9 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"text", QJsonObject{{"type", "string"}, {"description", "Text to speak"}}},
-					{"preset", QJsonObject{{"type", "string"}, {"description", "Avatar preset name"}}}
+					{"preset", QJsonObject{{"type", "string"}, {"description", "Avatar preset name"}}},
+					{"speed", QJsonObject{{"type", "number"}}},
+					{"voice", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"text"}}
 			}
@@ -1588,7 +1626,10 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID"}}},
-					{"text", QJsonObject{{"type", "string"}, {"description", "Text to speak"}}}
+					{"text", QJsonObject{{"type", "string"}, {"description", "Text to speak"}}},
+					{"preset", QJsonObject{{"type", "string"}}},
+					{"speed", QJsonObject{{"type", "number"}}},
+					{"voice", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"chat_id", "text"}}
 			}
@@ -1693,7 +1734,8 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"query", QJsonObject{{"type", "string"}, {"description", "Search query"}}},
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}}
+					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}},
+					{"category", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"query"}}
 			}
@@ -1706,8 +1748,6 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"direction", QJsonObject{{"type", "string"}, {"description", "received or sent"}}},
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}}
 				}}
 			}
 		},
@@ -1725,7 +1765,9 @@ void Server::registerTools() {
 		Tool{
 			"get_gift_analytics",
 			"Get reaction analytics (this returns reaction data, not gift data)",
-			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+					{"period", QJsonObject{{"type", "string"}}},
+				}}}
 		},
 		Tool{
 			"send_stars",
@@ -1758,7 +1800,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"subscription_id", QJsonObject{{"type", "string"}, {"description", "Subscription ID"}}}
+					{"subscription_id", QJsonObject{{"type", "string"}, {"description", "Subscription ID"}}},
+					{"channel_id", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{"subscription_id"}}
 			}
@@ -1787,8 +1830,7 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"channel_id", QJsonObject{{"type", "integer"}}},
-					{"period", QJsonObject{{"type", "string"}, {"description", "week, month, year"}}}
+					{"days", QJsonObject{{"type", "integer"}}},
 				}}
 			}
 		},
@@ -1798,7 +1840,7 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"channel_id", QJsonObject{{"type", "integer"}}}
+					{"period", QJsonObject{{"type", "string"}}},
 				}}
 			}
 		},
@@ -1808,7 +1850,6 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"channel_id", QJsonObject{{"type", "integer"}}}
 				}}
 			}
 		},
@@ -1825,7 +1866,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"status", QJsonObject{{"type", "string"}, {"description", "active, completed, all"}}}
+					{"status", QJsonObject{{"type", "string"}, {"description", "active, completed, all"}}},
+					{"limit", QJsonObject{{"type", "integer"}}},
 				}}
 			}
 		},
@@ -1864,7 +1906,12 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"amount", QJsonObject{{"type", "number"}, {"description", "Amount"}}},
-					{"currency", QJsonObject{{"type", "string"}, {"description", "Currency (TON, etc)"}}}
+					{"currency", QJsonObject{{"type", "string"}, {"description", "Currency (TON, etc)"}}},
+					{"action", QJsonObject{{"type", "string"}}},
+					{"comment", QJsonObject{{"type", "string"}}},
+					{"limit", QJsonObject{{"type", "integer"}}},
+					{"mnemonics", QJsonObject{{"type", "string"}}},
+					{"recipient", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"amount", "currency"}}
 			}
@@ -1877,9 +1924,9 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"category", QJsonObject{{"type", "string"}, {"description", "Category name"}}},
-					{"amount", QJsonObject{{"type", "number"}, {"description", "Budget amount"}}},
-					{"period", QJsonObject{{"type", "string"}, {"description", "daily, weekly, monthly"}}}
+					{"daily_limit", QJsonObject{{"type", "number"}}},
+					{"monthly_limit", QJsonObject{{"type", "number"}}},
+					{"weekly_limit", QJsonObject{{"type", "number"}}},
 				}},
 				{"required", QJsonArray{}}
 			}
@@ -1901,8 +1948,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"threshold_percentage", QJsonObject{{"type", "number"}, {"description", "Alert at this % of budget"}}},
-					{"enabled", QJsonObject{{"type", "boolean"}}}
+					{"threshold", QJsonObject{{"type", "number"}}},
+					{"type", QJsonObject{{"type", "string"}}},
 				}}
 			}
 		},
@@ -1912,9 +1959,7 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"start_date", QJsonObject{{"type", "integer"}}},
-					{"end_date", QJsonObject{{"type", "integer"}}},
-					{"format", QJsonObject{{"type", "string"}, {"description", "pdf, csv, json"}}}
+					{"period", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{}}
 			}
@@ -1940,8 +1985,6 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"type", QJsonObject{{"type", "string"}, {"description", "regular, unique, limited"}}},
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}}
 				}}
 			}
 		},
@@ -1951,7 +1994,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"gift_type", QJsonObject{{"type", "integer"}, {"description", "Gift ID"}}}
+					{"gift_type", QJsonObject{{"type", "integer"}, {"description", "Gift ID"}}},
+					{"days", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{"gift_type"}}
 			}
@@ -1980,7 +2024,9 @@ void Server::registerTools() {
 				{"properties", QJsonObject{
 					{"recipient_id", QJsonObject{{"type", "integer"}, {"description", "Recipient user ID"}}},
 					{"gift_id", QJsonObject{{"type", "integer"}, {"description", "Gift ID"}}},
-					{"message", QJsonObject{{"type", "string"}, {"description", "Optional message"}}}
+					{"message", QJsonObject{{"type", "string"}, {"description", "Optional message"}}},
+					{"anonymous", QJsonObject{{"type", "boolean"}}},
+					{"stars_amount", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{"recipient_id", "gift_id"}}
 			}
@@ -1991,7 +2037,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"gift_id", QJsonObject{{"type", "integer"}, {"description", "Gift ID"}}}
+					{"gift_id", QJsonObject{{"type", "integer"}, {"description", "Gift ID"}}},
+					{"limit", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{}}
 			}
@@ -2056,7 +2103,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}}
+					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}},
+					{"status", QJsonObject{{"type", "string"}}},
 				}}
 			}
 		},
@@ -2091,7 +2139,10 @@ void Server::registerTools() {
 		Tool{
 			"get_auction_history",
 			"Get user's auction history",
-			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+					{"limit", QJsonObject{{"type", "integer"}}},
+					{"status", QJsonObject{{"type", "string"}}},
+				}}}
 		},
 
 		// Marketplace - 5 tools
@@ -2113,7 +2164,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"period", QJsonObject{{"type", "string"}, {"description", "day, week, month"}}}
+					{"days", QJsonObject{{"type", "integer"}}},
+					{"gift_type", QJsonObject{{"type", "string"}}},
 				}}
 			}
 		},
@@ -2124,7 +2176,8 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"gift_id", QJsonObject{{"type", "integer"}, {"description", "Gift ID"}}},
-					{"price", QJsonObject{{"type", "number"}, {"description", "Sale price"}}}
+					{"price", QJsonObject{{"type", "number"}, {"description", "Sale price"}}},
+					{"category", QJsonObject{{"type", "string"}}},
 				}},
 				{"required", QJsonArray{"gift_id", "price"}}
 			}
@@ -2136,7 +2189,8 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"slug", QJsonObject{{"type", "integer"}, {"description", "Listing ID"}}},
-					{"price", QJsonObject{{"type", "number"}, {"description", "New price"}}}
+					{"price", QJsonObject{{"type", "number"}, {"description", "New price"}}},
+					{"msg_id", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{"slug", "price"}}
 			}
@@ -2160,7 +2214,6 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}}
 				}}
 			}
 		},
@@ -2170,7 +2223,6 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}}
 				}}
 			}
 		},
@@ -2198,7 +2250,8 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"enabled", QJsonObject{{"type", "boolean"}}},
-					{"min_stars", QJsonObject{{"type", "integer"}, {"description", "Minimum stars required"}}}
+					{"chat_id", QJsonObject{{"type", "integer"}}},
+					{"price", QJsonObject{{"type", "integer"}}},
 				}}
 			}
 		},
@@ -2213,7 +2266,6 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}}
 				}}
 			}
 		},
@@ -2225,7 +2277,7 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"app_id", QJsonObject{{"type", "string"}, {"description", "App ID (optional)"}}}
+					{"miniapp_id", QJsonObject{{"type", "string"}}},
 				}}
 			}
 		},
@@ -2235,8 +2287,6 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"app_id", QJsonObject{{"type", "string"}}},
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}}
 				}}
 			}
 		},
@@ -2247,8 +2297,7 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"miniapp_id", QJsonObject{{"type", "string"}, {"description", "App ID"}}},
-					{"daily_limit", QJsonObject{{"type", "number"}}},
-					{"monthly_limit", QJsonObject{{"type", "number"}}}
+					{"amount", QJsonObject{{"type", "number"}}},
 				}},
 				{"required", QJsonArray{"miniapp_id"}}
 			}
@@ -2276,8 +2325,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"action", QJsonObject{{"type", "string"}, {"description", "Action type"}}},
-					{"amount", QJsonObject{{"type", "number"}}}
+					{"additional_reactions", QJsonObject{{"type", "integer"}}},
+					{"additional_stars", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{}}
 			}
@@ -2296,7 +2345,7 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"msg_ids", QJsonObject{{"type", "integer"}}},
-					{"visible", QJsonObject{{"type", "boolean"}}}
+					{"chat_id", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{"msg_ids"}}
 			}
@@ -2307,7 +2356,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"collection_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Ordered list of gift IDs"}}}
+					{"collection_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Ordered list of gift IDs"}}},
+					{"chat_id", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{"collection_ids"}}
 			}
@@ -2318,7 +2368,8 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"enabled", QJsonObject{{"type", "boolean"}}}
+					{"enabled", QJsonObject{{"type", "boolean"}}},
+					{"chat_id", QJsonObject{{"type", "integer"}}},
 				}},
 				{"required", QJsonArray{"enabled"}}
 			}
@@ -2331,8 +2382,6 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"budget", QJsonObject{{"type", "number"}, {"description", "Available budget"}}},
-					{"risk_level", QJsonObject{{"type", "string"}, {"description", "low, medium, high"}}}
 				}}
 			}
 		},
@@ -2343,8 +2392,9 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"strategy", QJsonObject{{"type", "object"}, {"description", "Strategy parameters"}}},
-					{"start_date", QJsonObject{{"type", "integer"}}},
-					{"end_date", QJsonObject{{"type", "integer"}}}
+					{"days", QJsonObject{{"type", "integer"}}},
+					{"gift_type", QJsonObject{{"type", "string"}}},
+					{"initial_investment", QJsonObject{{"type", "number"}}},
 				}},
 				{"required", QJsonArray{"strategy"}}
 			}
@@ -2375,7 +2425,6 @@ void Server::registerTools() {
 				{"properties", QJsonObject{
 					{"auction_id", QJsonObject{{"type", "integer"}, {"description", "Gift ID"}}},
 					{"price_threshold", QJsonObject{{"type", "number"}, {"description", "Maximum bid"}}},
-					{"minutes_before", QJsonObject{{"type", "integer"}, {"default", 5}}}
 				}},
 				{"required", QJsonArray{"auction_id", "price_threshold"}}
 			}
@@ -2386,8 +2435,9 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"type", QJsonObject{{"type", "string"}, {"description", "usernames, numbers, gifts"}}},
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}}
+					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}},
+					{"category", QJsonObject{{"type", "string"}}},
+					{"sort_by", QJsonObject{{"type", "string"}}},
 				}}
 			}
 		},
@@ -2452,19 +2502,6 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"min_delay_ms", QJsonObject{{"type", "integer"}, {"description", "Min delay between batches (ms)"}}},
-					{"max_delay_ms", QJsonObject{{"type", "integer"}, {"description", "Max delay between batches (ms)"}}},
-					{"burst_pause_ms", QJsonObject{{"type", "integer"}, {"description", "Pause after burst (ms)"}}},
-					{"long_pause_ms", QJsonObject{{"type", "integer"}, {"description", "Occasional long pause (ms)"}}},
-					{"min_batch_size", QJsonObject{{"type", "integer"}, {"description", "Min messages per batch"}}},
-					{"max_batch_size", QJsonObject{{"type", "integer"}, {"description", "Max messages per batch"}}},
-					{"batches_before_pause", QJsonObject{{"type", "integer"}, {"description", "Batches before burst pause"}}},
-					{"max_messages_per_day", QJsonObject{{"type", "integer"}, {"description", "Daily limit"}}},
-					{"max_messages_per_hour", QJsonObject{{"type", "integer"}, {"description", "Hourly limit"}}},
-					{"respect_active_hours", QJsonObject{{"type", "boolean"}, {"description", "Only run during typical hours"}}},
-					{"active_hour_start", QJsonObject{{"type", "integer"}, {"description", "Start hour (0-23)"}}},
-					{"active_hour_end", QJsonObject{{"type", "integer"}, {"description", "End hour (0-23)"}}},
-					{"export_format", QJsonObject{{"type", "string"}, {"description", "html, markdown, or both"}}}
 				}}
 			}
 		},
@@ -2475,7 +2512,6 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID to queue"}}},
-					{"priority", QJsonObject{{"type", "integer"}, {"description", "Queue priority (lower = higher)"}, {"default", 0}}}
 				}},
 				{"required", QJsonArray{"chat_id"}}
 			}
@@ -2498,12 +2534,12 @@ void Server::registerTools() {
 		tool.name = "list_deleted_accounts";
 		tool.description = "Scan and list all chats with deleted Telegram accounts";
 
-		QJsonObject includeArchiveProp;
-		includeArchiveProp["type"] = "boolean";
-		includeArchiveProp["description"] = "Also scan the archive folder (default: true)";
-
+		// No parameters. An `include_archive_folder` toggle used to be
+		// advertised here, but toolListDeletedAccounts never reads its
+		// arguments and GradualArchiver::scanDeletedAccounts() takes none --
+		// the scan scope is fixed, so the toggle could not have had any
+		// effect whichever way it was set.
 		QJsonObject properties;
-		properties["include_archive_folder"] = includeArchiveProp;
 
 		QJsonObject schema;
 		schema["type"] = "object";
@@ -2642,7 +2678,6 @@ void Server::registerTools() {
 			"Get transcription of a voice message",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 				{"message_id", QJsonObject{{"type", "integer"}, {"description", "Voice message ID to transcribe"}}},
-				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat containing the voice message"}}}
 			}}, {"required", QJsonArray{"message_id", "message_id"}}}
 		},
 		Tool{
@@ -2651,8 +2686,9 @@ void Server::registerTools() {
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 				{"message_id", QJsonObject{{"type", "integer"}, {"description", "Message ID to translate"}}},
 				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat containing the message"}}},
-				{"target_language", QJsonObject{{"type", "string"}, {"description", "Target language code (e.g. en, ru, es)"}}}
-			}}, {"required", QJsonArray{"message_id", "chat_id", "target_language"}}}
+				{"target_language", QJsonObject{{"type", "string"}, {"description", "Target language code (e.g. en, ru, es)"}}},
+					{"source_language", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"message_id", "chat_id", "target_language"}}}
 		},
 		Tool{
 			"list_voice_personas",
@@ -2666,8 +2702,10 @@ void Server::registerTools() {
 			"Set an away message for the account",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 				{"message", QJsonObject{{"type", "string"}, {"description", "Away message text"}}},
-				{"enabled", QJsonObject{{"type", "boolean"}, {"description", "Enable or disable away message"}}}
-			}}, {"required", QJsonArray{"message"}}}
+				{"enabled", QJsonObject{{"type", "boolean"}, {"description", "Enable or disable away message"}}},
+					{"end_time", QJsonObject{{"type", "string"}}},
+					{"start_time", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"message"}}}
 		},
 		Tool{
 			"check_business_status",
@@ -2681,8 +2719,11 @@ void Server::registerTools() {
 			"Create a task from an existing message",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 				{"message_id", QJsonObject{{"type", "integer"}, {"description", "Message ID to create task from"}}},
-				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat containing the message"}}}
-			}}, {"required", QJsonArray{"message_id", "chat_id"}}}
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat containing the message"}}},
+					{"due_date", QJsonObject{{"type", "string"}}},
+					{"priority", QJsonObject{{"type", "integer"}}},
+					{"title", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"message_id", "chat_id"}}}
 		},
 
 		// ===== PROFILE SETTINGS TOOLS =====
@@ -2717,8 +2758,10 @@ void Server::registerTools() {
 			"update_profile_phone",
 			"Initiate phone number change (requires SMS verification)",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-				{"phone", QJsonObject{{"type", "string"}, {"description", "New phone number"}}}
-			}}, {"required", QJsonArray{"phone"}}}
+				{"phone", QJsonObject{{"type", "string"}, {"description", "New phone number"}}},
+					{"code", QJsonObject{{"type", "string"}}},
+					{"phone_code_hash", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"phone"}}}
 		},
 
 		// ===== PRIVACY SETTINGS TOOLS =====
@@ -2821,8 +2864,9 @@ void Server::registerTools() {
 		Tool{"add_message_tag", "Add a tag to a message", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID"}}},
 			{"message_id", QJsonObject{{"type", "integer"}, {"description", "Message ID"}}},
-			{"tag", QJsonObject{{"type", "string"}, {"description", "Tag name"}}}
-		}}, {"required", QJsonArray{"chat_id", "message_id", "tag"}}}},
+			{"tag", QJsonObject{{"type", "string"}, {"description", "Tag name"}}},
+					{"color", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"chat_id", "message_id", "tag"}}}},
 		Tool{"remove_message_tag", "Remove a tag from a message", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID"}}},
 			{"message_id", QJsonObject{{"type", "integer"}, {"description", "Message ID"}}},
@@ -2834,16 +2878,19 @@ void Server::registerTools() {
 		}}, {"required", QJsonArray{"chat_id", "message_id"}}}},
 		Tool{"search_by_tag", "Search messages by tag", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"tag", QJsonObject{{"type", "string"}, {"description", "Tag to search for"}}},
-			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Optional chat filter"}}}
-		}}, {"required", QJsonArray{"tag"}}}},
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Optional chat filter"}}},
+					{"limit", QJsonObject{{"type", "integer"}}},
+				}}, {"required", QJsonArray{"tag"}}}},
 		Tool{"get_tag_suggestions", "Get tag suggestions for a message", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"text", QJsonObject{{"type", "string"}, {"description", "Message text to analyze"}}}
-		}}, {"required", QJsonArray{"text"}}}},
+			{"text", QJsonObject{{"type", "string"}, {"description", "Message text to analyze"}}},
+					{"limit", QJsonObject{{"type", "integer"}}},
+				}}, {"required", QJsonArray{"text"}}}},
 
 		// --- Translation ---
 		Tool{"get_translation_history", "Get recent translations", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"limit", QJsonObject{{"type", "integer"}, {"description", "Max results"}, {"default", 50}}}
-		}}}},
+			{"limit", QJsonObject{{"type", "integer"}, {"description", "Max results"}, {"default", 50}}},
+					{"target_language", QJsonObject{{"type", "string"}}},
+				}}}},
 
 		// --- Ad Filter ---
 		Tool{"get_ad_filter_stats", "Get ad filtering statistics", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
@@ -2854,8 +2901,11 @@ void Server::registerTools() {
 		}}}},
 		Tool{"set_chat_rules", "Set chat automation rules", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID"}}},
-			{"rules", QJsonObject{{"type", "object"}, {"description", "Rules configuration"}}}
-		}}, {"required", QJsonArray{"chat_id"}}}},
+					{"actions", QJsonObject{{"type", "object"}}},
+					{"conditions", QJsonObject{{"type", "object"}}},
+					{"rule_name", QJsonObject{{"type", "string"}}},
+					{"rule_type", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"chat_id"}}}},
 		Tool{"test_chat_rules", "Test chat rules against sample text", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID"}}},
 			{"test_message", QJsonObject{{"type", "string"}, {"description", "Test message"}}}
@@ -2864,8 +2914,10 @@ void Server::registerTools() {
 		// --- Quick Replies ---
 		Tool{"update_quick_reply", "Update an existing quick reply", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"id", QJsonObject{{"type", "integer"}, {"description", "Quick reply ID"}}},
-			{"text", QJsonObject{{"type", "string"}, {"description", "New reply text"}}}
-		}}, {"required", QJsonArray{"id", "text"}}}},
+			{"text", QJsonObject{{"type", "string"}, {"description", "New reply text"}}},
+					{"category", QJsonObject{{"type", "string"}}},
+					{"shortcut", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"id", "text"}}}},
 		Tool{"use_quick_reply", "Send a quick reply to a chat", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"shortcut", QJsonObject{{"type", "string"}, {"description", "Quick reply shortcut"}}},
 			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat to send to"}}}
@@ -2874,8 +2926,10 @@ void Server::registerTools() {
 		// --- Greeting/Away ---
 		Tool{"set_greeting_message", "Configure greeting message", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"message", QJsonObject{{"type", "string"}, {"description", "Greeting text"}}},
-			{"enabled", QJsonObject{{"type", "boolean"}, {"description", "Enable/disable"}}}
-		}}, {"required", QJsonArray{"message"}}}},
+			{"enabled", QJsonObject{{"type", "boolean"}, {"description", "Enable/disable"}}},
+					{"delay_seconds", QJsonObject{{"type", "integer"}}},
+					{"trigger_chats", QJsonObject{{"type", "array"}}},
+				}}, {"required", QJsonArray{"message"}}}},
 		Tool{"get_greeting_message", "Get current greeting configuration", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
 		Tool{"disable_greeting", "Disable greeting message", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
 		Tool{"test_away", "Test away message configuration", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
@@ -2887,8 +2941,10 @@ void Server::registerTools() {
 		// --- AI Chatbot ---
 		Tool{"configure_chatbot", "Configure AI chatbot settings", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"name", QJsonObject{{"type", "string"}, {"description", "Chatbot name"}}},
-			{"personality", QJsonObject{{"type", "string"}, {"description", "Personality style"}}}
-		}}, {"required", QJsonArray{"name"}}}},
+			{"personality", QJsonObject{{"type", "string"}, {"description", "Personality style"}}},
+					{"response_style", QJsonObject{{"type", "string"}}},
+					{"trigger_keywords", QJsonObject{{"type", "array"}}},
+				}}, {"required", QJsonArray{"name"}}}},
 		Tool{"test_chatbot", "Test chatbot with sample input", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"input", QJsonObject{{"type", "string"}, {"description", "Test message"}}}
 		}}, {"required", QJsonArray{"input"}}}},
@@ -2897,23 +2953,32 @@ void Server::registerTools() {
 		// --- TTS/Video ---
 		Tool{"text_to_speech", "Convert text to speech audio", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"text", QJsonObject{{"type", "string"}, {"description", "Text to convert"}}},
-			{"voice", QJsonObject{{"type", "string"}, {"description", "Voice preset name"}}}
-		}}, {"required", QJsonArray{"text"}}}},
+			{"voice", QJsonObject{{"type", "string"}, {"description", "Voice preset name"}}},
+					{"pitch", QJsonObject{{"type", "number"}}},
+					{"speed", QJsonObject{{"type", "number"}}},
+				}}, {"required", QJsonArray{"text"}}}},
 		Tool{"text_to_video", "Generate video circle from text", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"text", QJsonObject{{"type", "string"}, {"description", "Text content"}}},
-			{"avatar", QJsonObject{{"type", "string"}, {"description", "Avatar preset"}}}
-		}}, {"required", QJsonArray{"text"}}}},
+					{"preset", QJsonObject{{"type", "string"}}},
+					{"speed", QJsonObject{{"type", "number"}}},
+					{"voice", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"text"}}}},
 
 		// --- Auto Reply ---
 		Tool{"create_auto_reply_rule", "Create auto-reply rule", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"triggers", QJsonObject{{"type", "string"}, {"description", "Trigger keyword or pattern"}}},
-			{"response", QJsonObject{{"type", "string"}, {"description", "Auto-reply text"}}}
-		}}, {"required", QJsonArray{"triggers", "response"}}}},
+			{"response", QJsonObject{{"type", "string"}, {"description", "Auto-reply text"}}},
+					{"name", QJsonObject{{"type", "string"}}},
+					{"priority", QJsonObject{{"type", "integer"}}},
+				}}, {"required", QJsonArray{"triggers", "response"}}}},
 		Tool{"list_auto_reply_rules", "List all auto-reply rules", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
 		Tool{"update_auto_reply_rule", "Update an auto-reply rule", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"rule_id", QJsonObject{{"type", "integer"}, {"description", "Rule ID"}}},
-			{"response", QJsonObject{{"type", "string"}, {"description", "New response text"}}}
-		}}, {"required", QJsonArray{"rule_id"}}}},
+			{"response", QJsonObject{{"type", "string"}, {"description", "New response text"}}},
+					{"enabled", QJsonObject{{"type", "boolean"}}},
+					{"name", QJsonObject{{"type", "string"}}},
+					{"triggers", QJsonObject{{"type", "object"}}},
+				}}, {"required", QJsonArray{"rule_id"}}}},
 		Tool{"delete_auto_reply_rule", "Delete an auto-reply rule", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"rule_id", QJsonObject{{"type", "integer"}, {"description", "Rule ID"}}}
 		}}, {"required", QJsonArray{"rule_id"}}}},
@@ -2925,8 +2990,9 @@ void Server::registerTools() {
 		// --- Gift Collections ---
 		Tool{"create_gift_collection", "Create a gift collection", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"name", QJsonObject{{"type", "string"}, {"description", "Collection name"}}},
-			{"description", QJsonObject{{"type", "string"}, {"description", "Collection description"}}}
-		}}, {"required", QJsonArray{"name"}}}},
+			{"description", QJsonObject{{"type", "string"}, {"description", "Collection description"}}},
+					{"public", QJsonObject{{"type", "boolean"}}},
+				}}, {"required", QJsonArray{"name"}}}},
 		Tool{"add_to_collection", "Add a gift to a collection", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"collection_id", QJsonObject{{"type", "integer"}, {"description", "Collection ID"}}},
 			{"gift_id", QJsonObject{{"type", "string"}, {"description", "Gift identifier"}}}
@@ -2943,15 +3009,17 @@ void Server::registerTools() {
 		// --- Auctions ---
 		Tool{"create_gift_auction", "Create an auction for a gift", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"gift_id", QJsonObject{{"type", "string"}, {"description", "Gift to auction"}}},
-			{"starting_bid", QJsonObject{{"type", "integer"}, {"description", "Starting bid in stars"}}}
-		}}, {"required", QJsonArray{"gift_id", "starting_bid"}}}},
+			{"starting_bid", QJsonObject{{"type", "integer"}, {"description", "Starting bid in stars"}}},
+					{"duration_hours", QJsonObject{{"type", "integer"}}},
+				}}, {"required", QJsonArray{"gift_id", "starting_bid"}}}},
 		Tool{"place_bid", "Place a bid on an auction", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"auction_id", QJsonObject{{"type", "string"}, {"description", "Auction ID"}}},
 			{"bid_amount", QJsonObject{{"type", "integer"}, {"description", "Bid amount in stars"}}}
 		}}, {"required", QJsonArray{"auction_id", "bid_amount"}}}},
 		Tool{"list_auctions", "List active auctions", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"status", QJsonObject{{"type", "string"}, {"description", "Filter by status (active/ended/cancelled)"}, {"default", "active"}}}
-		}}}},
+			{"status", QJsonObject{{"type", "string"}, {"description", "Filter by status (active/ended/cancelled)"}, {"default", "active"}}},
+					{"limit", QJsonObject{{"type", "integer"}}},
+				}}}},
 		Tool{"get_auction_status", "Get auction details and status", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"auction_id", QJsonObject{{"type", "string"}, {"description", "Auction ID"}}}
 		}}, {"required", QJsonArray{"auction_id"}}}},
@@ -2962,8 +3030,9 @@ void Server::registerTools() {
 		// --- Marketplace ---
 		Tool{"list_marketplace", "Browse gift marketplace listings", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"category", QJsonObject{{"type", "string"}, {"description", "Filter by category"}}},
-			{"sort_by", QJsonObject{{"type", "string"}, {"description", "Sort order (recent/price_asc/price_desc)"}, {"default", "recent"}}}
-		}}}},
+			{"sort_by", QJsonObject{{"type", "string"}, {"description", "Sort order (recent/price_asc/price_desc)"}, {"default", "recent"}}},
+					{"limit", QJsonObject{{"type", "integer"}}},
+				}}}},
 		Tool{"buy_gift", "Purchase a gift from marketplace", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"listing_id", QJsonObject{{"type", "string"}, {"description", "Marketplace listing ID"}}}
 		}}, {"required", QJsonArray{"listing_id"}}}},
@@ -2974,67 +3043,79 @@ void Server::registerTools() {
 		// --- Wallet/Gifts ---
 		Tool{"send_gift", "Send a gift to a user", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"recipient_id", QJsonObject{{"type", "integer"}, {"description", "Recipient user ID"}}},
-			{"gift_type", QJsonObject{{"type", "string"}, {"description", "Type of gift"}}},
-			{"stars_amount", QJsonObject{{"type", "integer"}, {"description", "Amount in stars"}}}
-		}}, {"required", QJsonArray{"recipient_id", "stars_amount"}}}},
+			{"stars_amount", QJsonObject{{"type", "integer"}, {"description", "Amount in stars"}}},
+					{"anonymous", QJsonObject{{"type", "boolean"}}},
+					{"gift_id", QJsonObject{{"type", "integer"}}},
+					{"message", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"recipient_id", "stars_amount"}}}},
 		Tool{"get_gift_history", "Get gift sending/receiving history", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"direction", QJsonObject{{"type", "string"}, {"description", "Filter: sent/received/both"}, {"default", "both"}}}
-		}}}},
+			{"direction", QJsonObject{{"type", "string"}, {"description", "Filter: sent/received/both"}, {"default", "both"}}},
+					{"limit", QJsonObject{{"type", "integer"}}},
+				}}}},
 		Tool{"list_available_gifts", "List available gift types", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
 		Tool{"get_gift_suggestions", "Get gift suggestions for a user", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"recipient_id", QJsonObject{{"type", "integer"}, {"description", "Recipient user ID"}}}
 		}}, {"required", QJsonArray{"recipient_id"}}}},
 		Tool{"get_gift_price_history", "Get price history for a gift type", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"gift_type", QJsonObject{{"type", "string"}, {"description", "Gift type"}}}
-		}}, {"required", QJsonArray{"gift_type"}}}},
+			{"gift_type", QJsonObject{{"type", "string"}, {"description", "Gift type"}}},
+					{"days", QJsonObject{{"type", "integer"}}},
+				}}, {"required", QJsonArray{"gift_type"}}}},
 
 		// --- Subscriptions ---
 		Tool{"subscribe_to_channel", "Subscribe to a channel", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"channel_id", QJsonObject{{"type", "integer"}, {"description", "Channel ID"}}}
-		}}, {"required", QJsonArray{"channel_id"}}}},
+			{"channel_id", QJsonObject{{"type", "integer"}, {"description", "Channel ID"}}},
+					{"tier", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"channel_id"}}}},
 		Tool{"unsubscribe_from_channel", "Unsubscribe from a channel", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"channel_id", QJsonObject{{"type", "integer"}, {"description", "Channel ID"}}}
-		}}, {"required", QJsonArray{"channel_id"}}}},
+			{"channel_id", QJsonObject{{"type", "integer"}, {"description", "Channel ID"}}},
+					{"subscription_id", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"channel_id"}}}},
 		Tool{"get_subscription_stats", "Get subscription spending statistics", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
 
 		// --- Monetization ---
 		Tool{"get_earnings", "Get creator earnings data", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"period", QJsonObject{{"type", "string"}, {"description", "Time period (day/week/month)"}, {"default", "month"}}}
-		}}}},
+					{"channel_id", QJsonObject{{"type", "integer"}}},
+				}}}},
 		Tool{"withdraw_earnings", "Withdraw earnings to wallet", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"amount", QJsonObject{{"type", "number"}, {"description", "Amount to withdraw"}}},
-			{"method", QJsonObject{{"type", "string"}, {"description", "Withdrawal method (ton/fragment)"}, {"default", "ton"}}}
-		}}, {"required", QJsonArray{"amount"}}}},
+			{"method", QJsonObject{{"type", "string"}, {"description", "Withdrawal method (ton/fragment)"}, {"default", "ton"}}},
+					{"channel_id", QJsonObject{{"type", "integer"}}},
+				}}, {"required", QJsonArray{"amount"}}}},
 		Tool{"set_monetization_rules", "Configure monetization rules", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"rules", QJsonObject{{"type", "object"}, {"description", "Monetization rules configuration"}}}
 		}}, {"required", QJsonArray{"rules"}}}},
-		Tool{"get_monetization_analytics", "Get monetization analytics", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+		Tool{"get_monetization_analytics", "Get monetization analytics", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}}},
+				}}}},
 
 		// --- Budget ---
 		Tool{"set_spending_budget", "Set spending budget limits", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"daily_limit", QJsonObject{{"type", "number"}, {"description", "Daily spending limit"}}},
-			{"monthly_limit", QJsonObject{{"type", "number"}, {"description", "Monthly spending limit"}}}
-		}}}},
+			{"monthly_limit", QJsonObject{{"type", "number"}, {"description", "Monthly spending limit"}}},
+					{"weekly_limit", QJsonObject{{"type", "number"}}},
+				}}}},
 		Tool{"set_budget_alert", "Set budget alert threshold", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"threshold", QJsonObject{{"type", "number"}, {"description", "Alert threshold amount"}}}
-		}}, {"required", QJsonArray{"threshold"}}}},
+			{"threshold", QJsonObject{{"type", "number"}, {"description", "Alert threshold amount"}}},
+					{"type", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"threshold"}}}},
 
 		// --- Stars ---
 		Tool{"request_stars", "Request stars from a user", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"from_user_id", QJsonObject{{"type", "integer"}, {"description", "User to request from"}}},
-			{"amount", QJsonObject{{"type", "integer"}, {"description", "Stars amount"}}}
-		}}, {"required", QJsonArray{"from_user_id", "amount"}}}},
+			{"amount", QJsonObject{{"type", "integer"}, {"description", "Stars amount"}}},
+					{"reason", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"from_user_id", "amount"}}}},
 		Tool{"get_stars_leaderboard", "Get stars leaderboard", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"limit", QJsonObject{{"type", "integer"}, {"description", "Max entries"}, {"default", 10}}}
 		}}}},
 		Tool{"get_stars_history", "Get stars transaction history", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"limit", QJsonObject{{"type", "integer"}, {"description", "Max entries"}, {"default", 50}}}
-		}}}},
+			{"limit", QJsonObject{{"type", "integer"}, {"description", "Max entries"}, {"default", 50}}},
+					{"direction", QJsonObject{{"type", "string"}}},
+				}}}},
 		Tool{"get_stars_rate", "Get current stars exchange rate", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
 		Tool{"convert_stars", "Convert stars to/from other currencies", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"stars_amount", QJsonObject{{"type", "integer"}, {"description", "Amount to convert"}}},
-			{"direction", QJsonObject{{"type", "string"}, {"description", "Conversion direction"}}}
-		}}, {"required", QJsonArray{"stars_amount"}}}},
+					{"target", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"stars_amount"}}}},
 		Tool{"categorize_transaction", "Categorize a transaction", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"transaction_id", QJsonObject{{"type", "integer"}, {"description", "Transaction ID"}}},
 			{"category", QJsonObject{{"type", "string"}, {"description", "Category name"}}}
@@ -3045,15 +3126,19 @@ void Server::registerTools() {
 			{"stars_count", QJsonObject{{"type", "integer"}, {"description", "Stars count"}}}
 		}}, {"required", QJsonArray{"chat_id", "message_id", "stars_count"}}}},
 		Tool{"get_star_reactions", "Get star reactions for messages", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID"}}}
-		}}}},
-		Tool{"get_reaction_analytics", "Get reaction analytics", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID"}}},
+					{"message_id", QJsonObject{{"type", "integer"}}},
+				}}}},
+		Tool{"get_reaction_analytics", "Get reaction analytics", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+					{"period", QJsonObject{{"type", "string"}}},
+				}}}},
 		Tool{"get_top_reacted", "Get most reacted messages", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"limit", QJsonObject{{"type", "integer"}, {"description", "Max entries"}, {"default", 10}}}
 		}}}},
 		Tool{"set_reaction_price", "Set custom star reaction price", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"min_stars", QJsonObject{{"type", "integer"}, {"description", "Price in stars"}}}
-		}}, {"required", QJsonArray{"min_stars"}}}},
+			{"min_stars", QJsonObject{{"type", "integer"}, {"description", "Price in stars"}}},
+					{"chat_id", QJsonObject{{"type", "integer"}}},
+				}}, {"required", QJsonArray{"min_stars"}}}},
 
 		// --- Portfolio ---
 		Tool{"get_portfolio", "Get gift portfolio holdings", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
@@ -3091,8 +3176,10 @@ void Server::registerTools() {
 		// --- Paid Content ---
 		Tool{"create_paid_post", "Create paid content post", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"content", QJsonObject{{"type", "string"}, {"description", "Content text"}}},
-			{"price", QJsonObject{{"type", "integer"}, {"description", "Price in stars"}}}
-		}}, {"required", QJsonArray{"content", "price"}}}},
+			{"price", QJsonObject{{"type", "integer"}, {"description", "Price in stars"}}},
+					{"chat_id", QJsonObject{{"type", "integer"}}},
+					{"preview", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"content", "price"}}}},
 		Tool{"set_content_price", "Set price for content", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"content_id", QJsonObject{{"type", "integer"}, {"description", "Content ID"}}},
 			{"price", QJsonObject{{"type", "integer"}, {"description", "New price in stars"}}}
@@ -3103,19 +3190,22 @@ void Server::registerTools() {
 		}}, {"required", QJsonArray{"content_id"}}}},
 		Tool{"list_purchased_content", "List purchased content", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
 		Tool{"refund_content", "Request refund for content", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"content_id", QJsonObject{{"type", "integer"}, {"description", "Content ID"}}}
-		}}, {"required", QJsonArray{"content_id"}}}},
+			{"content_id", QJsonObject{{"type", "integer"}, {"description", "Content ID"}}},
+					{"reason", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"content_id"}}}},
 
 		// --- Creator ---
 		Tool{"create_exclusive_content", "Create exclusive content for subscribers", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"content", QJsonObject{{"type", "string"}, {"description", "Content text"}}},
-			{"tier", QJsonObject{{"type", "string"}, {"description", "Subscriber tier"}, {"default", "all"}}}
-		}}, {"required", QJsonArray{"content"}}}},
+			{"tier", QJsonObject{{"type", "string"}, {"description", "Subscriber tier"}, {"default", "all"}}},
+					{"price", QJsonObject{{"type", "integer"}}},
+				}}, {"required", QJsonArray{"content"}}}},
 		Tool{"get_subscriber_analytics", "Get subscriber analytics", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
 		Tool{"send_subscriber_message", "Send message to subscribers", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"message", QJsonObject{{"type", "string"}, {"description", "Message text"}}},
-			{"tier", QJsonObject{{"type", "string"}, {"description", "Target tier"}, {"default", "all"}}}
-		}}, {"required", QJsonArray{"message"}}}},
+			{"tier", QJsonObject{{"type", "string"}, {"description", "Target tier"}, {"default", "all"}}},
+					{"channel_id", QJsonObject{{"type", "integer"}}},
+				}}, {"required", QJsonArray{"message"}}}},
 		Tool{"set_subscriber_tiers", "Configure subscriber tiers", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"tiers", QJsonObject{{"type", "array"}, {"description", "Tier configurations"}}}
 		}}, {"required", QJsonArray{"tiers"}}}},
@@ -3134,14 +3224,17 @@ void Server::registerTools() {
 		// --- Semantic Search ---
 		Tool{"semantic_index_messages", "Index messages for semantic search (alias for index_messages)", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID to index"}}},
-			{"limit", QJsonObject{{"type", "integer"}, {"description", "Max messages to index"}, {"default", 1000}}}
-		}}, {"required", QJsonArray{"chat_id"}}}},
+			{"limit", QJsonObject{{"type", "integer"}, {"description", "Max messages to index"}, {"default", 1000}}},
+					{"rebuild", QJsonObject{{"type", "boolean"}}},
+				}}, {"required", QJsonArray{"chat_id"}}}},
 
 		// --- Tasks ---
 		Tool{"update_task", "Update a task's status or details", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"task_id", QJsonObject{{"type", "integer"}, {"description", "Task ID"}}},
-			{"status", QJsonObject{{"type", "string"}, {"description", "New status (pending/in_progress/completed)"}}}
-		}}, {"required", QJsonArray{"task_id"}}}},
+			{"status", QJsonObject{{"type", "string"}, {"description", "New status (pending/in_progress/completed)"}}},
+					{"priority", QJsonObject{{"type", "integer"}}},
+					{"title", QJsonObject{{"type", "string"}}},
+				}}, {"required", QJsonArray{"task_id"}}}},
 
 		// ===== V6.5.1 FEATURE TOOLS (10) =====
 
@@ -3180,8 +3273,6 @@ void Server::registerTools() {
 			{"exclude_muted", QJsonObject{{"type", "boolean"}, {"description", "Exclude muted chats"}}},
 			{"exclude_read", QJsonObject{{"type", "boolean"}, {"description", "Exclude read chats"}}},
 			{"exclude_archived", QJsonObject{{"type", "boolean"}, {"description", "Exclude archived chats"}}},
-			{"include_chat_ids", QJsonObject{{"type", "array"}, {"description", "Specific chat IDs to always include"}, {"items", QJsonObject{{"type", "integer"}}}}},
-			{"exclude_chat_ids", QJsonObject{{"type", "array"}, {"description", "Specific chat IDs to always exclude"}, {"items", QJsonObject{{"type", "integer"}}}}}
 		}}, {"required", QJsonArray{"folder_id"}}}},
 
 		Tool{"delete_folder", "Delete a chat folder (does not delete the chats inside it)", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
