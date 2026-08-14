@@ -36,8 +36,8 @@ QJsonObject Server::toolScheduleMessage(const QJsonObject &args) {
 
 	QJsonObject result;
 	result["success"] = (scheduleId > 0);
-	result["schedule_id"] = QString::number(scheduleId);
-	result["chat_id"] = QString::number(chatId);
+	result["schedule_id"] = qint64(scheduleId);
+	result["chat_id"] = qint64(chatId);
 	result["type"] = scheduleType;
 
 	return result;
@@ -73,7 +73,7 @@ QJsonObject Server::toolListScheduled(const QJsonObject &args) {
 	result["schedules"] = schedules;
 	result["count"] = schedules.size();
 	if (chatId > 0) {
-		result["chat_id"] = QString::number(chatId);
+		result["chat_id"] = qint64(chatId);
 	}
 
 	return result;
@@ -102,7 +102,7 @@ QJsonObject Server::toolUpdateScheduled(const QJsonObject &args) {
 
 	QJsonObject result;
 	result["success"] = success;
-	result["schedule_id"] = QString::number(scheduleId);
+	result["schedule_id"] = qint64(scheduleId);
 
 	return result;
 }

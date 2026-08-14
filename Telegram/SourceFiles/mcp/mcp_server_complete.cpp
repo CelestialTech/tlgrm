@@ -1361,7 +1361,7 @@ QJsonObject Server::extractMessageJson(HistoryItem *item) {
 		return msg;
 	}
 
-	msg["message_id"] = QString::number(item->id.bare);
+	msg["message_id"] = qint64(item->id.bare);
 	msg["date"] = static_cast<qint64>(item->date());
 
 	// Get message text
@@ -1372,7 +1372,7 @@ QJsonObject Server::extractMessageJson(HistoryItem *item) {
 	auto from = item->from();
 	if (from) {
 		QJsonObject fromUser;
-		fromUser["id"] = QString::number(from->id.value);
+		fromUser["id"] = qint64(from->id.value);
 		fromUser["name"] = from->name();
 		if (!from->username().isEmpty()) {
 			fromUser["username"] = from->username();
@@ -1391,7 +1391,7 @@ QJsonObject Server::extractMessageJson(HistoryItem *item) {
 	// Add reply information if present
 	if (item->replyToId()) {
 		QJsonObject reply;
-		reply["message_id"] = QString::number(item->replyToId().bare);
+		reply["message_id"] = qint64(item->replyToId().bare);
 		msg["reply_to"] = reply;
 	}
 

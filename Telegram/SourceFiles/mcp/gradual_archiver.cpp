@@ -343,12 +343,12 @@ bool GradualArchiver::fetchBatch(int limit, qint64 offsetId) {
 			} else {
 				// Store in memory instead
 				QJsonObject msgObj;
-				msgObj["id"] = QString::number(item->id.bare);
-				msgObj["date"] = QString::number(item->date());
+				msgObj["id"] = qint64(item->id.bare);
+				msgObj["date"] = qint64(item->date());
 				msgObj["text"] = item->originalText().text;
 				if (const auto from = item->from()) {
 					msgObj["from"] = from->name();
-					msgObj["from_id"] = QString::number(from->id.value);
+					msgObj["from_id"] = qint64(from->id.value);
 				}
 				_collectedMessages.append(msgObj);
 				msgArchived = true;
@@ -1122,18 +1122,18 @@ void GradualArchiver::fetchBatchFromServer(int limit, qint64 offsetId) {
 					msgArchived = _archiver->archiveMessage(item);
 				} else {
 					QJsonObject msgObj;
-					msgObj["id"] = QString::number(item->id.bare);
-					msgObj["date"] = QString::number(item->date());
+					msgObj["id"] = qint64(item->id.bare);
+					msgObj["date"] = qint64(item->date());
 					msgObj["text"] = item->originalText().text;
 					if (const auto from = item->from()) {
 						msgObj["from"] = from->name();
-						msgObj["from_id"] = QString::number(from->id.value);
+						msgObj["from_id"] = qint64(from->id.value);
 					}
 					if (item->media()) {
 						if (const auto doc = item->media()->document()) {
 							msgObj["has_document"] = true;
 							msgObj["document_name"] = doc->filename();
-							msgObj["document_size"] = QString::number(doc->size);
+							msgObj["document_size"] = qint64(doc->size);
 							msgObj["document_mime"] = doc->mimeString();
 							downloadMedia(item);
 						}
@@ -1231,12 +1231,12 @@ void GradualArchiver::processServerMessages(const QVector<HistoryItem*> &message
 			msgArchived = _archiver->archiveMessage(item);
 		} else {
 			QJsonObject msgObj;
-			msgObj["id"] = QString::number(item->id.bare);
-			msgObj["date"] = QString::number(item->date());
+			msgObj["id"] = qint64(item->id.bare);
+			msgObj["date"] = qint64(item->date());
 			msgObj["text"] = item->originalText().text;
 			if (const auto from = item->from()) {
 				msgObj["from"] = from->name();
-				msgObj["from_id"] = QString::number(from->id.value);
+				msgObj["from_id"] = qint64(from->id.value);
 			}
 			_collectedMessages.append(msgObj);
 			msgArchived = true;

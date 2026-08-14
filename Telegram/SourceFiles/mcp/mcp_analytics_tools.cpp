@@ -18,13 +18,13 @@ QJsonObject Server::toolGetMessageStats(const QJsonObject &args) {
 	if (_analytics) {
 		auto stats = _analytics->getMessageStatistics(chatId, period);
 		QJsonObject result = stats;
-		result["chat_id"] = QString::number(chatId);
+		result["chat_id"] = qint64(chatId);
 		return result;
 	}
 
 	// Fallback: compute stats from local DB
 	QJsonObject result;
-	result["chat_id"] = QString::number(chatId);
+	result["chat_id"] = qint64(chatId);
 	result["period"] = period;
 
 	// Determine time filter
@@ -87,7 +87,7 @@ QJsonObject Server::toolGetUserActivity(const QJsonObject &args) {
 	}
 
 	QJsonObject result;
-	result["user_id"] = QString::number(userId);
+	result["user_id"] = qint64(userId);
 
 	QSqlQuery query(_db);
 	QString sql = "SELECT COUNT(*), MIN(timestamp), MAX(timestamp), "
@@ -99,7 +99,7 @@ QJsonObject Server::toolGetUserActivity(const QJsonObject &args) {
 	}
 	if (chatId > 0) {
 		sql += " AND chat_id = " + QString::number(chatId);
-		result["chat_id"] = QString::number(chatId);
+		result["chat_id"] = qint64(chatId);
 	}
 
 	query.exec(sql);
@@ -145,7 +145,7 @@ QJsonObject Server::toolGetChatActivity(const QJsonObject &args) {
 	}
 
 	QJsonObject result;
-	result["chat_id"] = QString::number(chatId);
+	result["chat_id"] = qint64(chatId);
 
 	QSqlQuery query(_db);
 	QString filter = (chatId > 0)
@@ -207,7 +207,7 @@ QJsonObject Server::toolGetTimeSeries(const QJsonObject &args) {
 	if (_analytics) {
 		auto timeSeries = _analytics->getTimeSeries(chatId, granularity);
 		QJsonObject result;
-		result["chat_id"] = QString::number(chatId);
+		result["chat_id"] = qint64(chatId);
 		result["granularity"] = granularity;
 		result["data_points"] = timeSeries;
 		result["count"] = timeSeries.size();
@@ -215,7 +215,7 @@ QJsonObject Server::toolGetTimeSeries(const QJsonObject &args) {
 	}
 
 	QJsonObject result;
-	result["chat_id"] = QString::number(chatId);
+	result["chat_id"] = qint64(chatId);
 	result["granularity"] = granularity;
 
 	QString dateFormat;
@@ -260,14 +260,14 @@ QJsonObject Server::toolGetTopUsers(const QJsonObject &args) {
 	if (_analytics) {
 		auto topUsers = _analytics->getTopUsers(chatId, limit);
 		QJsonObject result;
-		result["chat_id"] = QString::number(chatId);
+		result["chat_id"] = qint64(chatId);
 		result["users"] = topUsers;
 		result["count"] = topUsers.size();
 		return result;
 	}
 
 	QJsonObject result;
-	result["chat_id"] = QString::number(chatId);
+	result["chat_id"] = qint64(chatId);
 
 	QSqlQuery query(_db);
 	QString sql = "SELECT username, user_id, COUNT(*) as msg_count, "
@@ -314,7 +314,7 @@ QJsonObject Server::toolGetTopWords(const QJsonObject &args) {
 	if (_analytics) {
 		auto topWords = _analytics->getTopWords(chatId, limit);
 		QJsonObject result;
-		result["chat_id"] = QString::number(chatId);
+		result["chat_id"] = qint64(chatId);
 		result["words"] = topWords;
 		result["count"] = topWords.size();
 		return result;
@@ -322,7 +322,7 @@ QJsonObject Server::toolGetTopWords(const QJsonObject &args) {
 
 	// Fallback: word frequency analysis from DB
 	QJsonObject result;
-	result["chat_id"] = QString::number(chatId);
+	result["chat_id"] = qint64(chatId);
 
 	static const QSet<QString> stopWords = {
 		"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
@@ -405,7 +405,7 @@ QJsonObject Server::toolExportAnalytics(const QJsonObject &args) {
 		QString resultPath = _analytics->exportAnalytics(chatId, format, outputPath);
 		QJsonObject result;
 		result["success"] = !resultPath.isEmpty();
-		result["chat_id"] = QString::number(chatId);
+		result["chat_id"] = qint64(chatId);
 		result["output_path"] = resultPath;
 		result["format"] = format;
 		return result;
@@ -413,7 +413,7 @@ QJsonObject Server::toolExportAnalytics(const QJsonObject &args) {
 
 	// Fallback: generate export from DB
 	QJsonObject result;
-	result["chat_id"] = QString::number(chatId);
+	result["chat_id"] = qint64(chatId);
 	result["format"] = format;
 
 	// Gather all analytics data
@@ -465,14 +465,14 @@ QJsonObject Server::toolGetTrends(const QJsonObject &args) {
 	if (_analytics) {
 		auto trends = _analytics->getTrends(chatId, metric, daysBack);
 		QJsonObject result = trends;
-		result["chat_id"] = QString::number(chatId);
+		result["chat_id"] = qint64(chatId);
 		result["metric"] = metric;
 		result["days_back"] = daysBack;
 		return result;
 	}
 
 	QJsonObject result;
-	result["chat_id"] = QString::number(chatId);
+	result["chat_id"] = qint64(chatId);
 	result["metric"] = metric;
 	result["days_back"] = daysBack;
 

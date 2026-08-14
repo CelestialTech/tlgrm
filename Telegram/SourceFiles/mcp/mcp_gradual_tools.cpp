@@ -63,7 +63,7 @@ QJsonObject Server::toolStartGradualExport(const QJsonObject &args) {
 	result["success"] = started;
 	if (started) {
 		result["message"] = "Gradual export started";
-		result["chat_id"] = QString::number(chatId);
+		result["chat_id"] = qint64(chatId);
 	} else {
 		result["error"] = "Failed to start gradual export - another export may be in progress";
 	}
@@ -228,7 +228,7 @@ QJsonObject Server::toolQueueGradualExport(const QJsonObject &args) {
 	result["success"] = queued;
 	if (queued) {
 		result["message"] = "Chat added to export queue";
-		result["chat_id"] = QString::number(chatId);
+		result["chat_id"] = qint64(chatId);
 		result["queue"] = _gradualArchiver->getQueue();
 	} else {
 		result["error"] = "Failed to queue chat";

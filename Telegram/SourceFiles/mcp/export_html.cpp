@@ -86,14 +86,14 @@ bool HtmlExporter::exportChat(
 			}
 
 			QJsonObject msg;
-			msg["message_id"] = QString::number(item->id.bare);
+			msg["message_id"] = qint64(item->id.bare);
 			msg["date"] = timestamp;
 			msg["text"] = item->originalText().text;
 
 			auto from = item->from();
 			if (from) {
 				QJsonObject fromUser;
-				fromUser["id"] = QString::number(from->id.value);
+				fromUser["id"] = qint64(from->id.value);
 				fromUser["name"] = from->name();
 				if (!from->username().isEmpty()) {
 					fromUser["username"] = from->username();
@@ -104,7 +104,7 @@ bool HtmlExporter::exportChat(
 			msg["is_outgoing"] = item->out();
 
 			if (item->replyToId()) {
-				msg["reply_to"] = QString::number(item->replyToId().bare);
+				msg["reply_to"] = qint64(item->replyToId().bare);
 			}
 
 			if (options.embedMedia && item->media()) {
@@ -236,7 +236,7 @@ QString HtmlExporter::formatMessageHtml(const QJsonObject &message) {
 
 	if (message.contains("reply_to")) {
 		html += QString("<div class=\"reply-to\">Reply to message #%1</div>\n")
-			.arg(message["reply_to"].toString());
+			.arg(message["reply_to"].toVariant().toString());
 	}
 
 	QString text = message["text"].toString();

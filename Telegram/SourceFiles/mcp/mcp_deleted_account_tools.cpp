@@ -25,7 +25,7 @@ QJsonObject Server::toolListDeletedAccounts(const QJsonObject &args) {
 	QJsonArray chatsArray;
 	for (const auto &chat : deleted) {
 		QJsonObject obj;
-		obj["peer_id"] = QString::number(chat.peerId);
+		obj["peer_id"] = qint64(chat.peerId);
 		obj["name"] = chat.name;
 		obj["cached_message_count"] = chat.messageCount;
 		if (chat.firstMessageDate > 0) {
@@ -265,7 +265,7 @@ QJsonObject Server::toolListDeletedChannels(const QJsonObject &args) {
 			if (!isDeleted) continue;
 
 			QJsonObject obj;
-			obj["peer_id"] = QString::number(peer->id.value);
+			obj["peer_id"] = qint64(peer->id.value);
 			obj["name"] = peer->name();
 			obj["type"] = type;
 
@@ -287,7 +287,7 @@ QJsonObject Server::toolListDeletedChannels(const QJsonObject &args) {
 						if (!item || item->isService()) continue;
 
 						QJsonObject msgObj;
-						msgObj["id"] = QString::number(item->id.bare);
+						msgObj["id"] = qint64(item->id.bare);
 						msgObj["date"] = QDateTime::fromSecsSinceEpoch(
 							item->date()).toString(Qt::ISODate);
 

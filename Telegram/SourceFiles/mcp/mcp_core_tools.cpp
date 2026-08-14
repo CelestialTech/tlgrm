@@ -59,7 +59,7 @@ QJsonObject Server::toolListChats(const QJsonObject &args) {
 					if (!peer) continue;
 
 					QJsonObject chat;
-					chat["id"] = QString::number(peer->id.value);
+					chat["id"] = qint64(peer->id.value);
 					chat["name"] = peer->name();
 					chat["username"] = peer->username();
 					chat["source"] = "live";
@@ -297,12 +297,12 @@ QJsonObject Server::toolGetChatInfo(const QJsonObject &args) {
 		if (!peer) {
 			qWarning() << "MCP: No peer found for chat" << chatId;
 			chatInfo["error"] = "Chat not found";
-			chatInfo["chat_id"] = QString::number(chatId);
+			chatInfo["chat_id"] = qint64(chatId);
 			return chatInfo;
 		}
 
 		// Basic information
-		chatInfo["id"] = QString::number(peer->id.value);
+		chatInfo["id"] = qint64(peer->id.value);
 		chatInfo["name"] = peer->name();
 
 		// Determine chat type
@@ -369,14 +369,14 @@ QJsonObject Server::toolGetChatInfo(const QJsonObject &args) {
 
 	// Fallback to archived data
 	if (!_archiver) {
-		chatInfo["chat_id"] = QString::number(chatId);
+		chatInfo["chat_id"] = qint64(chatId);
 		chatInfo["error"] = "Chat info not available (archiver not initialized)";
 		chatInfo["source"] = "error";
 		return chatInfo;
 	}
 	chatInfo = _archiver->getChatInfo(chatId);
 	if (chatInfo.isEmpty() || !chatInfo.contains("id")) {
-		chatInfo["chat_id"] = QString::number(chatId);
+		chatInfo["chat_id"] = qint64(chatId);
 		chatInfo["error"] = "Chat info not available (session not active)";
 		chatInfo["source"] = "error";
 	} else {
@@ -430,7 +430,7 @@ QJsonObject Server::toolReadMessages(const QJsonObject &args) {
 
 					// Extract message data
 					QJsonObject msg;
-					msg["message_id"] = QString::number(item->id.bare);
+					msg["message_id"] = qint64(item->id.bare);
 					msg["date"] = static_cast<qint64>(item->date());
 
 					// Get message text
@@ -441,7 +441,7 @@ QJsonObject Server::toolReadMessages(const QJsonObject &args) {
 					auto from = item->from();
 					if (from) {
 						QJsonObject fromUser;
-						fromUser["id"] = QString::number(from->id.value);
+						fromUser["id"] = qint64(from->id.value);
 						fromUser["name"] = from->name();
 						if (!from->username().isEmpty()) {
 							fromUser["username"] = from->username();
@@ -460,7 +460,7 @@ QJsonObject Server::toolReadMessages(const QJsonObject &args) {
 					// Add reply information if present
 					if (item->replyToId()) {
 						QJsonObject reply;
-						reply["message_id"] = QString::number(item->replyToId().bare);
+						reply["message_id"] = qint64(item->replyToId().bare);
 						msg["reply_to"] = reply;
 					}
 
@@ -664,7 +664,7 @@ QJsonObject Server::toolSearchMessages(const QJsonObject &args) {
 					const auto &text = item->originalText();
 					if (text.text.toLower().contains(lowerQuery)) {
 						QJsonObject msg;
-						msg["message_id"] = QString::number(item->id.bare);
+						msg["message_id"] = qint64(item->id.bare);
 						msg["date"] = static_cast<qint64>(item->date());
 						msg["text"] = text.text;
 
@@ -672,7 +672,7 @@ QJsonObject Server::toolSearchMessages(const QJsonObject &args) {
 						auto from = item->from();
 						if (from) {
 							QJsonObject fromUser;
-							fromUser["id"] = QString::number(from->id.value);
+							fromUser["id"] = qint64(from->id.value);
 							fromUser["name"] = from->name();
 							if (!from->username().isEmpty()) {
 								fromUser["username"] = from->username();
@@ -734,7 +734,7 @@ QJsonObject Server::toolGetUserInfo(const QJsonObject &args) {
 		if (!peer) {
 			qWarning() << "MCP: Peer not found for" << userId;
 			userInfo["error"] = "User not found";
-			userInfo["user_id"] = QString::number(userId);
+			userInfo["user_id"] = qint64(userId);
 			return userInfo;
 		}
 
@@ -743,12 +743,12 @@ QJsonObject Server::toolGetUserInfo(const QJsonObject &args) {
 		if (!user) {
 			qWarning() << "MCP: Peer" << userId << "is not a user";
 			userInfo["error"] = "Specified ID is not a user";
-			userInfo["user_id"] = QString::number(userId);
+			userInfo["user_id"] = qint64(userId);
 			return userInfo;
 		}
 
 		// Extract user information
-		userInfo["id"] = QString::number(user->id.value);
+		userInfo["id"] = qint64(user->id.value);
 		userInfo["name"] = user->name();
 
 		// Optional fields
@@ -798,7 +798,7 @@ QJsonObject Server::toolGetUserInfo(const QJsonObject &args) {
 	}
 
 	// Fallback response if session not available
-	userInfo["user_id"] = QString::number(userId);
+	userInfo["user_id"] = qint64(userId);
 	userInfo["error"] = "User info not available (session not active)";
 	userInfo["source"] = "error";
 

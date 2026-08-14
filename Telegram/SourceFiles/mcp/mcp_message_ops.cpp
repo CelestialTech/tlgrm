@@ -447,7 +447,7 @@ QJsonObject Server::toolRenameChatTitle(const QJsonObject &args) {
 
 	QJsonObject result;
 	result["success"] = true;
-	result["chat_id"] = QString::number(chatId);
+	result["chat_id"] = qint64(chatId);
 	result["new_title"] = title;
 	return result;
 }

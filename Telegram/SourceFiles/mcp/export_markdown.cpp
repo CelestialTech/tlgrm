@@ -91,14 +91,14 @@ bool MarkdownExporter::exportChat(
 			}
 
 			QJsonObject msg;
-			msg["message_id"] = QString::number(item->id.bare);
+			msg["message_id"] = qint64(item->id.bare);
 			msg["date"] = timestamp;
 			msg["text"] = item->originalText().text;
 
 			auto from = item->from();
 			if (from) {
 				QJsonObject fromUser;
-				fromUser["id"] = QString::number(from->id.value);
+				fromUser["id"] = qint64(from->id.value);
 				fromUser["name"] = from->name();
 				if (!from->username().isEmpty()) {
 					fromUser["username"] = from->username();
@@ -109,7 +109,7 @@ bool MarkdownExporter::exportChat(
 			msg["is_outgoing"] = item->out();
 
 			if (item->replyToId()) {
-				msg["reply_to"] = QString::number(item->replyToId().bare);
+				msg["reply_to"] = qint64(item->replyToId().bare);
 			}
 
 			if (options.includeMedia && item->media()) {
@@ -239,7 +239,7 @@ QString MarkdownExporter::formatMessageMarkdown(
 	md += QString(" *%1*\n\n").arg(time);
 
 	if (message.contains("reply_to")) {
-		md += QString("> *Reply to message #%1*\n\n").arg(message["reply_to"].toString());
+		md += QString("> *Reply to message #%1*\n\n").arg(message["reply_to"].toVariant().toString());
 	}
 
 	QString text = message["text"].toString();
