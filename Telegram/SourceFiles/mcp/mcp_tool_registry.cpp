@@ -114,8 +114,7 @@ void Server::registerTools() {
 					}},
 					{"limit", QJsonObject{
 						{"type", "integer"},
-						{"default", 50}
-					}}
+						{"default", 50}, {"description", "Maximum number of results to return."}}}
 				}},
 				{"required", QJsonArray{"query"}},
 			}
@@ -277,8 +276,7 @@ void Server::registerTools() {
 					}},
 					{"limit", QJsonObject{
 						{"type", "integer"},
-						{"default", 50}
-					}}
+						{"default", 50}, {"description", "Maximum number of results to return."}}}
 				}},
 				{"required", QJsonArray{"query"}},
 			}
@@ -312,8 +310,7 @@ void Server::registerTools() {
 					{"period", QJsonObject{
 						{"type", "string"},
 						{"enum", QJsonArray{"all", "day", "week", "month"}},
-						{"default", "all"}
-					}}
+						{"default", "all"}, {"description", "Time window to report over, such as day, week or month."}}}
 				}},
 				{"required", QJsonArray{"chat_id"}},
 			}
@@ -364,8 +361,7 @@ void Server::registerTools() {
 					{"granularity", QJsonObject{
 						{"type", "string"},
 						{"enum", QJsonArray{"hourly", "daily", "weekly", "monthly"}},
-						{"default", "daily"}
-					}}
+						{"default", "daily"}, {"description", "Bucket size for the series, such as hour, day or week."}}}
 				}},
 				{"required", QJsonArray{"chat_id"}},
 			}
@@ -382,8 +378,7 @@ void Server::registerTools() {
 					}},
 					{"limit", QJsonObject{
 						{"type", "integer"},
-						{"default", 10}
-					}}
+						{"default", 10}, {"description", "Maximum number of results to return."}}}
 				}},
 				{"required", QJsonArray{"chat_id"}},
 			}
@@ -400,8 +395,7 @@ void Server::registerTools() {
 					}},
 					{"limit", QJsonObject{
 						{"type", "integer"},
-						{"default", 20}
-					}}
+						{"default", 20}, {"description", "Maximum number of results to return."}}}
 				}},
 				{"required", QJsonArray{"chat_id"}},
 			}
@@ -460,12 +454,10 @@ void Server::registerTools() {
 					}},
 					{"limit", QJsonObject{
 						{"type", "integer"},
-						{"default", 10}
-					}},
+						{"default", 10}, {"description", "Maximum number of results to return."}}},
 					{"min_similarity", QJsonObject{
 						{"type", "number"},
-						{"default", 0.7}
-					}}
+						{"default", 0.7}, {"description", "Minimum similarity score, 0.0 to 1.0; lower returns more, looser matches."}}}
 				}},
 				{"required", QJsonArray{"query"}},
 			}
@@ -502,8 +494,7 @@ void Server::registerTools() {
 					}},
 					{"num_topics", QJsonObject{
 						{"type", "integer"},
-						{"default", 5}
-					}},
+						{"default", 5}, {"description", "How many topics to extract."}}},
 					{"message_limit", QJsonObject{{"type", "integer"}, {"description", "How many recent messages to analyse (default 500)."}}},
 				}},
 				{"required", QJsonArray{"chat_id"}},
@@ -618,8 +609,7 @@ void Server::registerTools() {
 					}},
 					{"notify", QJsonObject{
 						{"type", "boolean"},
-						{"default", false}
-					}}
+						{"default", false}, {"description", "Notify chat members."}}}
 				}},
 				{"required", QJsonArray{"chat_id", "message_id"}},
 			}
@@ -897,8 +887,7 @@ void Server::registerTools() {
 				{"properties", QJsonObject{
 					{"limit", QJsonObject{
 						{"type", "integer"},
-						{"default", 50}
-					}},
+						{"default", 50}, {"description", "Maximum number of results to return."}}},
 					{"event_type", QJsonObject{
 						{"type", "string"},
 						{"description", "Filter by event type"}
@@ -1164,7 +1153,7 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"tag", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "string"}}}, {"description", "Tags to filter by"}}},
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}}
+					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}, {"description", "Maximum number of results to return."}}}
 				}},
 				{"required", QJsonArray{"tag"}}
 			}
@@ -1361,7 +1350,7 @@ void Server::registerTools() {
 				{"properties", QJsonObject{
 					{"enabled", QJsonObject{{"type", "boolean"}, {"description", "Turn the greeting message on or off."}}},
 					{"message", QJsonObject{{"type", "string"}, {"description", "Greeting message text"}}},
-					{"delay_seconds", QJsonObject{{"type", "integer"}, {"default", 0}}},
+					{"delay_seconds", QJsonObject{{"type", "integer"}, {"default", 0}, {"description", "How long to wait before sending."}}},
 					{"trigger_chats", QJsonObject{{"type", "array"}, {"description", "Chat ids this applies to, as an array."}}},
 				}},
 				{"required", QJsonArray{"enabled", "message"}}
@@ -1435,7 +1424,7 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"schedule", QJsonObject{{"type", "array"}, {"description", "Array of day schedules"}}},
-					{"timezone", QJsonObject{{"type", "string"}, {"default", "UTC"}}}
+					{"timezone", QJsonObject{{"type", "string"}, {"default", "UTC"}, {"description", "IANA timezone name, such as Europe/Berlin."}}}
 				}},
 				{"required", QJsonArray{"schedule"}}
 			}
@@ -1666,7 +1655,7 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"days", QJsonObject{{"type", "integer"}, {"default", 30}}}
+					{"days", QJsonObject{{"type", "integer"}, {"default", 30}, {"description", "How many days back to cover."}}}
 				}}
 			}
 		},
@@ -1698,7 +1687,7 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}},
+					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}, {"description", "Maximum number of results to return."}}},
 					{"type", QJsonObject{{"type", "string"}, {"description", "Filter by type"}}}
 				}}
 			}
@@ -1734,7 +1723,7 @@ void Server::registerTools() {
 				{"type", "object"},
 				{"properties", QJsonObject{
 					{"query", QJsonObject{{"type", "string"}, {"description", "Search query"}}},
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}},
+					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}, {"description", "Maximum number of results to return."}}},
 					{"category", QJsonObject{{"type", "string"}, {"description", "Restrict results to one marketplace category; omit for all categories."}}},
 				}},
 				{"required", QJsonArray{"query"}}
@@ -2103,7 +2092,7 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}},
+					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}, {"description", "Maximum number of results to return."}}},
 					{"status", QJsonObject{{"type", "string"}, {"description", "Restrict results to one status; omit to return every status."}}},
 				}}
 			}
@@ -2154,7 +2143,7 @@ void Server::registerTools() {
 				{"properties", QJsonObject{
 					{"category", QJsonObject{{"type", "string"}, {"description", "Restrict results to one marketplace category; omit for all categories."}}},
 					{"sort_by", QJsonObject{{"type", "string"}, {"description", "price, rarity, date"}}},
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}}
+					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}, {"description", "Maximum number of results to return."}}}
 				}}
 			}
 		},
@@ -2232,7 +2221,7 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 10}}}
+					{"limit", QJsonObject{{"type", "integer"}, {"default", 10}, {"description", "Maximum number of results to return."}}}
 				}}
 			}
 		},
@@ -2315,7 +2304,7 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"days", QJsonObject{{"type", "integer"}, {"default", 30}}}
+					{"days", QJsonObject{{"type", "integer"}, {"default", 30}, {"description", "How many days back to cover."}}}
 				}}
 			}
 		},
@@ -2435,7 +2424,7 @@ void Server::registerTools() {
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}}},
+					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}, {"description", "Maximum number of results to return."}}},
 					{"category", QJsonObject{{"type", "string"}, {"description", "Restrict results to one marketplace category; omit for all categories."}}},
 					{"sort_by", QJsonObject{{"type", "string"}, {"description", "Sort order: price_asc, price_desc, or recent (the default)."}}},
 				}}
