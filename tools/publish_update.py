@@ -307,11 +307,17 @@ def latest_post_id(bridge: Bridge, chat_id: int) -> int | None:
     time, so the wait below could never see the post land and every publish
     timed out after the upload had actually succeeded.
     """
-    msgs = bridge.tool("read_messages", {"chat_id": chat_id, "limit": 1})
-    items = msgs.get("messages") or []
-    if not items or "message_id" not in items[0]:
-        return None
-    return int(items[0]["message_id"])
+    # Reading one and trusting its position is not safe: the order the tool
+    # returns is not strictly newest-first once a queued placeholder resolves
+    # (observed: 4, 5, 3). Take the highest positive id from a small window
+    # instead -- in a channel, ids only increase.
+    msgs = bridge.tool("read_messages", {"chat_id": chat_id, "limit": 10})
+    ids = [
+        int(m["message_id"])
+        for m in (msgs.get("messages") or [])
+        if "message_id" in m and int(m["message_id"]) > 0
+    ]
+    return max(ids) if ids else None
 
 
 def post_package(bridge: Bridge, chat_id: int, package: Path, label: str) -> int:
@@ -327,16 +333,26 @@ def post_package(bridge: Bridge, chat_id: int, package: Path, label: str) -> int
     # id to appear rather than assuming the upload has landed.
     size = package.stat().st_size / 1e6
     print(f"Uploading {package.name} ({size:.1f} MB) ...", flush=True)
+
+    # A queued-but-unsent message shows up immediately with a NEGATIVE local
+    # id -- a client-side placeholder, not a channel post. Accepting it wrote
+    # `#-288230376151711731` into the feed, which no client can resolve, and
+    # the real post id only arrived afterwards. So wait for a positive id
+    # that is larger than what was there before: that is a server-assigned
+    # post, and nothing else is.
     deadline = time.monotonic() + 1800
     while time.monotonic() < deadline:
         time.sleep(5)
         current = latest_post_id(bridge, chat_id)
-        if current is not None and current != before:
-            print(f"  posted as #{current}")
-            return current
+        if current is None or current <= 0:
+            continue
+        if before is not None and current <= before:
+            continue
+        print(f"  posted as #{current}")
+        return current
     raise SystemExit(
         f"Timed out waiting for {package.name} to appear in the channel. "
-        "Check it: if the upload succeeded, the feed JSON still needs posting."
+        "Check it: if the upload succeeded, re-run with --post-id <id>."
     )
 
 
