@@ -165,10 +165,29 @@ def strip_and_sign(app: Path) -> None:
     if not binary.exists():
         raise SystemExit(f"No executable at {binary}")
 
+    # Never downgrade a Developer ID signature to ad-hoc. Stripping forces a
+    # re-sign, and re-signing here can only produce an ad-hoc signature -- which
+    # passes `codesign --verify` and fails Gatekeeper the moment the artifact is
+    # downloaded. If the bundle is properly signed, refuse and say what to do.
+    authority = subprocess.run(
+        ["codesign", "-dv", str(app)], capture_output=True, text=True)
+    signed_properly = "Developer ID Application" in (
+        authority.stdout + authority.stderr)
+
     before = binary.stat().st_size
     if before < 600 * 1024 * 1024:
         print(f"Binary is {before / 1e6:.0f} MB, already stripped")
         return
+    if signed_properly:
+        raise SystemExit(
+            "This bundle carries a Developer ID signature and still needs "
+            "stripping. Stripping would invalidate it and the re-sign here is "
+            "ad-hoc only.\n"
+            "Strip first, then sign:\n"
+            "  strip -x <binary>\n"
+            "  ~/.claude/skills/macos-codesign/sign.sh --app <app> "
+            "--entitlements <plist>\n"
+            "then re-run with --no-strip.")
 
     print(f"Stripping {binary.name} ({before / 1e6:.0f} MB) ...")
     proc = subprocess.run(["strip", "-x", str(binary)],
