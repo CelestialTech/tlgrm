@@ -5,10 +5,13 @@ upstream Telegram Desktop's guide and describes a cross-platform project; this
 file describes **ours**, and where the two disagree, this one wins.
 
 Tlgrm is a **macOS-only** fork of Telegram Desktop with an embedded MCP server.
-Current version **7.0.10** (`AppVersion 7000010`), built on upstream `v7.0.9`.
-The fork's patch number advances independently of upstream once a
-release ships without an upstream bump — the updater compares the
-integer, so it has to increase for an update to be offered at all.
+Current version **7.0.9** (`AppVersion 7000009`), built on upstream `v7.0.9`.
+
+**Version numbers are not free.** The updater compares `AppVersion` as an
+integer with a strict `>`, so shipping a fix to installed clients costs a
+number. To re-test the update path without spending one, run a client pinned
+to a *lower* version and let it see the current release — see "Testing an
+update" below.
 
 ---
 
@@ -87,6 +90,31 @@ signing happens before the DMG and before the update packages.
 8. **Install it** — upgrade `/Applications/Tlgrm.app` itself. The updater
    replaces the bundle the client is *running from*, so testing against a copy
    elsewhere leaves the real installation untouched.
+
+### Testing an update without spending a version number
+
+The updater's only rule is `availableVersion > AppVersion` **of the running
+client**. So lower the tester rather than raising the release: keep one build
+pinned at an old version (7.0.0 / `7000000`) and every release you publish
+looks newer to it, forever, on the same number.
+
+```bash
+rm -rf /tmp/t && mkdir -p /tmp/t/workdir
+cp -R /tmp/tlgrm-tester-pristine.app /tmp/t/Tlgrm.app        # keep a pristine copy
+cp -R ~/Library/Application\ Support/Tlgrm/tdata /tmp/t/workdir/   # for the MTProto path
+/tmp/t/Tlgrm.app/Contents/MacOS/Tlgrm -workdir /tmp/t/workdir
+```
+
+The updater replaces the bundle it is **running from**, so always test a copy
+and restore it from the pristine one afterwards. Do not kill the client
+mid-swap — that leaves an empty bundle.
+
+Two related mechanisms: `publish_update.py --testing` writes the feed's
+`testing` key, which only a client that has typed `testupdate` reads (it does
+not save a version number, but it keeps a rehearsal off what real installs are
+offered); and alpha versions, `7.0.9.1` → `7000009001`, give 999 build numbers
+per patch, invisible to stable clients — but the tester must itself be an alpha
+build, since a stable client refuses alpha entries outright.
 
 ### Traps that cost hours
 
