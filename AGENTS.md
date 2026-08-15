@@ -5,7 +5,10 @@ upstream Telegram Desktop's guide and describes a cross-platform project; this
 file describes **ours**, and where the two disagree, this one wins.
 
 Tlgrm is a **macOS-only** fork of Telegram Desktop with an embedded MCP server.
-Current version **7.0.9** (`AppVersion 7000009`), built on upstream `v7.0.9`.
+Current version **7.0.10** (`AppVersion 7000010`), built on upstream `v7.0.9`.
+The fork's patch number advances independently of upstream once a
+release ships without an upstream bump — the updater compares the
+integer, so it has to increase for an update to be offered at all.
 
 ---
 
@@ -49,15 +52,15 @@ If an artifact of that kind already exists in the tree, something produced it.
    `create_beautiful_dmg.sh` is the fuller variant; see the warning below.
    Verify before publishing: `hdiutil attach`, confirm the volume holds only
    `Tlgrm.app` + `Applications`, and `lipo -info` says `x86_64 arm64`.
-5. **Update packages** — `uv run tools/publish_update.py --version 7000009`.
+5. **Update packages** — `uv run tools/publish_update.py --version 7000010`.
    It packs both platform keys, copies to the HTTP origin (ironforge must be
    reachable, or the HTTP half is skipped and the run exits non-zero), and
    posts to the MTProto channel.
-5. **GitHub release** (still manual — no automation exists):
+6. **GitHub release** (still manual — no automation exists):
    ```bash
-   gh release create v7.0.9 --repo CelestialTech/tlgrm \
-     --title "Tlgrm v7.0.9" --notes-file RELEASE_NOTES_7.0.9.md \
-     dmg_build/Tlgrm_7.0.9.dmg
+   gh release create v7.0.10 --repo CelestialTech/tlgrm \
+     --title "Tlgrm v7.0.10" --notes-file RELEASE_NOTES_7.0.10.md \
+     dmg_build/Tlgrm_7.0.10.dmg
    ```
 
 ### Traps that cost hours
@@ -104,5 +107,5 @@ as `upgrade-v<version>` branches.
 - `ENABLE_APP_SANDBOX = NO` on every target.
 - No AI attribution in commit messages, ever.
 - Use `uv` for Python, never raw `python3`/`pip`.
-- MCP: 355 tools, four declaration sites must agree — see
+- MCP: 355 tools, 619 described parameters, four declaration sites must agree — see
   `tdesktop/Telegram/SourceFiles/mcp/mcp_tool_backing.h` for the backing table.

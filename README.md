@@ -56,6 +56,7 @@ A custom fork of Telegram Desktop that gives you full control over your data. Ex
 [![MCP](https://img.shields.io/badge/MCP-1.0-green.svg)](https://modelcontextprotocol.io/)
 [![C++20](https://img.shields.io/badge/C++-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
+[![Version](https://img.shields.io/badge/version-7.0.10-brightgreen.svg)](https://github.com/CelestialTech/tlgrm/releases/latest)
 [![Base](https://img.shields.io/badge/base-tdesktop%207.0.9-blue.svg)](https://github.com/telegramdesktop/tdesktop)
 
 ---
