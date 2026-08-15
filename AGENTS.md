@@ -31,6 +31,9 @@ If an artifact of that kind already exists in the tree, something produced it.
 
 ## Cutting a release
 
+Order matters: everything downstream must contain the **signed** bundle, so
+signing happens before the DMG and before the update packages.
+
 1. **Build universal** — a plain `-scheme` build silently emits host-arch only:
    ```bash
    cd tdesktop/Telegram && ./configure.sh -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627
@@ -38,30 +41,52 @@ If an artifact of that kind already exists in the tree, something produced it.
      -configuration Release -destination 'generic/platform=macOS' build -jobs 24
    lipo -info Release/Tlgrm.app/Contents/MacOS/Tlgrm   # must say: x86_64 arm64
    ```
-2. **Fix the icon** (manual, every build):
+2. **Strip** — `xcodebuild build` never strips, and Packer refuses anything over
+   1 GB uncompressed. Strip by hand so the signature in step 3 is applied to the
+   final bytes:
    ```bash
-   iconutil --convert icns --output out/Release/Tlgrm.app/Contents/Resources/AppIcon.icns \
-     Telegram/Telegram/Images.xcassets/Icon.iconset/
+   strip -x out/Release/Tlgrm.app/Contents/MacOS/Tlgrm   # 1.56 GB -> ~491 MB
    ```
-3. **Strip before the DMG** — `publish_update.py` strips and re-signs the
-   bundle *in place*, and `create_dmg.sh` copies that same bundle. Either run
-   `publish_update.py --pack-only` first, or strip by hand, before step 4 —
-   otherwise the DMG ships the 1.56 GB unstripped app instead of the 491 MB
-   one. This ordering is not enforced by either script.
-4. **DMG** — `./create_dmg.sh` → `dmg_build/Tlgrm_<version>.dmg`.
-   `create_beautiful_dmg.sh` is the fuller variant; see the warning below.
-   Verify before publishing: `hdiutil attach`, confirm the volume holds only
-   `Tlgrm.app` + `Applications`, and `lipo -info` says `x86_64 arm64`.
-5. **Update packages** — `uv run tools/publish_update.py --version 7000010`.
-   It packs both platform keys, copies to the HTTP origin (ironforge must be
-   reachable, or the HTTP half is skipped and the run exits non-zero), and
-   posts to the MTProto channel.
-6. **GitHub release** (still manual — no automation exists):
+3. **Sign with the Developer ID — NOT optional.** An ad-hoc build runs fine from
+   the build directory and Gatekeeper refuses it the moment anyone downloads it,
+   because the download is quarantined and ad-hoc carries no usable signature.
+   `get-task-allow` must come out first; notarization rejects it.
    ```bash
-   gh release create v7.0.10 --repo CelestialTech/tlgrm \
-     --title "Tlgrm v7.0.10" --notes-file RELEASE_NOTES_7.0.10.md \
-     dmg_build/Tlgrm_7.0.10.dmg
+   codesign -d --entitlements :- out/Release/Tlgrm.app > /tmp/ents.plist
+   /usr/libexec/PlistBuddy -c "Delete :com.apple.security.get-task-allow" /tmp/ents.plist
+   ~/.claude/skills/macos-codesign/sign.sh --app out/Release/Tlgrm.app --entitlements /tmp/ents.plist
    ```
+4. **DMG, from the signed bundle** — `./create_dmg.sh` →
+   `dmg_build/Tlgrm_<version>.dmg`. The disk image needs its **own** signature;
+   a stapled ticket alone still assesses as "no usable signature".
+   ```bash
+   codesign --force --sign "Developer ID Application: Rodion Nazarov (LGAQBC2VM2)" \
+     --timestamp dmg_build/Tlgrm_<version>.dmg
+   ~/.claude/skills/macos-codesign/notarize.sh --target dmg_build/Tlgrm_<version>.dmg
+   ```
+5. **Verify with `spctl`, never `codesign --verify`** — the latter passes on an
+   ad-hoc signature and tells you nothing about Gatekeeper:
+   ```bash
+   hdiutil attach dmg_build/Tlgrm_<version>.dmg
+   spctl -a -vvv --type exec /Volumes/Tlgrm/Tlgrm.app  # accepted / Notarized Developer ID
+   find /Volumes/Tlgrm -iname '*.pkg' -o -iname '*tdata*'   # must be empty
+   ```
+6. **Update packages, from the same signed bundle** —
+   `uv run tools/publish_update.py --version <int> --no-strip`. Use `--no-strip`:
+   stripping would force an ad-hoc re-sign and silently downgrade the signature
+   (the script now refuses rather than doing it). It packs both platform keys,
+   copies to the HTTP origin, and posts to the MTProto channel.
+   `--testing` publishes under the feed's testing key instead, which only
+   clients that typed `testupdate` will see.
+7. **GitHub release** (still manual — no automation exists):
+   ```bash
+   gh release create v<version> --repo CelestialTech/tlgrm \
+     --title "Tlgrm v<version>" --notes-file RELEASE_NOTES_<version>.md \
+     dmg_build/Tlgrm_<version>.dmg
+   ```
+8. **Install it** — upgrade `/Applications/Tlgrm.app` itself. The updater
+   replaces the bundle the client is *running from*, so testing against a copy
+   elsewhere leaves the real installation untouched.
 
 ### Traps that cost hours
 
