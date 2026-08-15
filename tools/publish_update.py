@@ -387,7 +387,8 @@ def publish(
         version: int,
         packages: dict[str, Path],
         channel: str,
-        post_id: int | None = None) -> None:
+        post_id: int | None = None,
+        testing: bool = False) -> None:
     """Post the package once, then a feed JSON naming it for every platform.
 
     Packer's -arch only picks the output filename: the payload is the same
@@ -406,6 +407,11 @@ def publish(
     chat_id = resolve_channel(bridge, channel)
     print(f"Channel @{channel} -> chat_id {chat_id}")
 
+    # The client reads "released" normally and "testing" after the user types
+    # `testupdate` (settings_codes.cpp). Publishing under "testing" first lets
+    # a real client exercise the whole path without offering the build to
+    # everyone; promoting is re-running without --testing.
+    feed_key = "testing" if testing else "released"
     keys = [key for key, _arch, _prefix in PLATFORMS]
     arches = ", ".join(arch for _key, arch, _prefix in PLATFORMS)
     caption = f"Tlgrm {version_string(version)} — universal ({arches})"
@@ -418,14 +424,17 @@ def publish(
         print(f"Using the package already posted as #{post_id}")
 
     feed = {
-        key: {"stable": {"released": f"{version}:{channel}#{post_id}"}}
+        key: {"stable": {feed_key: f"{version}:{channel}#{post_id}"}}
         for key in keys
     }
     bridge.tool("send_message", {
         "chat_id": chat_id,
         "text": json.dumps(feed, separators=(",", ":")),
     })
-    print(f"\nFeed JSON posted, pointing {', '.join(keys)} at #{post_id}.")
+    print(f"\nFeed JSON posted under '{feed_key}', "
+          f"pointing {', '.join(keys)} at #{post_id}.")
+    if testing:
+        print("Only clients that have typed `testupdate` will see it.")
     print("It must remain the channel's latest message.")
 
 
@@ -447,6 +456,9 @@ def main() -> None:
                     help="Package directory the origin serves from")
     ap.add_argument("--no-strip", action="store_true",
                     help="Pack the bundle as built, without stripping it")
+    ap.add_argument("--testing", action="store_true",
+                    help="Publish under the feed's testing key instead of "
+                         "released; only clients that typed `testupdate` see it")
     ap.add_argument("--post-id", type=int,
                     help="Package already posted as this id; post only the "
                          "feed JSON naming it")
@@ -480,7 +492,7 @@ def main() -> None:
     if not args.skip_http:
         http_ok = publish_http(
             list(packages.values()), args.http_host, args.http_dir)
-    publish(args.version, packages, args.channel, args.post_id)
+    publish(args.version, packages, args.channel, args.post_id, args.testing)
 
     # Exit non-zero if only half the release landed, so a caller (or a human
     # skimming the tail of the output) cannot read partial success as success.
