@@ -35,6 +35,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import socket
@@ -42,6 +43,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+# Redirected runs buffer stdout, which makes a long pack+upload look hung and
+# leaves no evidence if it fails. Flush every line.
+print = functools.partial(print, flush=True)  # noqa: A001
 
 REPO = Path(__file__).resolve().parent.parent
 PACKER = REPO / "tdesktop/out/Release/Packer"
@@ -313,9 +318,20 @@ def resolve_channel(bridge: Bridge, username: str) -> int:
 
 
 def version_string(version: int) -> str:
-    """7000009 -> "7.0.9". The integer is what the client compares; this is
-    only for the human-readable caption."""
-    return f"{version // 1000000}.{version // 1000 % 1000}.{version % 1000}"
+    """700000901 -> "7.0.9a", 7000009 -> "7.0.9".
+
+    The integer is what the client compares; this is only for the caption.
+    Tlgrm encodes several releases per upstream base as `base * 100 + index`,
+    shown as a letter, so anything wider than upstream's seven digits carries
+    an index. Decoding it as plain upstream numbering produced captions like
+    "Tlgrm 700.0.901".
+    """
+    base, suffix = version, ""
+    if version > 9999999:
+        base, index = divmod(version, 100)
+        if index:
+            suffix = chr(ord("a") + index - 1)
+    return (f"{base // 1000000}.{base // 1000 % 1000}.{base % 1000}" + suffix)
 
 
 def latest_post_id(bridge: Bridge, chat_id: int) -> int | None:
