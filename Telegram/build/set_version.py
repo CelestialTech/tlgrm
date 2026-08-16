@@ -26,20 +26,25 @@ versionMinor = ''
 versionPatch = ''
 versionAlpha = '0'
 versionBeta = False
+# Tlgrm's own release letter on a given upstream base: 7.0.9a, 7.0.9b, ...
+# Empty means a plain upstream-numbered build.
+versionFork = ''
 for arg in sys.argv:
-  match = re.match(r'^\s*(\d+)\.(\d+)(\.(\d+)(\.(\d+|beta))?)?\s*$', arg)
+  # Trailing lowercase letter = this fork's release index on that base.
+  match = re.match(r'^\s*(\d+)\.(\d+)(\.(\d+)([a-z])?(\.(\d+|beta))?)?\s*$', arg)
   if match:
     inputVersion = arg
     versionOriginal = inputVersion
     versionMajor = match.group(1)
     versionMinor = match.group(2)
     versionPatch = match.group(4) if match.group(4) else '0'
-    versionAlphaBeta = match.group(5) if match.group(5) else ''
+    versionFork = match.group(5) if match.group(5) else ''
+    versionAlphaBeta = match.group(6) if match.group(6) else ''
     if len(versionAlphaBeta) > 0:
-      if match.group(6) == 'beta':
+      if match.group(7) == 'beta':
         versionBeta = True
       else:
-        versionAlpha = match.group(6)
+        versionAlpha = match.group(7)
 
 if not len(versionMajor):
   print("Wrong version parameter")
@@ -56,13 +61,35 @@ checkVersionPart(versionMinor)
 checkVersionPart(versionPatch)
 checkVersionPart(versionAlpha)
 
-versionFull = str(int(versionMajor) * 1000000 + int(versionMinor) * 1000 + int(versionPatch))
+versionUpstream = int(versionMajor) * 1000000 + int(versionMinor) * 1000 + int(versionPatch)
+
+# One upstream base carries several Tlgrm releases, so the comparable integer
+# is `upstreamBase * 100 + index` -- 7.0.9a is 700000901, 7.0.9b is 700000902.
+# A newer upstream base always outranks every letter on an older one, and the
+# base stays readable in the number and in package filenames. Packer refuses
+# anything over 999999999 (packer.cpp), which this reaches at upstream major
+# 10; the scheme needs revisiting before then.
+# cmake/version.cmake (a shared upstream submodule, not ours to change) reads
+# ONLY AppVersionOriginal, splits it on '.' and does integer math on the parts,
+# so that field has to stay numeric -- it feeds the bundle's
+# CFBundleShortVersionString. Fold the fork index into the patch component so
+# it stays both parseable and unique per release: 7.0.9a -> 7.0.901.
+if versionFork:
+  forkIndex = ord(versionFork) - ord('a') + 1
+  versionOriginal = (versionMajor + '.' + versionMinor + '.'
+    + str(int(versionPatch) * 100 + forkIndex))
+  versionFull = str(versionUpstream * 100 + forkIndex)
+  if int(versionFull) > 999999999:
+    print("Version too large for the packer: " + versionFull)
+    finish(1)
+else:
+  versionFull = str(versionUpstream)
 versionFullAlpha = '0'
 if versionAlpha != '0':
   versionFullAlpha = str(int(versionFull) * 1000 + int(versionAlpha))
 
-versionStr = versionMajor + '.' + versionMinor + '.' + versionPatch
-versionStrSmall = versionStr if versionPatch != '0' else versionMajor + '.' + versionMinor
+versionStr = versionMajor + '.' + versionMinor + '.' + versionPatch + versionFork
+versionStrSmall = versionStr if versionPatch != '0' else versionMajor + '.' + versionMinor + versionFork
 
 if versionBeta:
   print('Setting version: ' + versionStr + ' beta')

@@ -148,18 +148,42 @@ void Changelogs::addBetaLog(int changeVersion, const char *changes) {
 	addLocalLog(log);
 }
 
+// Tlgrm ships several releases on one upstream base, so AppVersion encodes
+// both: `upstreamBase * 100 + index`, where index 1..99 is this fork's release
+// on that base and shows up as a letter -- 700000901 is "7.0.9a". Upstream's
+// own numbering is at most seven digits, so anything wider is ours, and both
+// forms have to decode here: `version` also arrives as the value a previous
+// install stored, which may predate the scheme.
+[[nodiscard]] int UpstreamBase(int version) {
+	return (version > 9999999) ? (version / 100) : version;
+}
+
+[[nodiscard]] QString ForkSuffix(int version) {
+	if (version <= 9999999) {
+		return QString();
+	}
+	const auto index = version % 100;
+	return index
+		? QString(QChar('a' + index - 1))
+		: QString();
+}
+
 QString FormatVersionDisplay(int version) {
-	return QString::number(version / 1000000)
-		+ '.' + QString::number((version % 1000000) / 1000)
-		+ ((version % 1000)
-			? ('.' + QString::number(version % 1000))
-			: QString());
+	const auto base = UpstreamBase(version);
+	return QString::number(base / 1000000)
+		+ '.' + QString::number((base % 1000000) / 1000)
+		+ ((base % 1000)
+			? ('.' + QString::number(base % 1000))
+			: QString())
+		+ ForkSuffix(version);
 }
 
 QString FormatVersionPrecise(int version) {
-	return QString::number(version / 1000000)
-		+ '.' + QString::number((version % 1000000) / 1000)
-		+ '.' + QString::number(version % 1000);
+	const auto base = UpstreamBase(version);
+	return QString::number(base / 1000000)
+		+ '.' + QString::number((base % 1000000) / 1000)
+		+ '.' + QString::number(base % 1000)
+		+ ForkSuffix(version);
 }
 
 } // namespace Core
