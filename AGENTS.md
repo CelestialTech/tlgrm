@@ -5,13 +5,71 @@ upstream Telegram Desktop's guide and describes a cross-platform project; this
 file describes **ours**, and where the two disagree, this one wins.
 
 Tlgrm is a **macOS-only** fork of Telegram Desktop with an embedded MCP server.
-Current version **7.0.9** (`AppVersion 7000009`), built on upstream `v7.0.9`.
+Current version **7.0.9a** (`AppVersion 700000901`), built on upstream `v7.0.9`.
 
-**Version numbers are not free.** The updater compares `AppVersion` as an
-integer with a strict `>`, so shipping a fix to installed clients costs a
-number. To re-test the update path without spending one, run a client pinned
-to a *lower* version and let it see the current release — see "Testing an
-update" below.
+## Versioning — several fork releases per upstream base
+
+The fork ships more than one release on a single Telegram Desktop base, so the
+version carries two numbers: upstream's, and ours.
+
+```
+display   7.0.9a            7.0.9b            7.0.12a
+AppVersion 700000901        700000902         700001201
+           = 7000009*100+1  = 7000009*100+2   = 7000012*100+1
+```
+
+`AppVersion = upstreamBase * 100 + index`, where index 1..99 is this fork's
+release on that base and renders as a letter. Set it with the version script,
+which understands the letter form directly:
+
+```bash
+cd tdesktop/Telegram && python build/set_version.py 7.0.9b
+```
+
+Why this shape:
+
+- **The updater compares `AppVersion` with a strict `>`.** Every release we
+  ship has to raise it, so a fork release cannot reuse upstream's number.
+- **Monotonic on both axes.** A newer upstream base outranks every letter on an
+  older one (`700001200 > 700000999`), so a rebase never collides with the
+  letters already shipped.
+- **The base stays readable** in the integer and in package filenames
+  (`tarmacupd700000901`), which matters when reading a feed.
+- **Bounds:** Packer refuses anything over `999999999` (`packer.cpp:207`) and
+  tdata stores the value as `qint32`. The worst case in this scheme,
+  `9.999.999z` → `999999926`, clears both. It stops working at upstream major
+  10, which is when the scheme needs revisiting.
+
+There are **three version fields and three consumers**, and they are not
+interchangeable:
+
+| Field | Read by | Value for 7.0.9a |
+|---|---|---|
+| `AppVersion` | the updater's comparison, tdata gates | `700000901` |
+| `AppVersionStr` | About box, logs, what people read | `7.0.9a` |
+| `AppVersionOriginal` | `cmake/version.cmake` parser **only** | `7.0.9` |
+
+`cmake/version.cmake` is a shared upstream submodule, not ours to change. It
+splits `AppVersionOriginal` on `.` and does integer math on the parts, so that
+field must stay plain upstream numbering. The bundle's
+`CFBundleShortVersionString` would then read "7.0.9" for every letter, so the
+root `CMakeLists.txt` overrides the two display variables from
+`AppVersionStr` — the plist reads `7.0.9a`, and the override lives in our file
+rather than the submodule. `set_version.py` derives all three fields from one
+argument, so use it rather than editing by hand; editing `build/version` alone
+leaves a stale plist, silently, because that regex is unanchored and cmake
+caches its parse.
+
+Only two places decode the integer, both display-only —
+`FormatVersionDisplay` / `FormatVersionPrecise` in `core/changelogs.cpp` — and
+they handle legacy values too, since `oldVersion` may predate the scheme
+(anything ≤ 7 digits is read as plain upstream numbering). Everything else,
+including the tdata gates in `localstorage.cpp`, treats `AppVersion` as an
+opaque monotonic integer.
+
+**This is a one-way door:** tdata written by a higher version cannot be opened
+by a lower one. Going from `7000009` to `700000901` is a normal upgrade, but it
+cannot be walked back.
 
 ---
 
