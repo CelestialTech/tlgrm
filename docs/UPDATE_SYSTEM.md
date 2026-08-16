@@ -15,17 +15,23 @@ if **both** fail, so one being unavailable is not an outage.
 GET https://updates.71grm.site/current
 ```
 
-The path is `{prefix}/current` + `Platform::AutoUpdateVersion()`, which is `4`
-on current macOS. The prefix is stored per-installation and defaults to
-`https://updates.71grm.site` (`storage/localstorage.cpp`,
-`readAutoupdatePrefixRaw`).
+The path is plain `{prefix}/current`. Upstream appends
+`Platform::AutoUpdateVersion()` (a generation suffix, `4` on current macOS);
+that was removed here, so the origin serves `/current` and nothing else.
+
+The prefix is **pinned** to `https://updates.71grm.site`
+(`storage/localstorage.cpp`). It is not a per-installation default: Telegram's
+config carries an `autoupdate_url_prefix` on every load and upstream stores it
+verbatim, which pointed every install at `td.telegram.org` — a feed that will
+never list a Tlgrm version. A foreign prefix is now ignored, and a prefix file
+left by an older build is discarded on read.
 
 The response is keyed by platform, then by channel:
 
 ```json
 {
-  "armac": { "stable": { "released": "7000007", "link": "/tarmacupd7000007" } },
-  "mac":   { "stable": { "released": "7000007", "link": "/tmacupd7000007"  } }
+  "armac": { "stable": { "released": "700000901", "link": "/tarmacupd700000901" } },
+  "mac":   { "stable": { "released": "700000901", "link": "/tmacupd700000901"  } }
 }
 ```
 
@@ -37,10 +43,10 @@ Served by **`update-server/`** running on `ironforge.local` — a static musl
 binary that generates this response from the packages in `/srv/tlgrm-updates`,
 published through its own Cloudflare tunnel.
 
-`cloudflare-worker/` implements the same protocol from GitHub release assets
-and remains in the repository as an alternative origin. Only one can own the
-hostname; the Worker's custom-domain binding was removed when ironforge took
-it over.
+`cloudflare-worker/` implements the same protocol from GitHub release assets.
+It is **superseded**: its custom-domain binding was removed when ironforge took
+the hostname over, and nothing routes through it. It stays in the repository
+only as a reference implementation.
 
 ### MTProto
 
@@ -53,10 +59,10 @@ be JSON of the same shape with one difference: `released` is not a version but a
 **location**.
 
 ```json
-{ "armac": { "stable": { "released": "7000007:updates71grm#42" } } }
+{ "armac": { "stable": { "released": "700000901:updates71grm#9" } } }
 ```
 
-That is `<version>:<channel>#<postId>`. The client then fetches post `42` in
+That is `<version>:<channel>#<postId>`. The client then fetches post `9` in
 that channel and downloads the document attached to it.
 
 Two consequences worth knowing:
@@ -108,13 +114,21 @@ All three are `Tlgrm`. The `Updater` binary swaps the bundle on next launch.
 ## Publishing a release
 
 ```bash
-tools/publish_update.py --version 7000007
+tools/publish_update.py --version 700000901 --no-strip
 ```
 
-It packs, refuses to continue unless Packer reports `Signature verified!`,
-uploads the package to the channel through the running client's MCP bridge
-(packages are ~74 MB, past the Bot API's 50 MB ceiling), reads back the post id,
-and posts the feed JSON last.
+It refuses to pack a bundle that is not universal, packs both platform keys,
+refuses to continue unless Packer reports `Signature verified!`, copies to the
+HTTP origin, uploads the package to the channel through the running client's
+MCP bridge (packages are ~110 MB, past the Bot API's 50 MB ceiling), reads back
+the post id, and posts the feed JSON last.
+
+**The bundle must be Developer ID signed and notarized before this runs** — see
+the release steps in AGENTS.md. Packing an unsigned bundle produces an update
+that installs an app Gatekeeper refuses once downloaded. `--no-strip` is
+required on an already-stripped, signed bundle: stripping forces a re-sign, and
+the re-sign here can only be ad-hoc, so the script refuses rather than silently
+downgrading the signature.
 
 The GitHub release carries the **DMG**, for people downloading the app by
 hand. It plays no part in updates: `/current` is served by the update-server
@@ -131,15 +145,17 @@ Both delivery paths are provisioned, serving, and carrying a release.
 | MTProto | `@updates71grm` | feed JSON is the channel's latest message |
 | HTTP | `updates.71grm.site` | ironforge via tunnel, serving both platform keys |
 
-Verified end to end on 11 August 2026 with 7.0.9. `/current` returns:
+Verified end to end on 16 August 2026 with 7.0.9a. `/current` returns:
 
 ```json
-{"armac":{"stable":{"link":"/tarmacupd7000009","released":"7000009"}},
- "mac":{"stable":{"link":"/tmacupd7000009","released":"7000009"}}}
+{"armac":{"stable":{"link":"/tarmacupd700000901","released":"700000901"}},
+ "mac":{"stable":{"link":"/tmacupd700000901","released":"700000901"}}}
 ```
 
-and the channel's latest message is the matching feed JSON, pointing both
-platform keys at the post carrying the package.
+The version integer is `upstreamBase * 100 + forkIndex` — see the versioning
+section of AGENTS.md. `700000901` is 7.0.9a: Telegram Desktop 7.0.9, Tlgrm
+release `a`. The channel's latest message is the matching feed JSON, pointing
+both platform keys at the post carrying the package.
 
 **Both keys must always be present.** The binary is universal; publishing only
 `armac` tells every Intel Mac that no update exists while one does. Packer's

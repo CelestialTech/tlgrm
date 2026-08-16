@@ -1,6 +1,6 @@
 # Tlgrm release pipeline — reconstructed from code (agent w1)
 
-Repo root: `/Users/pasha/xCode/tlgrm`. Submodule: `tdesktop/`. Current source version: **7.0.9 / AppVersion 7000009**.
+Repo root: `/Users/pasha/xCode/tlgrm`. Submodule: `tdesktop/`. Current source version: **7.0.9a / AppVersion 700000901**.
 
 Everything below is derived from the scripts themselves. Where a document says otherwise, the document is wrong and the discrepancy is called out.
 
@@ -18,7 +18,7 @@ There is no *single* release script. There are **three** artifacts-producing ent
 | Publish to HTTP origin `updates.71grm.site` | `tools/publish_update.py --http-host` (scp) | **yes**, scripted |
 | DMG for humans | `create_dmg.sh` (canonical) | **yes**, scripted |
 | GitHub Release + asset upload | *nothing* | **no** — 100% manual `gh` |
-| Developer ID signing / notarization | *nothing* | **no** — not done at all |
+| Developer ID signing / notarization | `~/.claude/skills/macos-codesign/` (`sign.sh`, `notarize.sh`) | **yes**, scripted — mandatory since 7.0.9a |
 
 So: a release script exists (`tools/publish_update.py`, added in `b19769708e`, 2026-08-05) and a DMG script exists (`create_dmg.sh`). What does **not** exist is any `gh release` automation.
 
@@ -28,19 +28,37 @@ So: a release script exists (`tools/publish_update.py`, added in `b19769708e`, 2
 
 ### 1.1 Source / version
 
-1. **Set the version** in `tdesktop/Telegram/build/version`:
+1. **Set the version with the script, not by hand:**
+   ```bash
+   cd tdesktop/Telegram && python build/set_version.py 7.0.9b
    ```
-   AppVersion         7000009
+   The fork ships several releases per upstream base, so the trailing letter is
+   its release index and `AppVersion = upstreamBase * 100 + index`. For 7.0.9a
+   that produces:
+   ```
+   AppVersion         700000901     # the updater's comparison
    AppVersionStrMajor 7.0
-   AppVersionStrSmall 7.0.9
-   AppVersionStr      7.0.9
+   AppVersionStrSmall 7.0.9a
+   AppVersionStr      7.0.9a        # what people read, and the bundle plist
    BetaChannel        0
    AlphaVersion       0
-   AppVersionOriginal 7.0.9
+   AppVersionOriginal 7.0.9         # cmake/version.cmake's parser only
    ```
-2. **Propagate it** with `tdesktop/Telegram/build/set_version.sh <version>` → runs `set_version.py`, which rewrites `tdesktop/Telegram/SourceFiles/core/version.h` (`constexpr auto AppVersion = 7000009; constexpr auto AppVersionStr = "7.0.9";`) and the Windows/setup files. `Info.plist`'s `CFBundleShortVersionString` is derived by CMake from the same source and currently reads `7.0.9`.
+   `AppVersionOriginal` stays plain upstream numbering because
+   `cmake/version.cmake` — a shared upstream submodule — splits it on `.` and
+   does integer math on the parts. The root `CMakeLists.txt` then overrides the
+   plist strings from `AppVersionStr`, so `CFBundleShortVersionString` reads
+   `7.0.9a`.
 
-   **Lockstep set:** `build/version` ↔ `core/version.h` ↔ `Info.plist` ↔ the `--version` integer passed to `publish_update.py` ↔ the package filename (`tarmacupd<version>`) ↔ the `released` field in the feed JSON. All six must agree; only the first two are mechanically linked.
+   **Editing `build/version` by hand fails silently.** That parser's regex is
+   unanchored, so a letter does not error, and CMake caches its parse — the
+   bundle keeps the previous version while the compiled binary reports the new
+   one.
+
+   **Lockstep set:** `build/version` ↔ `core/version.h` ↔ `Info.plist` ↔ the
+   `--version` integer passed to `publish_update.py` ↔ the package filename
+   (`tarmacupd<version>`) ↔ the `released` field in the feed JSON. All six must
+   agree; `set_version.py` links the first three.
 
 ### 1.2 Configure (the step that silently kills releases)
 
@@ -125,7 +143,7 @@ The update packages only *matter* on the release if `cloudflare-worker/` is serv
 
 ### 1.7 What reaches a user's Mac
 
-- **New install:** README:54 → GitHub Releases → `Tlgrm_<v>.dmg` → drag to Applications. The app is **ad-hoc signed, not notarized** (`Signature=adhoc`, `TeamIdentifier=not set`), so Gatekeeper will block it on a fresh Mac.
+- **New install:** README:54 → GitHub Releases → `Tlgrm_<v>.dmg` → drag to Applications. Since 7.0.9a the app and the disk image are **Developer ID signed and notarized** (`spctl -a -vvv` → `accepted / source=Notarized Developer ID`). Before that they were ad-hoc signed, and Gatekeeper blocked them on any Mac that downloaded them.
 - **Update:** `Updater::start()` runs the HTTP and MTProto checkers in parallel; either may supply it. Client downloads to `tupdates/temp/`, verifies with the public key in `SourceFiles/config.h`, `checkReadyUpdate()` looks for `tupdates/temp/Tlgrm.app/Contents/Frameworks/Updater`, and the `Updater` binary swaps the bundle on next launch.
 
 ---
@@ -169,7 +187,7 @@ The update packages only *matter* on the release if `cloudflare-worker/` is serv
 4. **Anything posted to `@updates71grm` after the feed JSON** → all MTProto update checks stop until a new JSON is posted.
 5. **Bundle-name drift** across CMakeLists `output_name` / `updater_osx.m` `appName` / `update_checker.cpp` path → update downloads, verifies, installs nothing.
 6. **DMG built before `publish_update.py`** → ships a ~1.5 GB unstripped binary; built after → ships the ad-hoc re-signed stripped one. Undocumented.
-7. **No notarization at any point** → Gatekeeper blocks the DMG. The pipeline never invokes `notarytool` or a Developer ID identity.
+7. **Signing happens before packaging, or not at all.** The DMG and the update packages must both be built *from the signed bundle*, so `sign.sh` runs after stripping and before `create_dmg.sh` and `publish_update.py`. Verify with `spctl`, never `codesign --verify` — the latter passes on an ad-hoc signature and says nothing about Gatekeeper.
 8. **`--version` typo** → package filename, feed JSON and `AppVersion` disagree; the client either never sees the update or loops on it.
 
 ---
@@ -178,7 +196,9 @@ The update packages only *matter* on the release if `cloudflare-worker/` is serv
 
 **Covers:** stripping + ad-hoc re-signing the bundle; running Packer for both platform keys; the `Signature verified!` gate; scp to the HTTP origin; MTProto upload through the client's MCP bridge; post-id readback; feed JSON in the correct order; `--pack-only`, `--skip-http`, `--no-strip`, `--post-id` recovery paths.
 
-**Does not cover:** setting or validating the version; configuring or building; verifying the binary is universal; verifying the `config.h` key matches; DMG creation; Developer ID signing; notarization/stapling; creating a GitHub release or uploading any asset; writing release notes; tagging git; restarting/validating `update-server` on ironforge; any post-publish verification that `https://updates.71grm.site/current` now returns the new version.
+**Covers now:** verifying the binary is universal (refuses to pack otherwise); refusing to ad-hoc re-sign a Developer ID bundle; packing both platform keys; copying to the HTTP origin (non-fatal on failure, non-zero exit); posting to the channel and the feed JSON last.
+
+**Does not cover:** setting or validating the version; configuring or building; verifying the `config.h` key matches; DMG creation; Developer ID signing and notarization (a separate skill, invoked by hand); creating a GitHub release or uploading any asset; writing release notes; tagging git; restarting/validating `update-server` on ironforge; post-publish verification that `https://updates.71grm.site/current` returns the new version.
 
 ---
 
@@ -216,7 +236,7 @@ cd ../out && xcodebuild -project Telegram.xcodeproj -scheme Telegram \
   -configuration Release -destination 'generic/platform=macOS' build -jobs 24
 lipo -info Release/Tlgrm.app/Contents/MacOS/Tlgrm     # must be x86_64 arm64
 
-# 4. (missing today) Developer ID sign bottom-up + notarize + staple
+# 4. Developer ID sign bottom-up + notarize + staple (macos-codesign skill)
 
 # 5. pack & publish the update — Tlgrm must be RUNNING and signed in
 tools/publish_update.py --version <AppVersion>
