@@ -12,6 +12,24 @@ include(cmake/validate_special_target.cmake)
 include(cmake/version.cmake)
 desktop_app_parse_version(Telegram/build/version)
 
+# The shared parser reads AppVersionOriginal, splits it on '.' and does integer
+# math on the parts, so that field has to stay plain upstream numbering. This
+# fork ships several releases per upstream base and names them with a letter
+# (7.0.9a), and that is what belongs in the bundle -- otherwise Get Info shows
+# "7.0.9" for every one of them, or an invented patch number like "7.0.901".
+# Only the plist and an Xcode attribute read these two variables, so overriding
+# them here changes nothing but what a person sees.
+file(STRINGS Telegram/build/version _tlgrm_version_lines)
+foreach (_line ${_tlgrm_version_lines})
+    string(REGEX MATCH "^AppVersionStr[ \t]+(.+)$" _matched "${_line}")
+    if (_matched)
+        string(STRIP "${CMAKE_MATCH_1}" _tlgrm_version_str)
+        set(desktop_app_version_string ${_tlgrm_version_str})
+        set(desktop_app_version_string_small ${_tlgrm_version_str})
+        break()
+    endif()
+endforeach()
+
 if (NOT DEFINED CMAKE_CONFIGURATION_TYPES)
     set(configuration_types_init 1)
 endif()
