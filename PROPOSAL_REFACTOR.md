@@ -84,33 +84,63 @@ real tax — the surface went 326 → 339 → 355 over months, which is not that
 
 ---
 
-## P2 — `LocalOnly` is a second product hiding inside the first
+## P2 — Telebox: what is actually in the box
 
-**Observation.** 229 of 355 tools never touch Telegram. They read and write a
-local SQLite store: wallets, budgets, price alerts, auctions, gift
-marketplaces, task lists, chat rules. They appear in the same `tools/list` as
-`send_message`.
+**The first draft proposed** splitting the tool surface into `telegram.*` and
+`local.*` namespaces. The minimalism gate rejected that, correctly: the
+`backing` field already tells a caller which store answered, and renaming 355
+tools is a breaking change for information the caller already has.
 
-**The first draft proposed** splitting the surface into `telegram.*` and
-`local.*` namespaces.
+**But the gate answered the wrong question.** The point was never labelling.
+229 of 355 tools do not touch Telegram, and a chunk of those are not a
+Telegram client feature at all — they are a separate application that happens
+to live in the same process. That application now has a name: **Telebox**.
 
-### Ponytail gate
+### `LocalOnly` is not the seam
 
-- **Rung 1 — does it need to exist?** **This rung holds. Do not build it.**
+Backing says *which store answered*. The seam is *what the tool is about*, and
+the two do not coincide. Splitting on `backing == LocalOnly` would take 229
+tools; splitting on subject matter gives a different set.
 
-The distinction is already carried: every response and every `tools/list` entry
-has a `backing` field naming exactly which store answered. That field was added
-for this precise confusion, and it works. Renaming 355 tools is a breaking
-change for every existing caller, bought in exchange for information the caller
-already has.
+| | Tools | Example | Where it belongs |
+|---|---|---|---|
+| **About Telegram data, stored locally** | ~33 | `archive_chat`, `search_archive`, `get_chat_activity`, `semantic_search`, the gradual-export and deleted-account tools | the client — this *is* what the fork is for |
+| **Not about Telegram at all** | ~150 | `set_wallet_budget`, `configure_ai_chatbot`, `clone_voice`, `backtest_strategy`, `create_gift_auction` | Telebox |
+| **Local bookkeeping of a Telegram concept** | ~45 | `buy_gift`, `get_star_reactions`, `browse_gift_marketplace` | needs deciding per tool |
 
-**Gate verdict: rejected.** What remains is not a refactor but a question worth
-answering with data: **how many of the 229 are ever called?** If a meaningful
-share are dead, deleting them is a far deeper simplification than renaming them
-— the absence of a module being the deepest module of all. That needs usage
-data we do not currently collect.
+The middle category is unambiguous. The third is the one that needs judgement:
+a tool named after a real Telegram feature but implemented against a local
+store is either a ledger *for* that feature or a simulation *of* it, and which
+one it is has to be read per tool. Nothing should be moved on the strength of
+its name.
 
----
+The concentration is helpful: 182 of the 229 live in five files
+(`mcp_settings_tools.cpp` 77, `mcp_stars_tools.cpp` 36,
+`mcp_business_tools.cpp` 31, `mcp_wallet_tools.cpp` 20,
+`mcp_premium_tools.cpp` 18), and those five are almost entirely category two.
+The tail — archive, gradual export, deleted accounts, analytics, search,
+system — is almost entirely category one.
+
+### Decided
+
+- **Telebox stays a subproject** inside this repository for now, on the
+  `telebox` branch. The client half of the separation is `tlgrm-desktop` in
+  the submodule.
+- **It may become separate later.** Nothing done now should assume either
+  outcome; the useful work is finding the seam, not moving directories.
+- **No namespace rename.** That was the rejected proposal and it stays
+  rejected. If a split happens it is a real separation, not a prefix.
+
+### Next, in order
+
+1. **Classify the ~45 ambiguous tools** by reading each implementation — is it
+   a ledger for a Telegram feature, or a self-contained simulation? This is
+   reading, not refactoring, and it decides the size of the box.
+2. **Find what the two halves share.** The MCP server, the socket, the auth
+   token, the SQLite handle, the audit log. Whatever is shared is the real
+   interface between them, and it is currently implicit.
+3. **Only then** consider moving code. A separation designed before its seam is
+   known is how the first draft ended up proposing a rename.
 
 ## P3 — The release pipeline is four tools, two docs and a skill
 
@@ -221,11 +251,11 @@ of confusion removed per minute spent.
 | 2 | **P4** — gitignore the cache, decide on pythonMCP | **done** — caches ignored; pythonMCP declared superseded |
 | 3 | **P3** — one release script | **done** — `tools/release.py` |
 | 4 | **P1** — build-time cross-check | **done** — `tools/check_mcp_tools.py`, PRE_BUILD |
-| 5 | **P2** — split or measure the local-only tools | **closed, not doing** |
+| 5 | **P2** — Telebox | **reframed** — the seam is subject matter, not backing; see above |
 
-**P2 closed by decision (2026-08-17):** local-only tools are part of the
-product; the `backing` field already distinguishes them. No split, no usage
-measurement.
+**P2 reframed (2026-08-17):** local-only tools are part of the product — but
+part of *which* product is the question, and the answer is Telebox for most of
+them. The `backing` field distinguishes stores, not subjects.
 
 **Also delivered alongside these:** resumable update downloads. The server
 ignored the `Range` header the updater sends on every request, so an

@@ -189,10 +189,32 @@ build, since a stable client refuses alpha entries outright.
 | `DesktopPrivate/` | RSA update-signing keys. Never commit, print, or upload. |
 | `docs/UPDATE_SYSTEM.md` | How updates work, both paths. |
 
-**Repo warning:** one GitHub repo (`CelestialTech/tlgrm`) backs both the parent
-repo and the `tdesktop` submodule, and `origin/master` there belongs to the
-**parent**. Never push the submodule's master to it — the submodule publishes
-as `upgrade-v<version>` branches.
+### Branches, and one sharp edge
+
+**One GitHub repo (`CelestialTech/tlgrm`) backs both the parent repo and the
+`tdesktop` submodule.** They share a branch namespace, so:
+
+- `origin/master` belongs to the **parent**. Pushing the submodule's master
+  there would overwrite it. (This has been attempted; git rejected it.)
+- No two branches can share a name across the two repos, which is why the
+  paired branches below differ.
+
+| Branch | Repo | What |
+|---|---|---|
+| `master` | parent | Shipping. Pins the submodule commit a release was cut from. |
+| `upgrade-v<version>` | submodule | Shipping client work, per upstream base. |
+| `telebox` | parent | Separating the local-only surface into its own thing. |
+| `tlgrm-desktop` | submodule | The client half of that separation. |
+
+**Release work goes on the shipping branches; everything else does not.** A
+build-time check was once fast-forwarded straight onto `upgrade-v7.0.9`, which
+coupled unreviewed work to the branch releases are cut from.
+
+**Check which repo you are in before committing.** A `cd` that fails in a
+compound command leaves the shell in the previous directory, and a
+`git checkout -b` then creates the branch in the wrong repository — silently,
+because both are git repos. Prefer `git -C <absolute path>` over relying on the
+working directory.
 
 ---
 
