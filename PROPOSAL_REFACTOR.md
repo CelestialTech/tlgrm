@@ -142,9 +142,16 @@ its current implementation; the only new thing is one program that knows they
 are ordered and refuses to run them out of order.
 
 ```
-// ponytail: linear script, no resume — add --from only when a real release
-// actually needs restarting from the middle
+// ponytail: idempotent steps, no --from — each step skips when its output
+// already exists, which covers resume without a resume mechanism
 ```
+
+**Revised during implementation.** The gate rejected `--dry-run` as
+speculative. Building the script proved otherwise: there is no other way to
+test an orchestrator whose last three steps publish to a channel, an origin and
+a GitHub release. It is in. `--from` stayed out — idempotent steps turned out
+to cover the same need more simply, which is the better answer than either
+option in the first draft.
 
 ---
 
@@ -200,13 +207,22 @@ of confusion removed per minute spent.
 
 ## Suggested order
 
-| | Item | Size | Why here |
-|---|---|---|---|
-| 1 | **P5** — label superseded things | an afternoon | No risk, immediate clarity |
-| 2 | **P4** — gitignore the cache, decide on pythonMCP | an hour + a decision | Stops an 18,524-file accident |
-| 3 | **P3** — one release script | small | Highest incident rate of anything here |
-| 4 | **P1** — build-time cross-check | an afternoon | Turns a class of past defects into compile errors |
-| 5 | **P2** — usage data for the 229 local tools | measurement | Decides whether the real answer is deletion |
+| | Item | Status |
+|---|---|---|
+| 1 | **P5** — label superseded things | **done** — `create_dmg.sh`, `create_beautiful_dmg.sh`, `cloudflare-worker/src/worker.ts` |
+| 2 | **P4** — gitignore the cache, decide on pythonMCP | **done** — caches ignored; pythonMCP declared superseded |
+| 3 | **P3** — one release script | **done** — `tools/release.py` |
+| 4 | **P1** — build-time cross-check | next |
+| 5 | **P2** — split or measure the local-only tools | **closed, not doing** |
+
+**P2 closed by decision (2026-08-17):** local-only tools are part of the
+product; the `backing` field already distinguishes them. No split, no usage
+measurement.
+
+**Also delivered alongside these:** resumable update downloads. The server
+ignored the `Range` header the updater sends on every request, so an
+interrupted 110 MB download restarted from zero. Not in the original five —
+it came out of the audit's constants table and was prioritised on request.
 
 Nothing in this list is a large refactor, which is the gate working: the two
 big rewrites in the first draft — a tool-declaration generator and a 355-tool

@@ -92,62 +92,62 @@ If an artifact of that kind already exists in the tree, something produced it.
 
 ## Cutting a release
 
-Order matters: everything downstream must contain the **signed** bundle, so
-signing happens before the DMG and before the update packages.
+```bash
+tools/release.py 7.0.9b            # the whole thing
+tools/release.py 7.0.9b --dry-run  # print the plan, touch nothing
+```
 
-1. **Build universal** — a plain `-scheme` build silently emits host-arch only:
-   ```bash
-   cd tdesktop/Telegram && ./configure.sh -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627
-   cd ../out && xcodebuild -project Telegram.xcodeproj -scheme Telegram \
-     -configuration Release -destination 'generic/platform=macOS' build -jobs 24
-   lipo -info Release/Tlgrm.app/Contents/MacOS/Tlgrm   # must say: x86_64 arm64
-   ```
-2. **Strip** — `xcodebuild build` never strips, and Packer refuses anything over
-   1 GB uncompressed. Strip by hand so the signature in step 3 is applied to the
-   final bytes:
-   ```bash
-   strip -x out/Release/Tlgrm.app/Contents/MacOS/Tlgrm   # 1.56 GB -> ~491 MB
-   ```
-3. **Sign with the Developer ID — NOT optional.** An ad-hoc build runs fine from
-   the build directory and Gatekeeper refuses it the moment anyone downloads it,
-   because the download is quarantined and ad-hoc carries no usable signature.
-   `get-task-allow` must come out first; notarization rejects it.
-   ```bash
-   codesign -d --entitlements :- out/Release/Tlgrm.app > /tmp/ents.plist
-   /usr/libexec/PlistBuddy -c "Delete :com.apple.security.get-task-allow" /tmp/ents.plist
-   ~/.claude/skills/macos-codesign/sign.sh --app out/Release/Tlgrm.app --entitlements /tmp/ents.plist
-   ```
-4. **DMG, from the signed bundle** — `./create_dmg.sh` →
-   `dmg_build/Tlgrm_<version>.dmg`. The disk image needs its **own** signature;
-   a stapled ticket alone still assesses as "no usable signature".
-   ```bash
-   codesign --force --sign "Developer ID Application: Rodion Nazarov (LGAQBC2VM2)" \
-     --timestamp dmg_build/Tlgrm_<version>.dmg
-   ~/.claude/skills/macos-codesign/notarize.sh --target dmg_build/Tlgrm_<version>.dmg
-   ```
-5. **Verify with `spctl`, never `codesign --verify`** — the latter passes on an
-   ad-hoc signature and tells you nothing about Gatekeeper:
-   ```bash
-   hdiutil attach dmg_build/Tlgrm_<version>.dmg
-   spctl -a -vvv --type exec /Volumes/Tlgrm/Tlgrm.app  # accepted / Notarized Developer ID
-   find /Volumes/Tlgrm -iname '*.pkg' -o -iname '*tdata*'   # must be empty
-   ```
-6. **Update packages, from the same signed bundle** —
-   `uv run tools/publish_update.py --version <int> --no-strip`. Use `--no-strip`:
-   stripping would force an ad-hoc re-sign and silently downgrade the signature
-   (the script now refuses rather than doing it). It packs both platform keys,
-   copies to the HTTP origin, and posts to the MTProto channel.
-   `--testing` publishes under the feed's testing key instead, which only
-   clients that typed `testupdate` will see.
-7. **GitHub release** (still manual — no automation exists):
-   ```bash
-   gh release create v<version> --repo CelestialTech/tlgrm \
-     --title "Tlgrm v<version>" --notes-file RELEASE_NOTES_<version>.md \
-     dmg_build/Tlgrm_<version>.dmg
-   ```
-8. **Install it** — upgrade `/Applications/Tlgrm.app` itself. The updater
-   replaces the bundle the client is *running from*, so testing against a copy
-   elsewhere leaves the real installation untouched.
+One command owns the order: version → build → verify universal → strip → sign
+→ DMG → notarize → verify with `spctl` → pack → publish both paths → GitHub
+release. It calls the same underlying tools that were always there; what it
+adds is knowing they are **ordered**, and refusing to continue when a step's
+output is not what the next step needs.
+
+Steps are idempotent rather than resumable — each skips when its output already
+exists for the target version — so re-running after a failure is cheap.
+
+`RELEASE_NOTES_<version>.md` must exist first; that is checked before anything
+else so a 15-minute build is not spent discovering it is missing. Installing
+into `/Applications` is deliberately not automated; the command is printed at
+the end.
+
+### Why the order is what it is
+
+Each of these is in the script because it was hit in production:
+
+- **`xcodebuild build` never strips**, and Packer refuses payloads over 1 GB
+  with `Bad result len` — which reads like a compression fault rather than "too
+  big to ship". Stripping also has to happen *before* signing, so the signature
+  covers the final bytes.
+- **Signing must precede the DMG and the packages**, because both are built
+  from the bundle. Signing afterwards ships an ad-hoc build that Gatekeeper
+  refuses the moment it is downloaded and quarantined.
+- **The disk image needs its own signature.** A stapled notarization ticket
+  alone still assesses as "no usable signature".
+- **`get-task-allow` must be removed** before signing; notarization rejects it.
+  Entitlements are read back out of the bundle first, because re-signing
+  *replaces* them rather than inheriting them — dropping camera, microphone and
+  location while the hardened runtime keeps enforcing them.
+- **Verify with `spctl`, never `codesign --verify`.** The latter passes on an
+  ad-hoc signature and says nothing about Gatekeeper. That is exactly how 7.0.9
+  shipped unusable.
+- **Both platform keys**, `armac` and `mac`. The binary is universal; Packer's
+  `-arch` only picks the output filename.
+- **The feed JSON must stay the channel's last message** — `MtpChecker` reads
+  history with `limit=1`.
+
+### Doing it by hand
+
+If a step has to be run alone, the individual tools are unchanged:
+`build/set_version.py`, `configure.sh` + `xcodebuild`, `strip`,
+`~/.claude/skills/macos-codesign/sign.sh`, `create_dmg.sh`,
+`~/.claude/skills/macos-codesign/notarize.sh`, `tools/publish_update.py`,
+`gh release`. The order above still applies — `release.py` is the encoding of
+it, not a replacement for knowing it.
+
+**`create_beautiful_dmg.sh` is not part of this.** It is the fuller variant and
+can seed a logged-in session with `INCLUDE_TDATA=1`; a DMG built that way must
+never be published.
 
 ### Testing an update without spending a version number
 
@@ -173,22 +173,6 @@ not save a version number, but it keeps a rehearsal off what real installs are
 offered); and alpha versions, `7.0.9.1` → `7000009001`, give 999 build numbers
 per patch, invisible to stable clients — but the tester must itself be an alpha
 build, since a stable client refuses alpha entries outright.
-
-### Traps that cost hours
-
-- **`xcodebuild build` never strips.** The unstripped universal binary is
-  1.56 GB; Packer rejects anything over 1 GB with `Bad result len`, which reads
-  like a compression fault rather than "too big". `publish_update.py` strips and
-  re-signs automatically (`--no-strip` opts out).
-- **Both platform keys must be published.** `armac` (Apple Silicon) and `mac`
-  (Intel). The binary is universal; Packer's `-arch` only picks the output
-  *filename*, and the two packages are byte-identical.
-- **The feed JSON must be the update channel's LAST message** — `MtpChecker`
-  reads history with `limit=1`. Post anything after it and update checks break.
-- **`create_beautiful_dmg.sh` can embed a logged-in session.** It packages
-  `~/tdata.zip` into `initiate.pkg`, and `postinstall` copies it into the
-  installing user's home. It now requires `INCLUDE_TDATA=1`; a DMG built that
-  way must never be published.
 
 ---
 
