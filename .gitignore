@@ -205,3 +205,9 @@ DesktopPrivate/
 # *_private.h key files must never be tracked. Verify with
 # `git ls-files DesktopPrivate/` -- custom_api_id.h must be the only entry.
 !DesktopPrivate/custom_api_id.h
+
+# Tool caches. .mypy_cache alone is ~18,500 files; it is not in the repository
+# but it is in every `find`, and an unqualified `git add -A` would commit it.
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

@@ -1,4 +1,18 @@
 #!/bin/bash
+# FULLER DMG: README files, beige background, and optional session seeding.
+#
+# NOT for public releases -- use create_dmg.sh for those.
+#
+# With INCLUDE_TDATA=1 it packages ~/tdata.zip into initiate.pkg, whose
+# postinstall copies that tdata into the installing user's home (its preinstall
+# removes any existing one first). A tdata directory IS a logged-in Telegram
+# session, so this seeds a machine with an account on purpose. That is the
+# intended use; it requires the explicit opt-in so a leftover ~/tdata.zip can
+# never end up in a release by accident.
+#
+#   INCLUDE_TDATA=1 ./create_beautiful_dmg.sh    # seeded, keep it private
+#   ./create_beautiful_dmg.sh                    # no session embedded
+#
 # Beautiful DMG creation script for Tlgrm with README files and beige background
 
 set -e
@@ -122,9 +136,8 @@ if [ -f "$TDATA_ZIP" ] && [ "${INCLUDE_TDATA:-0}" = "1" ]; then
     # Clean up temp directory
     rm -rf "$TDATA_TEMP"
     echo ""
-else
-    echo "Warning: ~/tdata.zip not found, skipping package creation"
-    echo "  (Using existing initiate.pkg if available)"
+elif [ ! -f "$TDATA_ZIP" ]; then
+    echo "No $TDATA_ZIP -- no session package will be built."
     echo ""
 fi
 
@@ -146,10 +159,20 @@ if [ -f "$README_RU" ]; then
     cp "$README_RU" "$DMG_STAGING/ПРОЧТИ.txt"
 fi
 
-# Copy PKG file to staging
-echo "Adding initiate.pkg installer..."
-if [ -f "$PKG_FILE" ]; then
-    cp "$PKG_FILE" "$DMG_STAGING/initiate.pkg"
+# Copy PKG file to staging -- ONLY under the explicit opt-in.
+#
+# This used to copy whatever initiate.pkg happened to be sitting in dmg_build,
+# which defeated the INCLUDE_TDATA gate entirely: refusing to rebuild the
+# package still shipped a stale one from a previous seeded build, carrying
+# whatever session it was built from.
+if [ "${INCLUDE_TDATA:-0}" = "1" ]; then
+    if [ -f "$PKG_FILE" ]; then
+        echo "Adding initiate.pkg installer (session seeding requested)..."
+        cp "$PKG_FILE" "$DMG_STAGING/initiate.pkg"
+    else
+        echo "Error: INCLUDE_TDATA=1 but no $PKG_FILE was built"
+        exit 1
+    fi
 fi
 
 # Remove old DMG if exists

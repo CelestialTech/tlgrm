@@ -35,7 +35,10 @@ use axum::{
     routing::get,
     Router,
 };
-use tokio::net::TcpListener;
+use tokio::{
+    io::{AsyncReadExt, AsyncSeekExt},
+    net::TcpListener,
+};
 
 /// A package found on disk.
 ///
@@ -185,6 +188,7 @@ async fn current(State(state): State<AppState>) -> Response {
 async fn package(
     State(state): State<AppState>,
     axum::extract::Path(name): axum::extract::Path<String>,
+    headers: header::HeaderMap,
 ) -> Response {
     let Some(package) = Package::parse(&name) else {
         return (StatusCode::NOT_FOUND, "not an update package").into_response();
@@ -198,22 +202,142 @@ async fn package(
         }
     };
     let len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
-    let stream = stream_file(file);
-    (
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "application/octet-stream".to_string()),
-            (header::CONTENT_LENGTH, len.to_string()),
-            // Packages are immutable: the version is in the name, so a given
-            // name always denotes the same bytes and can be cached hard.
+
+    // Packages are immutable: the version is in the name, so a given name
+    // always denotes the same bytes and can be cached hard.
+    let common = |extra: Vec<(header::HeaderName, String)>| {
+        let mut map = header::HeaderMap::new();
+        let mut put = |name: header::HeaderName, value: String| {
+            if let Ok(value) = header::HeaderValue::from_str(&value) {
+                map.insert(name, value);
+            }
+        };
+        put(header::CONTENT_TYPE, "application/octet-stream".to_string());
+        put(
+            header::CACHE_CONTROL,
+            "public, max-age=31536000, immutable".to_string(),
+        );
+        // Advertised unconditionally: the client asks for a range on its first
+        // request too, and a client that cannot tell whether ranges work has
+        // to restart from zero to find out.
+        put(header::ACCEPT_RANGES, "bytes".to_string());
+        for (name, value) in extra {
+            put(name, value);
+        }
+        map
+    };
+
+    match requested_range(&headers, len) {
+        // No range asked for, or one we could not parse. RFC 7233 permits
+        // ignoring a Range we do not understand, and a whole-file response is
+        // always a correct answer to one.
+        RangeRequest::Whole => (
+            StatusCode::OK,
+            common(vec![(header::CONTENT_LENGTH, len.to_string())]),
+            stream_file(file),
+        )
+            .into_response(),
+
+        // The client already holds the whole file. It accepts 416 and treats
+        // it as "nothing more to fetch", so this is a normal outcome of a
+        // resumed download, not an error.
+        RangeRequest::Unsatisfiable => (
+            StatusCode::RANGE_NOT_SATISFIABLE,
+            common(vec![(
+                header::CONTENT_RANGE,
+                format!("bytes */{len}"),
+            )]),
+            Body::empty(),
+        )
+            .into_response(),
+
+        RangeRequest::Partial { start, end } => {
+            let count = end - start + 1;
+            let mut file = file;
+            if let Err(error) = file.seek(std::io::SeekFrom::Start(start)).await {
+                tracing::warn!(%name, %error, "seek failed, serving whole file");
+                return (
+                    StatusCode::OK,
+                    common(vec![(header::CONTENT_LENGTH, len.to_string())]),
+                    stream_file(file),
+                )
+                    .into_response();
+            }
             (
-                header::CACHE_CONTROL,
-                "public, max-age=31536000, immutable".to_string(),
-            ),
-        ],
-        stream,
-    )
-        .into_response()
+                StatusCode::PARTIAL_CONTENT,
+                common(vec![
+                    (header::CONTENT_LENGTH, count.to_string()),
+                    (
+                        header::CONTENT_RANGE,
+                        format!("bytes {start}-{end}/{len}"),
+                    ),
+                ]),
+                stream_range(file, count),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// What a request's `Range` header asks for, resolved against the real length.
+enum RangeRequest {
+    Whole,
+    Partial { start: u64, end: u64 },
+    Unsatisfiable,
+}
+
+/// Parses the one range form the updater sends, plus the closed form for
+/// completeness.
+///
+/// `HttpLoaderActor::sendRequest` asks for `bytes=<alreadySize>-` on every
+/// request, including the first, where `alreadySize` is 0. Serving that as a
+/// whole-file 200 is correct and is what happened before ranges were
+/// supported — but it also meant an interrupted 110 MB download restarted from
+/// zero, because the offset in the second request was ignored.
+///
+/// Multi-range requests (`bytes=0-9,20-29`) are deliberately not supported:
+/// the updater never sends one, and answering with the whole file is a legal
+/// response to a Range a server chooses not to honour.
+fn requested_range(headers: &header::HeaderMap, len: u64) -> RangeRequest {
+    let Some(value) = headers.get(header::RANGE).and_then(|v| v.to_str().ok()) else {
+        return RangeRequest::Whole;
+    };
+    let Some(spec) = value.trim().strip_prefix("bytes=") else {
+        return RangeRequest::Whole;
+    };
+    if spec.contains(',') {
+        return RangeRequest::Whole;
+    }
+    let Some((from, to)) = spec.split_once('-') else {
+        return RangeRequest::Whole;
+    };
+    // A suffix range (`bytes=-500`, the last 500 bytes) has an empty `from`.
+    // The updater never sends one; treat it as unparsed rather than guessing.
+    let Ok(start) = from.trim().parse::<u64>() else {
+        return RangeRequest::Whole;
+    };
+    if start >= len {
+        return RangeRequest::Unsatisfiable;
+    }
+    let end = match to.trim() {
+        "" => len - 1,
+        explicit => match explicit.parse::<u64>() {
+            Ok(value) => value.min(len - 1),
+            Err(_) => return RangeRequest::Whole,
+        },
+    };
+    if end < start {
+        return RangeRequest::Whole;
+    }
+    RangeRequest::Partial { start, end }
+}
+
+/// Streams at most `count` bytes from the file's current position.
+fn stream_range(file: tokio::fs::File, count: u64) -> Body {
+    Body::from_stream(tokio_util::io::ReaderStream::with_capacity(
+        file.take(count),
+        64 * 1024,
+    ))
 }
 
 /// Streams a file as a body rather than buffering it.

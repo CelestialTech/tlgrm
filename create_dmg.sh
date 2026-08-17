@@ -1,4 +1,13 @@
 #!/bin/bash
+# CANONICAL DMG for published releases. Ships the app and nothing else.
+#
+# Build it from an already-stripped, Developer-ID-signed bundle -- this copies
+# whatever is in out/Release, so signing must happen first or the DMG carries an
+# unsigned app that Gatekeeper refuses once downloaded. See AGENTS.md.
+#
+# For a DMG that also seeds a session, use create_beautiful_dmg.sh -- and do
+# not publish that one.
+#
 # Minimal DMG creation script for Tlgrm
 # Just the app + background + Applications link. No README, no initiate.pkg.
 #

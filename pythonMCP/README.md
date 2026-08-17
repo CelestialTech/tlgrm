@@ -1,6 +1,18 @@
-# pythonMCP - Production-Ready Telegram MCP Server
+# pythonMCP — SUPERSEDED
 
-Complementary Python MCP server for Telegram with optional AI/ML capabilities and production monitoring.
+> **This server is superseded and is not maintained.** The MCP surface Tlgrm
+> ships is the C++ server embedded in the client
+> (`tdesktop/Telegram/SourceFiles/mcp/`, 355 tools), reachable on the IPC
+> socket described in `AGENTS.md`. Nothing depends on this directory; it is
+> kept for reference only.
+>
+> Anything below may be out of date. The socket path in the configuration
+> examples (`/tmp/telegram_mcp.sock`) is one such case — the client binds
+> `/tmp/tlgrm_mcp.sock` and publishes it to
+> `~/Library/Preferences/tlgrm/mcp_socket_path`.
+
+Python MCP server for Telegram with optional AI/ML capabilities and production
+monitoring.
 
 ## Overview
 

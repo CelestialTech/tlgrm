@@ -48,6 +48,25 @@ That is the whole protocol. This server implements it and nothing else.
 | `GET /tmacupd<version>` | The Intel package |
 | `GET /health` | Liveness, plus the packages it can currently see |
 
+### Range requests
+
+The updater sends `Range: bytes=<alreadySize>-` on **every** package request,
+including the first, and accepts 200, 206 and 416
+(`update_checker.cpp`, `HttpLoaderActor`). The server honours it:
+
+| Request | Response |
+|---|---|
+| no `Range` | `200` + `Accept-Ranges: bytes` |
+| `bytes=0-` | `206`, whole file, `Content-Range: bytes 0-<n-1>/<n>` |
+| `bytes=<k>-` | `206`, the remainder from `k` |
+| `bytes=<len>-` | `416` + `Content-Range: bytes */<len>` — the client already has it all |
+| `bytes=a-b` | `206`, exactly that slice |
+| multi-range, suffix range, malformed | `200`, whole file (a legal answer to a `Range` a server declines to honour) |
+
+Before this, the offset was ignored and an interrupted 110 MB download
+restarted from zero. Verified by splitting a real package across two range
+requests and confirming the concatenation is byte-identical to the original.
+
 ## The manifest is derived, never written
 
 Publishing an update is dropping a file into the packages directory. The

@@ -1,4 +1,12 @@
 /**
+ * SUPERSEDED -- nothing routes through this Worker.
+ *
+ * updates.71grm.site is served by update-server/ running on ironforge.local,
+ * which generates the manifest from the packages on its own disk. This Worker
+ * read them from GitHub release assets instead; its custom-domain binding was
+ * removed when ironforge took the hostname over. Kept as a reference
+ * implementation of the protocol. See docs/UPDATE_SYSTEM.md.
+ *
  * Tlgrm Update Proxy - Cloudflare Worker
  *
  * Serves as the update server for Tlgrm (Telegram Desktop fork).
