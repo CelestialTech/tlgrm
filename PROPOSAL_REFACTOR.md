@@ -62,6 +62,14 @@ schema-versus-implementation arguments. The comparison logic already exists —
 in the throwaway scripts written during the schema fix. That is an afternoon,
 and it converts every historical defect in this area into a compile error.
 
+**Done:** `tools/check_mcp_tools.py` runs PRE_BUILD on the Telegram target and
+fails the build on any of: a tool advertised twice, callable but never
+advertised, advertised but unbound, a missing or out-of-order backing entry, an
+argument read but never declared, an argument declared but never read, a
+required argument nothing reads, or a parameter with no description. Verified
+by injecting each defect and watching it fail with the specific tool and
+argument named — a check that cannot fail the build is decoration.
+
 **The code generator is deferred, not adopted.** Generating all four sites from
 one `TOOL(...)/ARG(...)` declaration is the deeper fix, and would make drift
 *impossible* rather than *detected*. But with a build-time check in place the
@@ -212,7 +220,7 @@ of confusion removed per minute spent.
 | 1 | **P5** — label superseded things | **done** — `create_dmg.sh`, `create_beautiful_dmg.sh`, `cloudflare-worker/src/worker.ts` |
 | 2 | **P4** — gitignore the cache, decide on pythonMCP | **done** — caches ignored; pythonMCP declared superseded |
 | 3 | **P3** — one release script | **done** — `tools/release.py` |
-| 4 | **P1** — build-time cross-check | next |
+| 4 | **P1** — build-time cross-check | **done** — `tools/check_mcp_tools.py`, PRE_BUILD |
 | 5 | **P2** — split or measure the local-only tools | **closed, not doing** |
 
 **P2 closed by decision (2026-08-17):** local-only tools are part of the
