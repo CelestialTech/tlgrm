@@ -55,6 +55,26 @@ endif()
 
 set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 
+# Every MCP tool has to agree across four hand-maintained places -- the
+# advertised Tool{} entry, the method declaration, the _toolHandlers binding
+# and the backing table -- and nothing in the type system relates them. The
+# server already checks part of this at startup, which is the right idea at the
+# wrong time: it fires on whoever happens to launch a build that has already
+# shipped. This runs the same comparison before the build finishes, so the
+# defects that were previously found by hand-written scripts after the fact
+# (tools advertised twice, callable but undiscoverable, arguments read but
+# never declared) fail the build instead.
+#
+# PRE_BUILD rather than a separate target so it cannot be skipped by building
+# Telegram directly.
+add_custom_command(TARGET Telegram
+PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} -E echo "Checking MCP tool declarations..."
+    COMMAND uv run --python 3.14 ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/check_mcp_tools.py --quiet
+    COMMENT "MCP tool declaration cross-check"
+    VERBATIM
+)
+
 # Tlgrm: the MCP subsystem stores its archive/analytics data in SQLite via QtSql.
 # desktop-app::external_qt does not request the Sql component, so ask for it here
 # rather than patching the vendored cmake_helpers submodule — that keeps the fork's
