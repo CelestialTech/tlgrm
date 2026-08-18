@@ -224,5 +224,12 @@ working directory.
 - `ENABLE_APP_SANDBOX = NO` on every target.
 - No AI attribution in commit messages, ever.
 - Use `uv` for Python, never raw `python3`/`pip`.
-- MCP: 355 tools, 619 described parameters, four declaration sites must agree — see
+- MCP: 353 tools, 610 described parameters, four declaration sites must agree — see
   `tdesktop/Telegram/SourceFiles/mcp/mcp_tool_backing.h` for the backing table.
+  `tools/check_mcp_tools.py` enforces this at build time.
+- **A tool reports what happened; it never records what it wishes had happened.**
+  No local table may stand in for a server answer. If no API backs a tool, remove
+  it; if one does but is out of reach, fail and say why. The check script cannot
+  see this class of bug — it compares declarations, not truth — so it is on
+  whoever touches a tool. See `docs/MCP_STAR_GIFTS.md` for the worst cases found
+  so far and which ones are still outstanding.
