@@ -1,16 +1,31 @@
 # Star gifts, auctions and the marketplace — what is real
 
 The star-gift corner of the MCP surface was the worst offender for inventing
-answers. Fourteen tools were backed by three SQLite tables — `auctions`,
-`marketplace_listings`, `gift_collections` — that no server ever saw. A caller
-could "create an auction", read it back, "bid" on it, and watch the bid rise,
-with none of it existing outside this client's database.
+answers. Around twenty tools were backed by local SQLite tables — `auctions`,
+`marketplace_listings`, `gift_collections`, `collection_items` — that no server
+ever saw. A caller could "create an auction", read it back, "bid" on it, and
+watch the bid rise, with none of it existing outside this client's database.
 
 The rule applied here, and to be applied to whatever is fixed next:
 
 > **A tool reports what happened. It never records what it wishes had
 > happened.** If there is no API, the tool goes. If there is an API it cannot
 > reach yet, it fails and says why. It does not write a plausible row.
+
+## The two failure shapes
+
+Worth naming, because they need different detection:
+
+**Pure fabrication** — a local table stands in for the server. Easy to spot
+once you look at the body.
+
+**Declared-but-not-done** — the tool *claims* an `Mtproto` backing and either
+never calls anything (`list_gift_for_sale`, `delist_gift`, both logging that
+the API "was not available in this version" — it had been there all along), or
+calls the right method and throws the reply away (`list_gift_collections`,
+which handed real collections to `qWarning` and returned invented ones). The
+four-site check passes cleanly on all of these: the drift is between the
+declared backing and the behaviour, which no static check can see.
 
 ## Auctions
 
@@ -25,82 +40,147 @@ auction id**, no client-side create, and no cancel anywhere in the schema.
 | `list_auctions` | real | `payments.getStarGiftActiveAuctions` |
 | `get_auction_status` | real | `payments.getStarGiftAuctionState` |
 | `get_auction_history` | real | `payments.getStarGiftAuctionAcquiredGifts` |
-| `place_bid` | refuses | spends stars; see below |
+| `place_bid` | refuses | spends stars |
 
-The two removals are not deferrals. No amount of further work makes them
-possible, because the server has no method to call — they were removed from all
-four declaration sites rather than left advertised.
+The removals are not deferrals — no further work makes them possible.
 
-`get_auction_status` and `get_auction_history` took `auction_id` (a UUID this
-client minted). They now take `gift_id`, an integer, matching how Telegram
-identifies an auction.
+Verified live: `list_auctions` returns `[]` because none are running, and
+`get_auction_history` with a fabricated gift id returns **`STARGIFT_INVALID`
+from Telegram**, which a local table could never do.
 
-Verified live against the account: `list_auctions` returns `[]` because no
-auction is running, and `get_auction_history` with a fabricated gift id returns
-**`STARGIFT_INVALID` from Telegram** — the request leaves the client and the
-server rejects it, which is exactly what a local table could never do.
+## The resale market
+
+Telegram resells unique gifts **by gift type**: you browse one gift's listings
+and get the individual copies on sale, each with its own asking price and issue
+number. There is no global feed, no free-text category, and no listing id — a
+copy is identified by its slug, and your own gift by the message id it occupies
+in your profile. The old `category` / `sort_by=recent` / `listing_id` shape had
+nothing to map onto because it described a local table.
+
+| Tool | Now | Backed by |
+|---|---|---|
+| `list_marketplace` | real | `payments.getResaleStarGifts` |
+| `list_gift_for_sale` | real | `payments.updateStarGiftPrice` |
+| `delist_gift` | real | same call, price zero |
+| `buy_gift` | refuses | spends stars |
+
+`list_gift_for_sale` and `delist_gift` delegate to `update_listing`, which
+already drove `updateStarGiftPrice` correctly, rather than repeating it — that
+is also how they inherit its slug-or-msg_id addressing.
 
 ## Collections
 
-`list_gift_collections` was the subtlest failure. It *did* call
-`payments.getStarGiftCollections` — then passed the reply to `qWarning` and
-returned rows from the local `gift_collections` table. The real collections went
-to stderr; the caller got invented ones. Its backing was already declared
-`Mtproto`, so the four-site check saw nothing wrong: the drift was between the
-declared backing and the behaviour, which no static check catches.
+Collection membership is server state, so there is nothing for a local table to
+add.
 
-It now returns the account's real collections (`collection_id`, `title`,
-`gifts_count`). Verified live: `[]`, because the account has none.
+| Tool | Now | Backed by |
+|---|---|---|
+| `list_gift_collections` | real | `payments.getStarGiftCollections` |
+| `get_collection_details` | real | same |
+| `get_collection_completion` | real | that plus `payments.getSavedStarGifts` |
+| `create_gift_collection` | real | `payments.createStarGiftCollection` |
+| `delete_gift_collection` | **new** | `payments.deleteStarGiftCollection` |
+| `add_to_collection` | real | `payments.updateStarGiftCollection` |
+| `remove_from_collection` | real | same call, other vector |
+| `share_collection` | **removed** | nothing — see below |
 
-## What is deferred, and on what
+`create_gift_collection` dropped its `description` and `public` parameters:
+Telegram collections have a title and their gifts, nothing else. It now requires
+`msg_ids`, because `createStarGiftCollection` takes a non-optional
+`Vector<InputSavedStarGift>`. Leaving it writing local rows would have been
+worse than before this pass, since `list_gift_collections` returns server
+collections and would never have shown them.
 
-Deferred means implementable, not impossible — blocked on something this account
-does not currently have.
+One thing testing turned up, contrary to what the TL signature suggests: the
+server **silently drops gift references you do not own and creates the
+collection empty** rather than refusing. A `success: true` is therefore not
+proof the gifts went in — check `gifts_count` in the reply.
+
+`delete_gift_collection` is new. The surface could create, list and add to
+collections but never delete one, so anything created was permanent as far as
+an MCP caller was concerned. `payments.deleteStarGiftCollection` had been there
+the whole time.
+
+`share_collection` set `is_public` on a local row and reported a collection
+shared with a user who was never told anything. Gift collections have no share,
+publish or link method in the schema, and no visibility flag at all.
+
+`get_collection_completion` used to divide one orphaned table by another and,
+with nothing writing to either, would have reported 0% forever. It is now a
+ratio over two counts Telegram returns.
+
+## Deferred, and on what
+
+Deferred means implementable, not impossible.
 
 | Tool | Blocked on |
 |---|---|
-| `place_bid` | stars — a bid is an invoice (`inputInvoiceStarGiftAuctionBid`) |
+| `place_bid` | stars — `inputInvoiceStarGiftAuctionBid` |
 | `buy_gift` | stars — `inputInvoiceStarGiftResale` |
 | `send_gift` | stars — the gift payment form |
-| `create_gift_collection` | owning a gift; `createStarGiftCollection` requires a non-empty `Vector<InputSavedStarGift>` |
-| `list_gift_for_sale`, `delist_gift` | owning a gift (`updateStarGiftPrice` is free, but needs one) |
 
-The account holds **0 stars and 0 gifts**, so none of these can be exercised
-end-to-end even after being written. `place_bid` is marked `Unimplemented` and
-now fails through the `callTool()` gate. That gate had never fired before —
-the August audit recorded zero `Unimplemented` entries and noted it "protects
-nothing today".
+The account holds **0 stars and 0 gifts**, so none can be exercised end-to-end
+even once written. The same emptiness stops the *written* tools from being
+exercised too: `add_to_collection` and `list_gift_for_sale` need a gift to point
+at, so they can only be shown reaching Telegram and being refused, not
+succeeding.
 
-## Still fabricated — next in line
+The star-spending ones are marked `Unimplemented` and fail through the
+`callTool()` gate — a gate that had never fired before, since the August audit
+recorded zero `Unimplemented` entries and noted it "protects nothing today".
 
-These remain backed by local tables and still invent answers. They have real
-counterparts and are the next thing to fix:
+## Impossible as named
 
-| Tool | Should use |
-|---|---|
-| `list_marketplace` | `payments.getResaleStarGifts` |
-| `get_collection_details` | `payments.getStarGiftCollections` |
-| `share_collection` | nothing — likely another removal |
-| `send_stars` | no direct transfer exists; the gift path plus `convertStarGift` is the only equivalent |
+`send_stars` cannot be finished. Telegram has **no user-to-user star
+transfer**: `inputInvoiceStars` tops up your own balance, and
+`inputStorePaymentStarsGift` buys stars for someone with real money, not with
+stars you hold. The nearest route is a gift the recipient converts with
+`convertStarGift` — a different operation, at their discretion, usually worth
+less than the gift cost. It must not be described as an equivalent transfer.
 
-`send_stars` deserves care: there is no user-to-user star transfer in the API.
-The nearest equivalent is sending a gift the recipient then converts to stars,
-which is not the same operation and must not be described as if it were.
-
-The `auctions` and `marketplace_listings` tables are now orphaned by the auction
-work; `marketplace_listings` still backs the marketplace tools above.
+It used to write a **negative row into `wallet_spending`** and answer success
+with status `"recorded"`, so a transfer that never happened appeared in the
+spending history while the recipient got nothing. `buy_gift` did the same and
+also inserted a `gift_transfers` row claiming a gift had arrived. Both
+corrupted the very ledger `get_balance_history` and `get_stars_history` read
+back; both now write nothing.
 
 ## Aliases
 
-`list_active_auctions`, `get_auction_details` and `place_auction_bid` are
-pass-throughs to `list_auctions`, `get_auction_status` and `place_bid`. They
-were kept so existing callers keep working, and their schemas were corrected to
-match. Whether to keep three duplicate names on the surface is an open question,
-not a decision this pass made.
+Several names are pass-throughs, kept so existing callers keep working, with
+their schemas corrected to match what they delegate to:
+
+| Alias | Delegates to |
+|---|---|
+| `list_active_auctions` | `list_auctions` |
+| `get_auction_details` | `get_auction_status` |
+| `place_auction_bid` | `place_bid` |
+| `browse_gift_marketplace`, `get_fragment_listings` | `list_marketplace` |
+| `cancel_listing` | `delist_gift` |
+
+`get_fragment_listings` was labelled "this client's local marketplace table
+(not Telegram Fragment)" — accurate when written, wrong once the tool it
+delegates to started querying Telegram. Whether six duplicate names belong on
+the surface is an open question, not a decision these passes made.
+
+## The checker
+
+`tools/check_mcp_tools.py` gained one rule here: it follows a delegation
+through a **copy** of the args object, not only the literal parameter. Without
+it, `delist_gift` — which forwards its gift with a price of zero — looked like
+a tool ignoring its entire schema.
+
+It still compares declarations, not truth. It cannot tell whether a tool's
+answer is real, which is why this document exists.
 
 ## Count
 
-353 tools, 610 described parameters, four declaration sites agreeing —
-down from 355 by the two removals. `tools/check_mcp_tools.py` enforces the
-agreement at build time; it cannot tell whether a tool's answer is true, which
-is why this document exists.
+353 tools, 613 described parameters, four declaration sites agreeing — down
+from 355 by three removals (`create_gift_auction`, `cancel_auction`,
+`share_collection`).
+
+## Still local, deliberately
+
+`create_auction_alert` and `get_auction_alerts` remain `LocalOnly`, correctly:
+they are this client's own reminders and Telegram has no notion of them. Their
+descriptions now say so.

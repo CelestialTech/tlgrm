@@ -247,17 +247,36 @@ def args_read(param: str, body: str) -> dict[str, str]:
     return found
 
 
+def arg_names(param: str, body: str) -> set[str]:
+    """The args object plus any local copy of it.
+
+    A tool that delegates after overriding one field -- `auto cleared = args;
+    cleared["price"] = 0; return toolUpdateListing(cleared);` -- still reads
+    every argument the callee reads. Following only the literal parameter name
+    made delist_gift look like a tool that ignored its entire schema.
+    """
+    names = {param}
+    for m in re.finditer(
+            r"\bauto\s+(\w+)\s*=\s*" + re.escape(param) + r"\s*;", body):
+        names.add(m.group(1))
+    return names
+
+
 def reads_for(method: str, impls, helps) -> dict[str, str]:
     if method not in impls:
         return {}
     param, body = impls[method]
-    found = dict(args_read(param, body))
-    for callee in set(re.findall(
-            r"\b([A-Za-z_]\w*)\s*\(\s*" + re.escape(param) + r"\s*[,)]", body)):
-        if callee in helps and callee != method:
-            hparam, hbody = helps[callee]
-            for key, kind in args_read(hparam, hbody).items():
-                found.setdefault(key, kind)
+    found: dict[str, str] = {}
+    for name in arg_names(param, body):
+        for key, kind in args_read(name, body).items():
+            found.setdefault(key, kind)
+        for callee in set(re.findall(
+                r"\b([A-Za-z_]\w*)\s*\(\s*" + re.escape(name) + r"\s*[,)]",
+                body)):
+            if callee in helps and callee != method:
+                hparam, hbody = helps[callee]
+                for key, kind in args_read(hparam, hbody).items():
+                    found.setdefault(key, kind)
     return found
 
 
