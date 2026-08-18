@@ -20,31 +20,45 @@ QJsonObject Server::toolGetWalletBalance(const QJsonObject &args) {
 		return result;
 	}
 
-	// Credits API not available in this version - use stub values
-	qint64 starsBalance = 0;
-	qint64 tonBalance = 0;
-	float64 usdRate = 0.0;
+	// Asks Telegram for the balance rather than reporting zero.
+	//
+	// This used to return hardcoded zeros with `loaded: false` and
+	// `success: true`, on the belief that the Credits API did not exist in
+	// this version. It does -- payments.getStarsStatus, and Data::Credits
+	// besides -- and the comment was left over from the 6.x base. Worse than
+	// the wrong answer: the zero was written into wallet_budgets, so the
+	// historical record was being filled with a balance nobody ever had.
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_GetStarsStatus(
+			MTP_flags(0),
+			_session->user()->input()
+		)).done([=](const MTPpayments_StarsStatus &result) {
+			auto value = QJsonObject();
+			const auto &data = result.data();
+			const auto balance = data.vbalance().match([](
+					const MTPDstarsAmount &amount) {
+				return std::pair{ qint64(amount.vamount().v),
+					qint64(amount.vnanos().v) };
+			}, [](const MTPDstarsTonAmount &amount) {
+				return std::pair{ qint64(amount.vamount().v), qint64(0) };
+			});
+			value["success"] = true;
+			value["stars_balance"] = balance.first;
+			value["stars_nano"] = balance.second;
+			value["loaded"] = true;
 
-	result["stars_balance"] = starsBalance;
-	result["stars_nano"] = 0;
-	if (tonBalance > 0) {
-		result["ton_balance"] = tonBalance;
-	}
-	if (usdRate > 0) {
-		result["usd_rate"] = usdRate;
-		result["usd_value"] = starsBalance * usdRate;
-	}
-	result["loaded"] = false;
-	result["success"] = true;
+			// Only now is there something true to record.
+			QSqlQuery query(_db);
+			query.prepare("INSERT OR REPLACE INTO wallet_budgets "
+				"(id, balance, last_updated) VALUES (1, ?, datetime('now'))");
+			query.addBindValue(balance.first);
+			query.exec();
 
-	// Also store locally for historical tracking
-	QSqlQuery query(_db);
-	query.prepare("INSERT OR REPLACE INTO wallet_budgets (id, balance, last_updated) "
-				  "VALUES (1, ?, datetime('now'))");
-	query.addBindValue(starsBalance);
-	query.exec();
-
-	return result;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolGetBalanceHistory(const QJsonObject &args) {
@@ -1243,81 +1257,107 @@ QJsonObject Server::toolGetStarsLeaderboard(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolGetStarsHistory(const QJsonObject &args) {
-	QJsonObject result;
-	QString direction = args.value("direction").toString("all");  // all, inbound, outbound
-	int limit = args.value("limit").toInt(50);
+	const auto direction = args.value("direction").toString("all");
+	const auto limit = clampLimit(args.value("limit").toInt(50), 50, 100);
 
 	if (!_session) {
-		result["error"] = "No active session";
-		result["success"] = false;
-		return result;
+		return toolError("No active session");
 	}
 
-	// Fire async request for stars transaction history
-	bool inbound = (direction == "inbound" || direction == "all");
-	bool outbound = (direction == "outbound" || direction == "all");
-
+	// Waits for Telegram's answer instead of throwing it away.
+	//
+	// This used to fire the request, discard the reply in a lambda that only
+	// logged a count, and return local rows with `api_request: "submitted"`
+	// and a note saying the real data "loads asynchronously". It never did:
+	// nothing wrote it anywhere a later call could read. The local ledger is
+	// still returned alongside, but now as a named second list rather than as
+	// a stand-in for the thing that was promised.
 	using Flags = MTPpayments_GetStarsTransactions::Flags;
-	Flags flags(0);
+	auto flags = Flags(0);
 	if (direction == "inbound") {
 		flags |= MTPpayments_GetStarsTransactions::Flag::f_inbound;
 	} else if (direction == "outbound") {
 		flags |= MTPpayments_GetStarsTransactions::Flag::f_outbound;
 	}
 
-	_session->api().request(MTPpayments_GetStarsTransactions(
-		MTP_flags(flags),
-		MTPstring(),  // subscription_id
-		MTP_inputPeerSelf(),
-		MTP_string(QString()),  // offset token (empty = first page)
-		MTP_int(limit)
-	)).done([this](const MTPpayments_StarsStatus &status) {
-		const auto &data = status.data();
-		_session->data().processUsers(data.vusers());
-		_session->data().processChats(data.vchats());
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_GetStarsTransactions(
+			MTP_flags(flags),
+			MTPstring(),
+			MTP_inputPeerSelf(),
+			MTP_string(QString()),
+			MTP_int(limit)
+		)).done([=](const MTPpayments_StarsStatus &status) {
+			const auto &data = status.data();
+			_session->data().processUsers(data.vusers());
+			_session->data().processChats(data.vchats());
 
-		int count = 0;
-		if (const auto history = data.vhistory()) {
-			count = history->v.size();
-		}
-		// Credits API not available - balance update skipped
-		qWarning() << "MCP: Loaded" << count << "stars transactions";
-	}).fail([](const MTP::Error &error) {
-		qWarning() << "MCP: Failed to load stars history:" << error.type();
-	}).send();
-
-	// Return local records plus indication that API data is loading
-	QJsonArray history;
-	QSqlQuery query(_db);
-	query.prepare("SELECT date, amount, category, description, peer_id FROM wallet_spending "
-				  "ORDER BY date DESC LIMIT ?");
-	query.addBindValue(limit);
-	if (query.exec()) {
-		while (query.next()) {
-			QJsonObject entry;
-			entry["date"] = query.value(0).toString();
-			entry["amount"] = query.value(1).toDouble();
-			entry["category"] = query.value(2).toString();
-			entry["description"] = query.value(3).toString();
-			if (!query.value(4).isNull()) {
-				entry["peer_id"] = query.value(4).toLongLong();
+			auto transactions = QJsonArray();
+			if (const auto history = data.vhistory()) {
+				for (const auto &entry : history->v) {
+					const auto &tx = entry.data();
+					auto item = QJsonObject();
+					item["id"] = qs(tx.vid());
+					item["date"] = qint64(tx.vdate().v);
+					item["amount"] = tx.vamount().match([](
+							const MTPDstarsAmount &amount) {
+						return qint64(amount.vamount().v);
+					}, [](const MTPDstarsTonAmount &amount) {
+						return qint64(amount.vamount().v);
+					});
+					if (const auto title = tx.vtitle()) {
+						item["title"] = qs(*title);
+					}
+					if (const auto description = tx.vdescription()) {
+						item["description"] = qs(*description);
+					}
+					item["refund"] = tx.is_refund();
+					item["pending"] = tx.is_pending();
+					item["failed"] = tx.is_failed();
+					transactions.append(item);
+				}
 			}
-			entry["source"] = "local";
-			history.append(entry);
-		}
-	}
 
-	// Credits API not available in this version
-	result["success"] = true;
-	result["history"] = history;
-	result["count"] = history.size();
-	result["current_balance"] = 0;
-	result["direction"] = direction;
-	result["api_request"] = "submitted";
-	result["note"] = "Stars transaction history request sent to Telegram API. "
-					 "Local records shown. Full Telegram transaction data loads asynchronously.";
+			const auto balance = data.vbalance().match([](
+					const MTPDstarsAmount &amount) {
+				return qint64(amount.vamount().v);
+			}, [](const MTPDstarsTonAmount &amount) {
+				return qint64(amount.vamount().v);
+			});
 
-	return result;
+			// The local ledger, kept but no longer passed off as the answer.
+			auto local = QJsonArray();
+			QSqlQuery query(_db);
+			query.prepare("SELECT date, amount, category, description, peer_id "
+				"FROM wallet_spending ORDER BY date DESC LIMIT ?");
+			query.addBindValue(limit);
+			if (query.exec()) {
+				while (query.next()) {
+					auto row = QJsonObject();
+					row["date"] = query.value(0).toString();
+					row["amount"] = query.value(1).toDouble();
+					row["category"] = query.value(2).toString();
+					row["description"] = query.value(3).toString();
+					if (!query.value(4).isNull()) {
+						row["peer_id"] = qint64(query.value(4).toLongLong());
+					}
+					local.append(row);
+				}
+			}
+
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["direction"] = direction;
+			value["current_balance"] = balance;
+			value["transactions"] = transactions;
+			value["count"] = transactions.size();
+			value["local_notes"] = local;
+			value["local_notes_count"] = local.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 

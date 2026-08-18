@@ -598,10 +598,8 @@ private:
 	QJsonObject toolAddToCollection(const QJsonObject &args);
 	QJsonObject toolRemoveFromCollection(const QJsonObject &args);
 	QJsonObject toolShareCollection(const QJsonObject &args);
-	QJsonObject toolCreateGiftAuction(const QJsonObject &args);
 	QJsonObject toolListAuctions(const QJsonObject &args);
 	QJsonObject toolPlaceBid(const QJsonObject &args);
-	QJsonObject toolCancelAuction(const QJsonObject &args);
 	QJsonObject toolGetAuctionStatus(const QJsonObject &args);
 	QJsonObject toolListMarketplace(const QJsonObject &args);
 	QJsonObject toolDelistGift(const QJsonObject &args);

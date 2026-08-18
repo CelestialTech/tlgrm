@@ -1812,10 +1812,8 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["add_to_collection"] = [this](const QJsonObject &args) { return toolAddToCollection(args); };
 	_toolHandlers["remove_from_collection"] = [this](const QJsonObject &args) { return toolRemoveFromCollection(args); };
 	_toolHandlers["share_collection"] = [this](const QJsonObject &args) { return toolShareCollection(args); };
-	_toolHandlers["create_gift_auction"] = [this](const QJsonObject &args) { return toolCreateGiftAuction(args); };
 	_toolHandlers["list_auctions"] = [this](const QJsonObject &args) { return toolListAuctions(args); };
 	_toolHandlers["place_bid"] = [this](const QJsonObject &args) { return toolPlaceBid(args); };
-	_toolHandlers["cancel_auction"] = [this](const QJsonObject &args) { return toolCancelAuction(args); };
 	_toolHandlers["get_auction_status"] = [this](const QJsonObject &args) { return toolGetAuctionStatus(args); };
 	_toolHandlers["list_marketplace"] = [this](const QJsonObject &args) { return toolListMarketplace(args); };
 	_toolHandlers["delist_gift"] = [this](const QJsonObject &args) { return toolDelistGift(args); };

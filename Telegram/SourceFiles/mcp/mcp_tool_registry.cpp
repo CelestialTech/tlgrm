@@ -2086,52 +2086,53 @@ void Server::registerTools() {
 		},
 
 		// Auctions - 5 tools
+		//
+		// The first three are pass-throughs to list_auctions,
+		// get_auction_status and place_bid. They are kept so existing callers
+		// keep working; prefer the names they delegate to.
 		Tool{
 			"list_active_auctions",
-			"List active gift auctions",
+			"List the star-gift auctions Telegram currently has running. Alias for list_auctions.",
 			QJsonObject{
 				{"type", "object"},
-				{"properties", QJsonObject{
-					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}, {"description", "Maximum number of results to return."}}},
-					{"status", QJsonObject{{"type", "string"}, {"description", "Restrict results to one status; omit to return every status."}}},
-				}}
+				{"properties", QJsonObject{}}
 			}
 		},
 		Tool{
 			"get_auction_details",
-			"Get details of an auction",
+			"Get the live state of one star-gift auction. Alias for get_auction_status.",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"auction_id", QJsonObject{{"type", "integer"}, {"description", "Auction ID"}}}
+					{"gift_id", QJsonObject{{"type", "integer"}, {"description", "ID of the gift being auctioned -- an auction is identified by its gift."}}}
 				}},
-				{"required", QJsonArray{"auction_id"}}
+				{"required", QJsonArray{"gift_id"}}
 			}
 		},
 		Tool{
 			"get_auction_alerts",
-			"Get configured auction alerts",
+			"Get the auction alerts configured on this client. These are local reminders only -- Telegram does not know about them.",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
 		},
 		Tool{
 			"place_auction_bid",
-			"Place a bid on an auction",
+			"Place a bid on a star-gift auction. NOT IMPLEMENTED -- alias for place_bid, which always reports failure.",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"auction_id", QJsonObject{{"type", "integer"}, {"description", "Auction ID"}}},
-					{"bid_amount", QJsonObject{{"type", "number"}, {"description", "Bid amount"}}}
+					{"gift_id", QJsonObject{{"type", "integer"}, {"description", "ID of the gift being auctioned -- an auction is identified by its gift."}}},
+					{"bid_amount", QJsonObject{{"type", "integer"}, {"description", "Bid amount in stars."}}}
 				}},
-				{"required", QJsonArray{"auction_id", "bid_amount"}}
+				{"required", QJsonArray{"gift_id", "bid_amount"}}
 			}
 		},
 		Tool{
 			"get_auction_history",
-			"Get user's auction history",
+			"List the gifts a finished star-gift auction handed out, with the winning bid, round and position for each.",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-					{"limit", QJsonObject{{"type", "integer"}, {"description", "Maximum number of results to return (default 50)."}}},
-					{"status", QJsonObject{{"type", "string"}, {"description", "Restrict results to one status; omit to return every status."}}},
-				}}}
+					{"gift_id", QJsonObject{{"type", "integer"}, {"description", "ID of the auctioned gift whose results to fetch."}}},
+				}},
+				{"required", QJsonArray{"gift_id"}}}
 		},
 
 		// Marketplace - 5 tools
@@ -2996,25 +2997,21 @@ void Server::registerTools() {
 		}}, {"required", QJsonArray{"collection_id"}}}},
 
 		// --- Auctions ---
-		Tool{"create_gift_auction", "Create an auction for a gift", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"gift_id", QJsonObject{{"type", "string"}, {"description", "Gift to auction"}}},
-			{"starting_bid", QJsonObject{{"type", "integer"}, {"description", "Starting bid in stars"}}},
-					{"duration_hours", QJsonObject{{"type", "integer"}, {"description", "How long the auction runs (default 24)."}}},
-				}}, {"required", QJsonArray{"gift_id", "starting_bid"}}}},
-		Tool{"place_bid", "Place a bid on an auction", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"auction_id", QJsonObject{{"type", "string"}, {"description", "Auction ID"}}},
-			{"bid_amount", QJsonObject{{"type", "integer"}, {"description", "Bid amount in stars"}}}
-		}}, {"required", QJsonArray{"auction_id", "bid_amount"}}}},
-		Tool{"list_auctions", "List active auctions", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"status", QJsonObject{{"type", "string"}, {"description", "Filter by status (active/ended/cancelled)"}, {"default", "active"}}},
-					{"limit", QJsonObject{{"type", "integer"}, {"description", "Maximum number of results to return (default 50)."}}},
+		//
+		// Telegram opens and closes star-gift auctions itself, and identifies
+		// each one by the gift being auctioned -- there is no client-side
+		// create, no cancel, and no separate auction id. `create_gift_auction`
+		// and `cancel_auction` used to be advertised here; both were backed by
+		// a local table rather than by any API, so they were removed.
+		Tool{"place_bid", "Place a bid on a star-gift auction. NOT IMPLEMENTED: bidding spends stars through the payment-form flow, and nothing is recorded locally, so this always reports failure.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"gift_id", QJsonObject{{"type", "integer"}, {"description", "ID of the gift being auctioned -- an auction is identified by its gift."}}},
+			{"bid_amount", QJsonObject{{"type", "integer"}, {"description", "Bid amount in stars."}}}
+		}}, {"required", QJsonArray{"gift_id", "bid_amount"}}}},
+		Tool{"list_auctions", "List the star-gift auctions Telegram currently has running, with each one's round state and this account's own position in it.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 				}}}},
-		Tool{"get_auction_status", "Get auction details and status", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"auction_id", QJsonObject{{"type", "string"}, {"description", "Auction ID"}}}
-		}}, {"required", QJsonArray{"auction_id"}}}},
-		Tool{"cancel_auction", "Cancel an active auction", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"auction_id", QJsonObject{{"type", "string"}, {"description", "Auction ID"}}}
-		}}, {"required", QJsonArray{"auction_id"}}}},
+		Tool{"get_auction_status", "Get the live state of one star-gift auction: round progress, bid levels, gifts left, and this account's own bid if it has placed one.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"gift_id", QJsonObject{{"type", "integer"}, {"description", "ID of the gift being auctioned -- an auction is identified by its gift."}}}
+		}}, {"required", QJsonArray{"gift_id"}}}},
 
 		// --- Marketplace ---
 		Tool{"list_marketplace", "Browse gift marketplace listings", QJsonObject{{"type", "object"}, {"properties", QJsonObject{

@@ -45,46 +45,46 @@ QJsonObject Server::toolListGiftCollections(const QJsonObject &args) {
 	Q_UNUSED(args);
 	QJsonObject result;
 
-	if (_session) {
-		// Also request collections from Telegram API
-		auto self = _session->data().peer(_session->userPeerId());
+	if (!_session) {
+		result["error"] = "No active session";
+		result["success"] = false;
+		return result;
+	}
+
+	// Returns the account's real gift collections.
+	//
+	// This used to fire exactly this request, hand the reply to qWarning, and
+	// then answer with rows from a local `gift_collections` table -- so the
+	// caller got collections this client had invented while the real ones went
+	// to stderr and were dropped. Star gift collections live on the server;
+	// there is nothing for a local table to add.
+	return awaitMtp([&](auto done, auto fail) {
+		const auto self = _session->data().peer(_session->userPeerId());
 		_session->api().request(MTPpayments_GetStarGiftCollections(
 			self->input(),
-			MTP_long(0)  // hash for caching
-		)).done([](const MTPpayments_StarGiftCollections &collections) {
-			collections.match([](const MTPDpayments_starGiftCollections &data) {
-				qWarning() << "MCP: Loaded" << data.vcollections().v.size() << "gift collections from Telegram";
+			MTP_long(0) // hash 0: nothing cached, send the full list
+		)).done([=](const MTPpayments_StarGiftCollections &result) {
+			auto value = QJsonObject();
+			auto collections = QJsonArray();
+			result.match([&](const MTPDpayments_starGiftCollections &data) {
+				for (const auto &entry : data.vcollections().v) {
+					const auto &collection = entry.data();
+					auto obj = QJsonObject();
+					obj["collection_id"] = collection.vcollection_id().v;
+					obj["title"] = qs(collection.vtitle());
+					obj["gifts_count"] = collection.vgifts_count().v;
+					collections.append(obj);
+				}
 			}, [](const MTPDpayments_starGiftCollectionsNotModified &) {
-				qWarning() << "MCP: Gift collections not modified (cached)";
 			});
-		}).fail([](const MTP::Error &error) {
-			qWarning() << "MCP: Failed to load gift collections:" << error.type();
+			value["success"] = true;
+			value["collections"] = collections;
+			value["count"] = collections.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
 		}).send();
-	}
-
-	QSqlQuery query(_db);
-	query.prepare("SELECT id, name, description, is_public, created_at FROM gift_collections");
-
-	QJsonArray collections;
-	if (query.exec()) {
-		while (query.next()) {
-			QJsonObject collection;
-			collection["id"] = query.value(0).toLongLong();
-			collection["name"] = query.value(1).toString();
-			collection["description"] = query.value(2).toString();
-			collection["is_public"] = query.value(3).toBool();
-			collection["created_at"] = query.value(4).toString();
-			collection["source"] = "local";
-			collections.append(collection);
-		}
-	}
-
-	result["success"] = true;
-	result["collections"] = collections;
-	result["api_request"] = _session ? "submitted" : "no_session";
-	result["note"] = "Local collections shown. Telegram gift collections also loading asynchronously.";
-
-	return result;
+	});
 }
 
 QJsonObject Server::toolAddToCollection(const QJsonObject &args) {
@@ -156,71 +156,127 @@ QJsonObject Server::toolShareCollection(const QJsonObject &args) {
 	return result;
 }
 
-// Gift Auctions - uses Telegram Star Gift Auction API
-QJsonObject Server::toolCreateGiftAuction(const QJsonObject &args) {
-	QJsonObject result;
-	QString giftId = args["gift_id"].toString();
-	int startingBid = args["starting_bid"].toInt();
-	int durationHours = args.value("duration_hours").toInt(24);
-
-	if (giftId.isEmpty() || startingBid <= 0) {
-		result["error"] = "Missing gift_id or invalid starting_bid";
-		result["success"] = false;
-		return result;
-	}
-
-	if (!_session) {
-		result["error"] = "No active session";
-		result["success"] = false;
-		return result;
-	}
-
-	QString auctionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-	QDateTime endTime = QDateTime::currentDateTimeUtc().addSecs(durationHours * 3600);
-
-	// Store auction locally
-	QSqlQuery query(_db);
-	query.prepare("INSERT INTO auctions (id, gift_id, starting_bid, current_bid, bidder_count, status, ends_at, created_at) "
-				  "VALUES (?, ?, ?, ?, 0, 'active', ?, datetime('now'))");
-	query.addBindValue(auctionId);
-	query.addBindValue(giftId);
-	query.addBindValue(startingBid);
-	query.addBindValue(startingBid);
-	query.addBindValue(endTime.toString(Qt::ISODate));
-	query.exec();
-
-	// MTPpayments_UpdateStarGiftPrice API not available in this version
-	// Gift price update would be done here if the API supported it
-	qint64 giftIdNum = giftId.toLongLong();
-	if (giftIdNum > 0) {
-		qWarning() << "MCP: Gift auction API not available - price update skipped for auction" << auctionId;
-	}
-
-	result["success"] = true;
-	result["auction_id"] = auctionId;
-	result["gift_id"] = giftId;
-	result["starting_bid"] = startingBid;
-	result["current_bid"] = startingBid;
-	result["duration_hours"] = durationHours;
-	result["ends_at"] = endTime.toString(Qt::ISODate);
-	result["status"] = "active";
-	result["api_request"] = "submitted";
-	result["note"] = "Auction created locally and price update submitted to Telegram API. "
-					 "Full auction functionality uses Telegram's gift marketplace.";
-
-	return result;
-}
+// Gift auctions.
+//
+// Telegram runs these itself: an auction is a property of a gift, opened and
+// closed server-side, so there is no create and no cancel for a client to
+// call. The two tools that claimed to do that (create_gift_auction,
+// cancel_auction) invented an `auctions` SQLite table and reported UUIDs that
+// existed nowhere but this database -- they are gone rather than reimplemented,
+// because no API can back them.
+//
+// What remains is real: the active auction list, one auction's live state, and
+// the gifts a finished auction handed out. Bidding stays unimplemented on
+// purpose -- see toolPlaceBid.
 
 QJsonObject Server::toolPlaceBid(const QJsonObject &args) {
 	QJsonObject result;
-	QString auctionId = args["auction_id"].toString();
-	int bidAmount = args["bid_amount"].toInt();
+	const auto giftId = qint64(args["gift_id"].toDouble());
+	const auto bidAmount = qint64(args["bid_amount"].toDouble());
 
-	if (auctionId.isEmpty() || bidAmount <= 0) {
-		result["error"] = "Missing auction_id or invalid bid_amount";
-		result["success"] = false;
-		return result;
+	// A bid is a purchase: it goes through the invoice flow
+	// (inputInvoiceStarGiftAuctionBid -> payments.getPaymentForm ->
+	// payments.sendStarsForm) and debits real stars. This used to write a row
+	// into a local `auctions` table and answer "bid_placed", which was a lie in
+	// the most expensive direction -- a caller could believe it held the top
+	// bid on a gift it had never bid on.
+	//
+	// Refusing is the honest answer until the flow is wired and there is a
+	// balance to exercise it against.
+	result["success"] = false;
+	result["implemented"] = false;
+	result["gift_id"] = giftId;
+	result["bid_amount"] = bidAmount;
+	result["error"] = "Bidding is not implemented";
+	result["reason"] = "A bid spends stars through the payment-form flow "
+		"(inputInvoiceStarGiftAuctionBid). Nothing is recorded locally, because "
+		"a bid this client did not actually place must never look like one it did.";
+	return result;
+}
+
+namespace {
+
+// A gift carries its auction, so the gift id is the auction's identity --
+// there is no separate auction id anywhere in the API.
+[[nodiscard]] qint64 StarGiftId(const MTPStarGift &gift) {
+	return gift.match([](const MTPDstarGift &data) {
+		return qint64(data.vid().v);
+	}, [](const MTPDstarGiftUnique &data) {
+		return qint64(data.vid().v);
+	});
+}
+
+// Auctions run in rounds: each round releases gifts to the current top
+// bidders, so "the state" is a running tally, not a single high bid. Reported
+// as-is; nothing here is inferred or interpolated.
+[[nodiscard]] QJsonObject AuctionStateJson(
+		const MTPStarGiftAuctionState &state) {
+	auto json = QJsonObject();
+	state.match([&](const MTPDstarGiftAuctionState &data) {
+		json["phase"] = "running";
+		json["version"] = data.vversion().v;
+		json["start_date"] = qint64(data.vstart_date().v);
+		json["end_date"] = qint64(data.vend_date().v);
+		json["min_bid_amount"] = qint64(data.vmin_bid_amount().v);
+		json["next_round_at"] = qint64(data.vnext_round_at().v);
+		json["last_gift_num"] = data.vlast_gift_num().v;
+		json["gifts_left"] = data.vgifts_left().v;
+		json["current_round"] = data.vcurrent_round().v;
+		json["total_rounds"] = data.vtotal_rounds().v;
+
+		auto levels = QJsonArray();
+		for (const auto &level : data.vbid_levels().v) {
+			const auto &entry = level.data();
+			auto obj = QJsonObject();
+			obj["pos"] = entry.vpos().v;
+			obj["amount"] = qint64(entry.vamount().v);
+			obj["date"] = qint64(entry.vdate().v);
+			levels.append(obj);
+		}
+		json["bid_levels"] = levels;
+	}, [&](const MTPDstarGiftAuctionStateFinished &data) {
+		json["phase"] = "finished";
+		json["start_date"] = qint64(data.vstart_date().v);
+		json["end_date"] = qint64(data.vend_date().v);
+		json["average_price"] = qint64(data.vaverage_price().v);
+		if (const auto listed = data.vlisted_count()) {
+			json["listed_count"] = listed->v;
+		}
+		if (const auto url = data.vfragment_listed_url()) {
+			json["fragment_listed_url"] = qs(*url);
+		}
+	}, [&](const MTPDstarGiftAuctionStateNotModified &) {
+		json["phase"] = "not_modified";
+	});
+	return json;
+}
+
+// What this account did in the auction. `acquired_count` is always present;
+// the bid fields only exist once a bid has actually been placed, so their
+// absence is reported as absence rather than as a zero bid.
+[[nodiscard]] QJsonObject AuctionUserStateJson(
+		const MTPStarGiftAuctionUserState &state) {
+	const auto &data = state.data();
+	auto json = QJsonObject();
+	json["acquired_count"] = data.vacquired_count().v;
+	json["returned"] = data.is_returned();
+	if (const auto amount = data.vbid_amount()) {
+		json["bid_amount"] = qint64(amount->v);
 	}
+	if (const auto date = data.vbid_date()) {
+		json["bid_date"] = qint64(date->v);
+	}
+	if (const auto min = data.vmin_bid_amount()) {
+		json["min_bid_amount"] = qint64(min->v);
+	}
+	return json;
+}
+
+} // namespace
+
+QJsonObject Server::toolListAuctions(const QJsonObject &args) {
+	Q_UNUSED(args);
+	QJsonObject result;
 
 	if (!_session) {
 		result["error"] = "No active session";
@@ -228,184 +284,121 @@ QJsonObject Server::toolPlaceBid(const QJsonObject &args) {
 		return result;
 	}
 
-	// Credits API not available in this version - skip balance check
-	qint64 balance = 0;
-
-	// Check auction exists and bid is valid
-	QSqlQuery checkQuery(_db);
-	checkQuery.prepare("SELECT current_bid, status FROM auctions WHERE id = ?");
-	checkQuery.addBindValue(auctionId);
-
-	if (checkQuery.exec() && checkQuery.next()) {
-		int currentBid = checkQuery.value(0).toInt();
-		QString status = checkQuery.value(1).toString();
-
-		if (status != "active") {
-			result["error"] = QString("Auction is %1, not active").arg(status);
-			result["success"] = false;
-			return result;
-		}
-
-		if (bidAmount <= currentBid) {
-			result["error"] = QString("Bid must be higher than current bid of %1 stars").arg(currentBid);
-			result["success"] = false;
-			result["current_bid"] = currentBid;
-			return result;
-		}
-
-		// Update auction with new bid
-		QSqlQuery updateQuery(_db);
-		updateQuery.prepare("UPDATE auctions SET current_bid = ?, bidder_count = bidder_count + 1 WHERE id = ?");
-		updateQuery.addBindValue(bidAmount);
-		updateQuery.addBindValue(auctionId);
-		updateQuery.exec();
-	} else {
-		result["error"] = "Auction not found";
-		result["success"] = false;
-		return result;
-	}
-
-	// Record bid in spending
-	QSqlQuery query(_db);
-	query.prepare("INSERT INTO wallet_spending (date, amount, category, description) "
-				  "VALUES (date('now'), 0, 'bid', ?)");
-	query.addBindValue(QString("Bid %1 stars on auction %2").arg(bidAmount).arg(auctionId));
-	query.exec();
-
-	result["success"] = true;
-	result["auction_id"] = auctionId;
-	result["bid_amount"] = bidAmount;
-	result["current_balance"] = balance;
-	result["status"] = "bid_placed";
-	result["note"] = "Bid placed locally. Telegram gift auctions use the Star Gift marketplace. "
-					 "For live Telegram auctions, use the Telegram UI.";
-
-	return result;
-}
-
-QJsonObject Server::toolListAuctions(const QJsonObject &args) {
-	QJsonObject result;
-	QString status = args.value("status").toString("active");
-	int limit = args.value("limit").toInt(50);
-
-	QSqlQuery query(_db);
-	query.prepare("SELECT id, gift_id, starting_bid, current_bid, bidder_count, status, ends_at, created_at "
-				  "FROM auctions WHERE status = ? ORDER BY created_at DESC LIMIT ?");
-	query.addBindValue(status);
-	query.addBindValue(limit);
-
-	QJsonArray auctions;
-	if (query.exec()) {
-		while (query.next()) {
-			QJsonObject auction;
-			auction["auction_id"] = query.value(0).toString();
-			auction["gift_id"] = query.value(1).toString();
-			auction["starting_bid"] = query.value(2).toInt();
-			auction["current_bid"] = query.value(3).toInt();
-			auction["bidder_count"] = query.value(4).toInt();
-			auction["status"] = query.value(5).toString();
-			auction["ends_at"] = query.value(6).toString();
-			auction["created_at"] = query.value(7).toString();
-			auctions.append(auction);
-		}
-	}
-
-	result["success"] = true;
-	result["auctions"] = auctions;
-	result["count"] = auctions.size();
-	result["status_filter"] = status;
-
-	return result;
+	// Telegram decides which auctions are live; this used to read them out of
+	// a local table that only ever held rows create_gift_auction had invented.
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_GetStarGiftActiveAuctions(
+			MTP_long(0) // hash 0: nothing cached, send the full list
+		)).done([=](const MTPpayments_StarGiftActiveAuctions &result) {
+			auto value = QJsonObject();
+			auto auctions = QJsonArray();
+			result.match([&](
+					const MTPDpayments_starGiftActiveAuctions &data) {
+				for (const auto &entry : data.vauctions().v) {
+					const auto &auction = entry.data();
+					auto obj = QJsonObject();
+					obj["gift_id"] = StarGiftId(auction.vgift());
+					obj["state"] = AuctionStateJson(auction.vstate());
+					obj["your_state"] = AuctionUserStateJson(
+						auction.vuser_state());
+					auctions.append(obj);
+				}
+			}, [](const MTPDpayments_starGiftActiveAuctionsNotModified &) {
+			});
+			value["success"] = true;
+			value["auctions"] = auctions;
+			value["count"] = auctions.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolGetAuctionStatus(const QJsonObject &args) {
 	QJsonObject result;
-	QString auctionId = args["auction_id"].toString();
+	const auto giftId = qint64(args["gift_id"].toDouble());
 
-	QSqlQuery query(_db);
-	query.prepare("SELECT gift_id, starting_bid, current_bid, bidder_count, status, ends_at, created_at "
-				  "FROM auctions WHERE id = ?");
-	query.addBindValue(auctionId);
-
-	if (query.exec() && query.next()) {
-		result["success"] = true;
-		result["auction_id"] = auctionId;
-		result["gift_id"] = query.value(0).toString();
-		result["starting_bid"] = query.value(1).toInt();
-		result["current_bid"] = query.value(2).toInt();
-		result["bidder_count"] = query.value(3).toInt();
-		result["status"] = query.value(4).toString();
-		result["ends_at"] = query.value(5).toString();
-		result["created_at"] = query.value(6).toString();
-	} else {
+	if (!giftId) {
+		result["error"] = "Missing gift_id parameter";
 		result["success"] = false;
-		result["auction_id"] = auctionId;
-		result["error"] = "Auction not found";
+		return result;
 	}
 
-	return result;
-}
-
-QJsonObject Server::toolCancelAuction(const QJsonObject &args) {
-	QJsonObject result;
-	QString auctionId = args["auction_id"].toString();
-
-	QSqlQuery query(_db);
-	query.prepare("UPDATE auctions SET status = 'cancelled' WHERE id = ? AND status = 'active'");
-	query.addBindValue(auctionId);
-
-	if (query.exec() && query.numRowsAffected() > 0) {
-		result["success"] = true;
-		result["auction_id"] = auctionId;
-		result["cancelled"] = true;
-	} else {
+	if (!_session) {
+		result["error"] = "No active session";
 		result["success"] = false;
-		result["auction_id"] = auctionId;
-		result["cancelled"] = false;
-		result["error"] = "Auction not found or not active";
+		return result;
 	}
 
-	return result;
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_GetStarGiftAuctionState(
+			MTP_inputStarGiftAuction(MTP_long(giftId)),
+			MTP_int(0) // version 0: no cached state to diff against
+		)).done([=](const MTPpayments_StarGiftAuctionState &result) {
+			const auto &data = result.data();
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["gift_id"] = StarGiftId(data.vgift());
+			value["state"] = AuctionStateJson(data.vstate());
+			value["your_state"] = AuctionUserStateJson(data.vuser_state());
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolGetAuctionHistory(const QJsonObject &args) {
 	QJsonObject result;
-	int limit = args.value("limit").toInt(50);
-	QString statusFilter = args.value("status").toString();
+	const auto giftId = qint64(args["gift_id"].toDouble());
 
-	QSqlQuery query(_db);
-	if (statusFilter.isEmpty()) {
-		query.prepare("SELECT id, gift_id, starting_bid, current_bid, bidder_count, status, ends_at, created_at "
-					  "FROM auctions ORDER BY created_at DESC LIMIT ?");
-		query.addBindValue(limit);
-	} else {
-		query.prepare("SELECT id, gift_id, starting_bid, current_bid, bidder_count, status, ends_at, created_at "
-					  "FROM auctions WHERE status = ? ORDER BY created_at DESC LIMIT ?");
-		query.addBindValue(statusFilter);
-		query.addBindValue(limit);
+	if (!giftId) {
+		result["error"] = "Missing gift_id parameter";
+		result["success"] = false;
+		return result;
 	}
 
-	QJsonArray history;
-	if (query.exec()) {
-		while (query.next()) {
-			QJsonObject entry;
-			entry["auction_id"] = query.value(0).toString();
-			entry["gift_id"] = query.value(1).toString();
-			entry["starting_bid"] = query.value(2).toInt();
-			entry["final_bid"] = query.value(3).toInt();
-			entry["bidder_count"] = query.value(4).toInt();
-			entry["status"] = query.value(5).toString();
-			entry["ends_at"] = query.value(6).toString();
-			entry["created_at"] = query.value(7).toString();
-			history.append(entry);
-		}
+	if (!_session) {
+		result["error"] = "No active session";
+		result["success"] = false;
+		return result;
 	}
 
-	result["success"] = true;
-	result["history"] = history;
-	result["count"] = history.size();
-
-	return result;
+	// The gifts an auction actually handed out, and to whom -- the closest
+	// thing to a result sheet Telegram exposes.
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_GetStarGiftAuctionAcquiredGifts(
+			MTP_long(giftId)
+		)).done([=](const MTPpayments_StarGiftAuctionAcquiredGifts &result) {
+			const auto &data = result.data();
+			auto value = QJsonObject();
+			auto gifts = QJsonArray();
+			for (const auto &item : data.vgifts().v) {
+				const auto &entry = item.data();
+				auto obj = QJsonObject();
+				obj["peer_id"] = entry.is_name_hidden()
+					? QJsonValue()
+					: QJsonValue(qint64(peerFromMTP(entry.vpeer()).value));
+				obj["name_hidden"] = entry.is_name_hidden();
+				obj["date"] = qint64(entry.vdate().v);
+				obj["bid_amount"] = qint64(entry.vbid_amount().v);
+				obj["round"] = entry.vround().v;
+				obj["pos"] = entry.vpos().v;
+				if (const auto num = entry.vgift_num()) {
+					obj["gift_num"] = num->v;
+				}
+				gifts.append(obj);
+			}
+			value["success"] = true;
+			value["gift_id"] = giftId;
+			value["acquired_gifts"] = gifts;
+			value["count"] = gifts.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 // Gift Marketplace
