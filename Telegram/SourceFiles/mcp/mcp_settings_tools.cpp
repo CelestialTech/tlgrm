@@ -1452,63 +1452,134 @@ QJsonObject Server::toolGetCollectiblesPortfolio(const QJsonObject &args) {
 	return toolGetPortfolio(args);
 }
 
+// Both of these read a gift_collections / collection_items pair that no server
+// ever populated, so they described collections this client had invented. They
+// go to Telegram now; there is nothing a local table can add, because
+// collection membership is server state.
 QJsonObject Server::toolGetCollectionDetails(const QJsonObject &args) {
-	qint64 collectionId = args["collection_id"].toVariant().toLongLong();
-
-	QSqlQuery query(_db);
-	query.prepare("SELECT id, name, description, is_public, created_at FROM gift_collections WHERE id = ?");
-	query.addBindValue(collectionId);
-
 	QJsonObject result;
-	if (query.exec() && query.next()) {
-		result["id"] = query.value(0).toLongLong();
-		result["name"] = query.value(1).toString();
-		result["description"] = query.value(2).toString();
-		result["is_public"] = query.value(3).toBool();
-		result["created_at"] = query.value(4).toString();
-		result["success"] = true;
-	} else {
+	const auto collectionId = args["collection_id"].toInt();
+
+	if (collectionId <= 0) {
+		result["error"] = "Missing or invalid collection_id";
 		result["success"] = false;
-		result["error"] = "Collection not found";
+		return result;
 	}
-	return result;
+
+	if (!_session) {
+		result["error"] = "No active session";
+		result["success"] = false;
+		return result;
+	}
+
+	return awaitMtp([&](auto done, auto fail) {
+		const auto self = _session->data().peer(_session->userPeerId());
+		_session->api().request(MTPpayments_GetStarGiftCollections(
+			self->input(),
+			MTP_long(0)
+		)).done([=](const MTPpayments_StarGiftCollections &result) {
+			auto value = QJsonObject();
+			auto found = false;
+			result.match([&](const MTPDpayments_starGiftCollections &data) {
+				for (const auto &entry : data.vcollections().v) {
+					const auto &collection = entry.data();
+					if (collection.vcollection_id().v != collectionId) {
+						continue;
+					}
+					found = true;
+					value["collection_id"] = collection.vcollection_id().v;
+					value["title"] = qs(collection.vtitle());
+					value["gifts_count"] = collection.vgifts_count().v;
+				}
+			}, [](const MTPDpayments_starGiftCollectionsNotModified &) {
+			});
+			value["success"] = found;
+			if (!found) {
+				value["error"] = "Collection not found";
+				value["collection_id"] = collectionId;
+			}
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
+// How much of this account's gift shelf sits in one collection.
+//
+// The old version divided one orphaned table by another and, since nothing
+// writes to either any more, would have reported 0% forever. This is a ratio
+// over two numbers Telegram actually returns; it is arithmetic on real
+// figures, not an estimate.
 QJsonObject Server::toolGetCollectionCompletion(const QJsonObject &args) {
-	qint64 collectionId = args["collection_id"].toVariant().toLongLong();
-
-	// Count items in collection
-	QSqlQuery itemQuery(_db);
-	itemQuery.prepare("SELECT COUNT(*) FROM collection_items WHERE collection_id = ?");
-	itemQuery.addBindValue(collectionId);
-
-	int totalItems = 0;
-	if (itemQuery.exec() && itemQuery.next()) {
-		totalItems = itemQuery.value(0).toInt();
-	}
-
-	// Count items that exist in portfolio (owned)
-	QSqlQuery ownedQuery(_db);
-	ownedQuery.prepare(
-		"SELECT COUNT(*) FROM collection_items ci "
-		"INNER JOIN portfolio p ON ci.gift_id = p.gift_type "
-		"WHERE ci.collection_id = ? AND p.quantity > 0");
-	ownedQuery.addBindValue(collectionId);
-
-	int ownedItems = 0;
-	if (ownedQuery.exec() && ownedQuery.next()) {
-		ownedItems = ownedQuery.value(0).toInt();
-	}
-
-	double completion = totalItems > 0 ? (static_cast<double>(ownedItems) / totalItems * 100.0) : 0.0;
-
 	QJsonObject result;
-	result["success"] = true;
-	result["collection_id"] = collectionId;
-	result["total_items"] = totalItems;
-	result["owned_items"] = ownedItems;
-	result["completion_percentage"] = completion;
-	return result;
+	const auto collectionId = args["collection_id"].toInt();
+
+	if (collectionId <= 0) {
+		result["error"] = "Missing or invalid collection_id";
+		result["success"] = false;
+		return result;
+	}
+
+	if (!_session) {
+		result["error"] = "No active session";
+		result["success"] = false;
+		return result;
+	}
+
+	return awaitMtp([&](auto done, auto fail) {
+		const auto self = _session->data().peer(_session->userPeerId());
+		_session->api().request(MTPpayments_GetStarGiftCollections(
+			self->input(),
+			MTP_long(0)
+		)).done([=](const MTPpayments_StarGiftCollections &collections) {
+			auto inCollection = -1;
+			collections.match([&](
+					const MTPDpayments_starGiftCollections &data) {
+				for (const auto &entry : data.vcollections().v) {
+					const auto &collection = entry.data();
+					if (collection.vcollection_id().v == collectionId) {
+						inCollection = collection.vgifts_count().v;
+					}
+				}
+			}, [](const MTPDpayments_starGiftCollectionsNotModified &) {
+			});
+
+			if (inCollection < 0) {
+				auto value = QJsonObject();
+				value["success"] = false;
+				value["collection_id"] = collectionId;
+				value["error"] = "Collection not found";
+				done(value);
+				return;
+			}
+
+			// Second hop: the total is the account's whole saved-gift count,
+			// which only payments.getSavedStarGifts knows.
+			_session->api().request(MTPpayments_GetSavedStarGifts(
+				MTP_flags(0),
+				self->input(),
+				MTPint(), // collection_id: unset, we want every gift
+				MTP_string(QString()),
+				MTP_int(1) // one row is enough; `count` is what we need
+			)).done([=](const MTPpayments_SavedStarGifts &saved) {
+				const auto total = saved.data().vcount().v;
+				auto value = QJsonObject();
+				value["success"] = true;
+				value["collection_id"] = collectionId;
+				value["gifts_in_collection"] = inCollection;
+				value["gifts_owned_total"] = total;
+				value["completion_percentage"] = total > 0
+					? (double(inCollection) / total * 100.0)
+					: 0.0;
+				done(value);
+			}).fail([=](const MTP::Error &error) {
+				fail(error.type());
+			}).send();
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 // ============================================================================

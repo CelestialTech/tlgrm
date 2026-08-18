@@ -1760,7 +1760,7 @@ void Server::registerTools() {
 		},
 		Tool{
 			"send_stars",
-			"Send Stars to a user",
+			"Send Stars to a user. NOT POSSIBLE: Telegram has no user-to-user star transfer, so this always reports failure. send_gift, which the recipient converts, is the nearest route -- a different operation, not an equivalent transfer.",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
@@ -2138,14 +2138,16 @@ void Server::registerTools() {
 		// Marketplace - 5 tools
 		Tool{
 			"browse_gift_marketplace",
-			"Browse the gift marketplace",
+			"Browse the copies of one star gift currently offered for resale. Alias for list_marketplace.",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"category", QJsonObject{{"type", "string"}, {"description", "Restrict results to one marketplace category; omit for all categories."}}},
-					{"sort_by", QJsonObject{{"type", "string"}, {"description", "price, rarity, date"}}},
+					{"gift_id", QJsonObject{{"type", "integer"}, {"description", "Gift type whose resale listings to browse."}}},
+					{"sort_by", QJsonObject{{"type", "string"}, {"description", "Order results by asking price (\"price\") or issue number (\"num\"); anything else leaves Telegram's default order."}}},
+					{"offset", QJsonObject{{"type", "string"}, {"description", "Opaque paging cursor from a previous call's next_offset; omit for the first page."}}},
 					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}, {"description", "Maximum number of results to return."}}}
-				}}
+				}},
+				{"required", QJsonArray{"gift_id"}}
 			}
 		},
 		Tool{
@@ -2161,15 +2163,15 @@ void Server::registerTools() {
 		},
 		Tool{
 			"list_gift_for_sale",
-			"List a gift for sale",
+			"Offer one of your star gifts for resale at a given price. Identify the gift by slug or by msg_id -- one of the two is required.",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"gift_id", QJsonObject{{"type", "integer"}, {"description", "Gift ID"}}},
-					{"price", QJsonObject{{"type", "number"}, {"description", "Sale price"}}},
-					{"category", QJsonObject{{"type", "string"}, {"description", "Restrict results to one marketplace category; omit for all categories."}}},
+					{"slug", QJsonObject{{"type", "string"}, {"description", "Slug of the unique gift being offered. Use this or msg_id."}}},
+					{"msg_id", QJsonObject{{"type", "integer"}, {"description", "Message ID of the saved gift in your profile. Use this or slug."}}},
+					{"price", QJsonObject{{"type", "integer"}, {"description", "Asking price in stars. Zero takes it off sale, the same as delist_gift."}}},
 				}},
-				{"required", QJsonArray{"gift_id", "price"}}
+				{"required", QJsonArray{"price"}}
 			}
 		},
 		Tool{
@@ -2187,13 +2189,13 @@ void Server::registerTools() {
 		},
 		Tool{
 			"cancel_listing",
-			"Cancel a marketplace listing",
+			"Take one of your star gifts off resale. Alias for delist_gift.",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"listing_id", QJsonObject{{"type", "integer"}, {"description", "Listing ID"}}}
-				}},
-				{"required", QJsonArray{"listing_id"}}
+					{"slug", QJsonObject{{"type", "string"}, {"description", "Slug of the unique gift to take off sale. Use this or msg_id."}}},
+					{"msg_id", QJsonObject{{"type", "integer"}, {"description", "Message ID of the saved gift in your profile. Use this or slug."}}}
+				}}
 			}
 		},
 
@@ -2421,14 +2423,16 @@ void Server::registerTools() {
 		},
 		Tool{
 			"get_fragment_listings",
-			"Get listings from this client's local marketplace table (not Telegram Fragment)",
+			"Browse the copies of one star gift currently offered for resale. Alias for list_marketplace -- these are Telegram's own resale listings, not Fragment's.",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
+					{"gift_id", QJsonObject{{"type", "integer"}, {"description", "Gift type whose resale listings to browse."}}},
 					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}, {"description", "Maximum number of results to return."}}},
-					{"category", QJsonObject{{"type", "string"}, {"description", "Restrict results to one marketplace category; omit for all categories."}}},
-					{"sort_by", QJsonObject{{"type", "string"}, {"description", "Sort order: price_asc, price_desc, or recent (the default)."}}},
-				}}
+					{"offset", QJsonObject{{"type", "string"}, {"description", "Opaque paging cursor from a previous call's next_offset; omit for the first page."}}},
+					{"sort_by", QJsonObject{{"type", "string"}, {"description", "Order results by asking price (\"price\") or issue number (\"num\"); anything else leaves Telegram's default order."}}},
+				}},
+				{"required", QJsonArray{"gift_id"}}
 			}
 		},
 		Tool{
@@ -2978,23 +2982,24 @@ void Server::registerTools() {
 		Tool{"get_auto_reply_stats", "Get auto-reply usage statistics", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
 
 		// --- Gift Collections ---
-		Tool{"create_gift_collection", "Create a gift collection", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"name", QJsonObject{{"type", "string"}, {"description", "Collection name"}}},
-			{"description", QJsonObject{{"type", "string"}, {"description", "Collection description"}}},
-					{"public", QJsonObject{{"type", "boolean"}, {"description", "Make the collection visible to others (default false)."}}},
-				}}, {"required", QJsonArray{"name"}}}},
-		Tool{"add_to_collection", "Add a gift to a collection", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"collection_id", QJsonObject{{"type", "integer"}, {"description", "Collection ID"}}},
-			{"gift_id", QJsonObject{{"type", "string"}, {"description", "Gift identifier"}}}
-		}}, {"required", QJsonArray{"collection_id", "gift_id"}}}},
-		Tool{"remove_from_collection", "Remove a gift from a collection", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"collection_id", QJsonObject{{"type", "integer"}, {"description", "Collection ID"}}},
-			{"gift_id", QJsonObject{{"type", "string"}, {"description", "Gift identifier"}}}
-		}}, {"required", QJsonArray{"collection_id", "gift_id"}}}},
-		Tool{"share_collection", "Share a collection with a user", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"collection_id", QJsonObject{{"type", "integer"}, {"description", "Collection ID"}}},
-			{"with_user_id", QJsonObject{{"type", "integer"}, {"description", "User ID to share with"}}}
+		Tool{"create_gift_collection", "Create a collection around star gifts you already own. Telegram has no empty collections and no collection description or visibility flag -- a collection has a title and its gifts.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"title", QJsonObject{{"type", "string"}, {"description", "Collection title."}}},
+			{"msg_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Message IDs of the saved gifts to put in it -- at least one, since a collection cannot be created empty."}}},
+				}}, {"required", QJsonArray{"title", "msg_ids"}}}},
+		// share_collection used to be advertised here. Gift collections have
+		// no share, publish or link method and no visibility flag; it only
+		// ever set a boolean on a local row, so it was removed.
+		Tool{"delete_gift_collection", "Delete one of your star gift collections. The gifts themselves are unaffected.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"collection_id", QJsonObject{{"type", "integer"}, {"description", "Collection to delete, as returned by list_gift_collections."}}}
 		}}, {"required", QJsonArray{"collection_id"}}}},
+		Tool{"add_to_collection", "Add one of your star gifts to a collection.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"collection_id", QJsonObject{{"type", "integer"}, {"description", "Collection to add to, as returned by list_gift_collections."}}},
+			{"msg_id", QJsonObject{{"type", "integer"}, {"description", "Message ID of the saved gift in your profile -- how Telegram identifies a gift you own."}}}
+		}}, {"required", QJsonArray{"collection_id", "msg_id"}}}},
+		Tool{"remove_from_collection", "Remove one of your star gifts from a collection.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"collection_id", QJsonObject{{"type", "integer"}, {"description", "Collection to remove from, as returned by list_gift_collections."}}},
+			{"msg_id", QJsonObject{{"type", "integer"}, {"description", "Message ID of the saved gift in your profile -- how Telegram identifies a gift you own."}}}
+		}}, {"required", QJsonArray{"collection_id", "msg_id"}}}},
 
 		// --- Auctions ---
 		//
@@ -3014,17 +3019,24 @@ void Server::registerTools() {
 		}}, {"required", QJsonArray{"gift_id"}}}},
 
 		// --- Marketplace ---
-		Tool{"list_marketplace", "Browse gift marketplace listings", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"category", QJsonObject{{"type", "string"}, {"description", "Filter by category"}}},
-			{"sort_by", QJsonObject{{"type", "string"}, {"description", "Sort order (recent/price_asc/price_desc)"}, {"default", "recent"}}},
+		//
+		// Telegram resells unique gifts by gift type, so you browse one gift's
+		// listings rather than a global feed. There is no category and no
+		// listing id: a copy on sale is identified by its slug, and your own
+		// gift by the message id it occupies in your profile.
+		Tool{"list_marketplace", "Browse the copies of one star gift currently offered for resale, each with its asking price and issue number.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"gift_id", QJsonObject{{"type", "integer"}, {"description", "Gift type whose resale listings to browse."}}},
+			{"sort_by", QJsonObject{{"type", "string"}, {"description", "Order results by asking price (\"price\") or issue number (\"num\"); anything else leaves Telegram's default order."}, {"default", "price"}}},
+			{"offset", QJsonObject{{"type", "string"}, {"description", "Opaque paging cursor from a previous call's next_offset; omit for the first page."}}},
 					{"limit", QJsonObject{{"type", "integer"}, {"description", "Maximum number of results to return (default 50)."}}},
-				}}}},
-		Tool{"buy_gift", "Purchase a gift from marketplace", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"listing_id", QJsonObject{{"type", "string"}, {"description", "Marketplace listing ID"}}}
-		}}, {"required", QJsonArray{"listing_id"}}}},
-		Tool{"delist_gift", "Remove a gift listing from marketplace", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"listing_id", QJsonObject{{"type", "string"}, {"description", "Listing ID"}}}
-		}}, {"required", QJsonArray{"listing_id"}}}},
+				}}, {"required", QJsonArray{"gift_id"}}}},
+		Tool{"buy_gift", "Buy a resold star gift. NOT IMPLEMENTED: this spends stars through the payment-form flow, and nothing is recorded locally, so it always reports failure.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"slug", QJsonObject{{"type", "string"}, {"description", "Slug of the specific gift copy being bought, from list_marketplace."}}}
+		}}, {"required", QJsonArray{"slug"}}}},
+		Tool{"delist_gift", "Take one of your star gifts off resale by clearing its asking price. Identify the gift by slug or by msg_id.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"slug", QJsonObject{{"type", "string"}, {"description", "Slug of the unique gift to take off sale. Use this or msg_id."}}},
+			{"msg_id", QJsonObject{{"type", "integer"}, {"description", "Message ID of the saved gift in your profile. Use this or slug."}}}
+		}}}},
 
 		// --- Wallet/Gifts ---
 		Tool{"send_gift", "Send a gift to a user", QJsonObject{{"type", "object"}, {"properties", QJsonObject{

@@ -595,9 +595,16 @@ private:
 
 	// Stars feature tools
 	QJsonObject toolCreateGiftCollection(const QJsonObject &args);
+	QJsonObject toolDeleteGiftCollection(const QJsonObject &args);
 	QJsonObject toolAddToCollection(const QJsonObject &args);
 	QJsonObject toolRemoveFromCollection(const QJsonObject &args);
-	QJsonObject toolShareCollection(const QJsonObject &args);
+	// Both directions of collection membership are one server call with a
+	// different vector filled in; both resale operations are one call with a
+	// price of zero meaning "not for sale".
+	QJsonObject updateCollectionMembership(
+		int collectionId,
+		int msgId,
+		bool add);
 	QJsonObject toolListAuctions(const QJsonObject &args);
 	QJsonObject toolPlaceBid(const QJsonObject &args);
 	QJsonObject toolGetAuctionStatus(const QJsonObject &args);

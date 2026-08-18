@@ -1085,32 +1085,28 @@ QJsonObject Server::toolSendStars(const QJsonObject &args) {
 		return result;
 	}
 
-	if (!_session) {
-		result["error"] = "No active session";
-		result["success"] = false;
-		return result;
-	}
-
-	// Credits API not available in this version - skip balance check
-	qint64 balance = 0;
-
-	// Record star transfer locally
-	QSqlQuery query(_db);
-	query.prepare("INSERT INTO wallet_spending (date, amount, category, description, peer_id) "
-				  "VALUES (date('now'), ?, 'stars_sent', ?, ?)");
-	query.addBindValue(-amount);
-	query.addBindValue(message.isEmpty() ? QString("Stars sent to %1").arg(recipientId) : message);
-	query.addBindValue(recipientId);
-	query.exec();
-
-	result["success"] = true;
+	// There is no user-to-user star transfer in the API, in any version.
+	// inputInvoiceStars tops up your OWN balance; inputStorePaymentStarsGift
+	// buys stars for someone with real money, not with stars you hold. The
+	// closest equivalent is sending a gift the recipient then converts with
+	// convertStarGift -- a different operation, at the recipient's discretion,
+	// usually worth less than the gift cost.
+	//
+	// So this cannot be finished as named. It used to write a NEGATIVE row
+	// into wallet_spending and answer success with status "recorded", which
+	// made a transfer that never happened show up in the spending history
+	// while the recipient received nothing.
+	result["success"] = false;
+	result["implemented"] = false;
 	result["recipient_id"] = recipientId;
 	result["amount"] = amount;
-	result["current_balance"] = balance;
-	result["status"] = "recorded";
-	result["note"] = "Star transfer recorded. Direct star transfers between users require "
-					 "the Telegram Stars payment form. Use send_gift to send stars as a gift, "
-					 "or use the Telegram UI for direct star transfers.";
+	result["error"] = "Sending stars directly to another user is not possible";
+	result["reason"] = "Telegram has no user-to-user star transfer. Buying stars "
+		"for someone else costs real money (inputStorePaymentStarsGift), and the "
+		"only star-denominated route is send_gift, which the recipient must "
+		"convert -- a different operation, not an equivalent transfer. Nothing "
+		"was recorded locally.";
+	Q_UNUSED(message);
 
 	return result;
 }

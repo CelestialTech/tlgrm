@@ -10,35 +10,65 @@ namespace MCP {
 // ===== STARS FEATURES IMPLEMENTATION =====
 
 // Gift Collections
+//
+// A collection is created on the server around gifts you already own.
+// createStarGiftCollection takes a non-optional Vector<InputSavedStarGift>, so
+// at least one is required here -- though the server silently drops references
+// to gifts you do not own and creates the collection empty rather than
+// refusing, which is worth knowing before treating success as proof the gifts
+// went in. Check gifts_count in the reply.
+//
+// A collection has only a title. The description and public flag this tool
+// used to accept had no server equivalent, and setting them wrote a local row
+// that list_gift_collections would never show, because that now returns
+// Telegram's collections.
 QJsonObject Server::toolCreateGiftCollection(const QJsonObject &args) {
 	QJsonObject result;
-	QString name = args["name"].toString();
-	QString description = args.value("description").toString();
-	bool isPublic = args.value("public").toBool(false);
+	const auto title = args["title"].toString();
+	const auto msgIds = args["msg_ids"].toArray();
 
-	if (name.isEmpty()) {
-		result["error"] = "Missing name parameter";
+	if (title.isEmpty()) {
+		result["error"] = "Missing title parameter";
 		result["success"] = false;
 		return result;
 	}
 
-	QSqlQuery query(_db);
-	query.prepare("INSERT INTO gift_collections (name, description, is_public, created_at) "
-				  "VALUES (?, ?, ?, datetime('now'))");
-	query.addBindValue(name);
-	query.addBindValue(description);
-	query.addBindValue(isPublic);
-
-	if (query.exec()) {
-		result["success"] = true;
-		result["collection_id"] = query.lastInsertId().toLongLong();
-		result["name"] = name;
-	} else {
+	if (msgIds.isEmpty()) {
+		result["error"] = "msg_ids must name at least one gift you own";
 		result["success"] = false;
-		result["error"] = "Failed to create collection";
+		return result;
 	}
 
-	return result;
+	if (!_session) {
+		result["error"] = "No active session";
+		result["success"] = false;
+		return result;
+	}
+
+	auto gifts = QVector<MTPInputSavedStarGift>();
+	gifts.reserve(msgIds.size());
+	for (const auto &id : msgIds) {
+		gifts.push_back(MTP_inputSavedStarGiftUser(MTP_int(id.toInt())));
+	}
+
+	return awaitMtp([&](auto done, auto fail) {
+		const auto self = _session->data().peer(_session->userPeerId());
+		_session->api().request(MTPpayments_CreateStarGiftCollection(
+			self->input(),
+			MTP_string(title),
+			MTP_vector<MTPInputSavedStarGift>(gifts)
+		)).done([=](const MTPStarGiftCollection &result) {
+			const auto &data = result.data();
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["collection_id"] = data.vcollection_id().v;
+			value["title"] = qs(data.vtitle());
+			value["gifts_count"] = data.vgifts_count().v;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolListGiftCollections(const QJsonObject &args) {
@@ -87,73 +117,111 @@ QJsonObject Server::toolListGiftCollections(const QJsonObject &args) {
 	});
 }
 
-QJsonObject Server::toolAddToCollection(const QJsonObject &args) {
+// Collections could be created, listed and added to, but never deleted -- so
+// anything created was permanent as far as this surface was concerned. The
+// method existed all along.
+QJsonObject Server::toolDeleteGiftCollection(const QJsonObject &args) {
 	QJsonObject result;
-	qint64 collectionId = args["collection_id"].toVariant().toLongLong();
-	QString giftId = args["gift_id"].toString();
+	const auto collectionId = args["collection_id"].toInt();
 
-	QSqlQuery query(_db);
-	query.prepare("INSERT OR IGNORE INTO collection_items (collection_id, gift_id) VALUES (?, ?)");
-	query.addBindValue(collectionId);
-	query.addBindValue(giftId);
-
-	if (query.exec()) {
-		result["success"] = true;
-		result["collection_id"] = collectionId;
-		result["gift_id"] = giftId;
-		result["added"] = query.numRowsAffected() > 0;
-	} else {
+	if (collectionId <= 0) {
+		result["error"] = "Missing or invalid collection_id";
 		result["success"] = false;
-		result["error"] = "Failed to add to collection";
+		return result;
 	}
 
-	return result;
+	if (!_session) {
+		result["error"] = "No active session";
+		result["success"] = false;
+		return result;
+	}
+
+	return awaitMtp([&](auto done, auto fail) {
+		const auto self = _session->data().peer(_session->userPeerId());
+		_session->api().request(MTPpayments_DeleteStarGiftCollection(
+			self->input(),
+			MTP_int(collectionId)
+		)).done([=](const MTPBool &result) {
+			auto value = QJsonObject();
+			value["success"] = mtpIsTrue(result);
+			value["collection_id"] = collectionId;
+			value["deleted"] = mtpIsTrue(result);
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+// Collection membership lives on the server, and both directions are the same
+// call with a different vector filled in. These used to move rows in a local
+// collection_items table, so a gift could be "in" a collection Telegram had
+// never heard of.
+//
+// share_collection used to sit here. It set is_public on a local row and
+// reported a collection shared with a user who was never told anything: gift
+// collections have no share, publish or link method in the schema, and no
+// visibility flag either. It was removed rather than reimplemented.
+QJsonObject Server::toolAddToCollection(const QJsonObject &args) {
+	return updateCollectionMembership(
+		args["collection_id"].toInt(),
+		args["msg_id"].toInt(),
+		true);
 }
 
 QJsonObject Server::toolRemoveFromCollection(const QJsonObject &args) {
-	QJsonObject result;
-	qint64 collectionId = args["collection_id"].toVariant().toLongLong();
-	QString giftId = args["gift_id"].toString();
-
-	QSqlQuery query(_db);
-	query.prepare("DELETE FROM collection_items WHERE collection_id = ? AND gift_id = ?");
-	query.addBindValue(collectionId);
-	query.addBindValue(giftId);
-
-	if (query.exec()) {
-		result["success"] = true;
-		result["collection_id"] = collectionId;
-		result["gift_id"] = giftId;
-		result["removed"] = query.numRowsAffected() > 0;
-	} else {
-		result["success"] = false;
-		result["error"] = "Failed to remove from collection";
-	}
-
-	return result;
+	return updateCollectionMembership(
+		args["collection_id"].toInt(),
+		args["msg_id"].toInt(),
+		false);
 }
 
-QJsonObject Server::toolShareCollection(const QJsonObject &args) {
+QJsonObject Server::updateCollectionMembership(
+		int collectionId,
+		int msgId,
+		bool add) {
 	QJsonObject result;
-	qint64 collectionId = args["collection_id"].toVariant().toLongLong();
-	qint64 withUserId = args.value("with_user_id").toVariant().toLongLong();
 
-	// Mark collection as public so it can be shared
-	QSqlQuery query(_db);
-	query.prepare("UPDATE gift_collections SET is_public = 1 WHERE id = ?");
-	query.addBindValue(collectionId);
-
-	if (query.exec() && query.numRowsAffected() > 0) {
-		result["success"] = true;
-		result["collection_id"] = collectionId;
-		result["shared_with"] = withUserId;
-		result["is_public"] = true;
-	} else {
+	if (collectionId <= 0 || msgId <= 0) {
+		result["error"] = "Missing or invalid collection_id or msg_id";
 		result["success"] = false;
-		result["error"] = "Collection not found";
+		return result;
 	}
 
-	return result;
+	if (!_session) {
+		result["error"] = "No active session";
+		result["success"] = false;
+		return result;
+	}
+
+	using Flag = MTPpayments_UpdateStarGiftCollection::Flag;
+	const auto gifts = MTP_vector<MTPInputSavedStarGift>(
+		1,
+		MTP_inputSavedStarGiftUser(MTP_int(msgId)));
+
+	return awaitMtp([&](auto done, auto fail) {
+		const auto self = _session->data().peer(_session->userPeerId());
+		_session->api().request(MTPpayments_UpdateStarGiftCollection(
+			MTP_flags(add ? Flag::f_add_stargift : Flag::f_delete_stargift),
+			self->input(),
+			MTP_int(collectionId),
+			MTPstring(), // title unchanged
+			add ? MTPVector<MTPInputSavedStarGift>() : gifts,
+			add ? gifts : MTPVector<MTPInputSavedStarGift>(),
+			MTPVector<MTPInputSavedStarGift>() // order unchanged
+		)).done([=](const MTPStarGiftCollection &result) {
+			const auto &data = result.data();
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["collection_id"] = data.vcollection_id().v;
+			value["title"] = qs(data.vtitle());
+			value["gifts_count"] = data.vgifts_count().v;
+			value[add ? "added" : "removed"] = true;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 // Gift auctions.
@@ -195,6 +263,23 @@ QJsonObject Server::toolPlaceBid(const QJsonObject &args) {
 }
 
 namespace {
+
+// Stars come in two flavours -- ordinary stars, carrying a nano remainder,
+// and TON -- and a price can be quoted in either. Reported with its currency
+// rather than flattened to a bare number, so a TON price is never mistaken
+// for a star price.
+[[nodiscard]] QJsonObject StarsAmountJson(const MTPStarsAmount &amount) {
+	auto json = QJsonObject();
+	amount.match([&](const MTPDstarsAmount &data) {
+		json["currency"] = "stars";
+		json["amount"] = qint64(data.vamount().v);
+		json["nanos"] = data.vnanos().v;
+	}, [&](const MTPDstarsTonAmount &data) {
+		json["currency"] = "ton";
+		json["amount"] = qint64(data.vamount().v);
+	});
+	return json;
+}
 
 // A gift carries its auction, so the gift id is the auction's identity --
 // there is no separate auction id anywhere in the API.
@@ -402,64 +487,22 @@ QJsonObject Server::toolGetAuctionHistory(const QJsonObject &args) {
 }
 
 // Gift Marketplace
+// The resale market.
+//
+// Telegram resells unique gifts by gift type: you ask for one gift's listings
+// and get back the individual copies on sale, each with its own asking price
+// and issue number. There is no free-text "category" and no global feed, which
+// is why the old category/sort_by/recent shape had nothing to map onto -- it
+// was describing a local table, not the market.
 QJsonObject Server::toolListMarketplace(const QJsonObject &args) {
 	QJsonObject result;
-	QString category = args.value("category").toString();
-	QString sortBy = args.value("sort_by").toString("recent");
-	int limit = args.value("limit").toInt(50);
+	const auto giftId = qint64(args["gift_id"].toDouble());
+	const auto sortBy = args.value("sort_by").toString("price");
+	const auto offset = args.value("offset").toString();
+	const auto limit = args.value("limit").toInt(50);
 
-	QString sql = "SELECT id, gift_id, price, category, status, created_at "
-				  "FROM marketplace_listings WHERE status = 'active'";
-	if (!category.isEmpty()) {
-		sql += " AND category = :category";
-	}
-	if (sortBy == "price_asc") {
-		sql += " ORDER BY price ASC";
-	} else if (sortBy == "price_desc") {
-		sql += " ORDER BY price DESC";
-	} else {
-		sql += " ORDER BY created_at DESC";
-	}
-	sql += " LIMIT :limit";
-
-	QSqlQuery query(_db);
-	query.prepare(sql);
-	if (!category.isEmpty()) {
-		query.bindValue(":category", category);
-	}
-	query.bindValue(":limit", limit);
-
-	QJsonArray listings;
-	if (query.exec()) {
-		while (query.next()) {
-			QJsonObject listing;
-			listing["listing_id"] = query.value(0).toString();
-			listing["gift_id"] = query.value(1).toString();
-			listing["price"] = query.value(2).toInt();
-			listing["category"] = query.value(3).toString();
-			listing["status"] = query.value(4).toString();
-			listing["created_at"] = query.value(5).toString();
-			listings.append(listing);
-		}
-	}
-
-	result["success"] = true;
-	result["listings"] = listings;
-	result["count"] = listings.size();
-	result["category"] = category;
-	result["sort_by"] = sortBy;
-
-	return result;
-}
-
-QJsonObject Server::toolListGiftForSale(const QJsonObject &args) {
-	QJsonObject result;
-	QString giftId = args["gift_id"].toString();
-	int price = args["price"].toInt();
-	QString category = args.value("category").toString("general");
-
-	if (giftId.isEmpty() || price <= 0) {
-		result["error"] = "Missing gift_id or invalid price";
+	if (!giftId) {
+		result["error"] = "Missing gift_id parameter";
 		result["success"] = false;
 		return result;
 	}
@@ -470,150 +513,102 @@ QJsonObject Server::toolListGiftForSale(const QJsonObject &args) {
 		return result;
 	}
 
-	QString listingId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+	using Flag = MTPpayments_GetResaleStarGifts::Flag;
+	const auto flags = (sortBy == "price")
+		? Flag::f_sort_by_price
+		: (sortBy == "num")
+		? Flag::f_sort_by_num
+		: Flag();
 
-	// Record listing in marketplace_listings
-	QSqlQuery query(_db);
-	query.prepare("INSERT INTO marketplace_listings (id, gift_id, price, category, status, created_at) "
-				  "VALUES (?, ?, ?, ?, 'active', datetime('now'))");
-	query.addBindValue(listingId);
-	query.addBindValue(giftId);
-	query.addBindValue(price);
-	query.addBindValue(category);
-	query.exec();
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_GetResaleStarGifts(
+			MTP_flags(flags),
+			MTPlong(), // attributes_hash: nothing cached
+			MTP_long(giftId),
+			MTPVector<MTPStarGiftAttributeId>(), // no attribute filter
+			MTP_string(offset),
+			MTP_int(limit)
+		)).done([=](const MTPpayments_ResaleStarGifts &result) {
+			const auto &data = result.data();
+			auto value = QJsonObject();
+			auto listings = QJsonArray();
+			for (const auto &item : data.vgifts().v) {
+				auto obj = QJsonObject();
+				item.match([&](const MTPDstarGiftUnique &gift) {
+					obj["gift_id"] = qint64(gift.vid().v);
+					obj["title"] = qs(gift.vtitle());
+					obj["slug"] = qs(gift.vslug());
+					obj["num"] = gift.vnum().v;
+					// A copy on sale carries its asking price; one that is
+					// merely on display carries none, and says so.
+					if (const auto amounts = gift.vresell_amount()) {
+						auto prices = QJsonArray();
+						for (const auto &amount : amounts->v) {
+							prices.append(StarsAmountJson(amount));
+						}
+						obj["resell_amount"] = prices;
+					}
+				}, [&](const MTPDstarGift &gift) {
+					obj["gift_id"] = qint64(gift.vid().v);
+					obj["stars"] = qint64(gift.vstars().v);
+				});
+				listings.append(obj);
+			}
+			value["success"] = true;
+			value["gift_id"] = giftId;
+			value["listings"] = listings;
+			value["count"] = listings.size();
+			value["total_count"] = data.vcount().v;
+			if (const auto next = data.vnext_offset()) {
+				value["next_offset"] = qs(*next);
+			}
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
 
-	// Record in price_history for tracking
-	QSqlQuery priceQuery(_db);
-	priceQuery.prepare("INSERT INTO price_history (gift_type, date, price) "
-					   "VALUES (?, date('now'), ?)");
-	priceQuery.addBindValue(giftId);
-	priceQuery.addBindValue(price);
-	priceQuery.exec();
+// Listing and delisting are the same server call -- setting a resale price,
+// where zero means "not for sale". Both used to invent a listing id and write
+// a marketplace_listings row while logging that the API "was not available in
+// this version"; payments.updateStarGiftPrice has been there all along, and
+// toolUpdateListing already drives it. These delegate rather than repeat it,
+// which is also how they inherit its slug-or-msg_id addressing.
+QJsonObject Server::toolListGiftForSale(const QJsonObject &args) {
+	return toolUpdateListing(args);
+}
 
-	// MTPpayments_UpdateStarGiftPrice API not available in this version
-	// Gift listing would be done here if the API supported it
-	qint64 giftIdNum = giftId.toLongLong();
-	if (giftIdNum > 0) {
-		qWarning() << "MCP: Gift listing API not available - price update skipped for listing" << listingId;
-	}
-
-	result["success"] = true;
-	result["listing_id"] = listingId;
-	result["gift_id"] = giftId;
-	result["price"] = price;
-	result["category"] = category;
-	result["status"] = "listed";
-	result["api_request"] = "submitted";
-	result["note"] = "Gift listed locally and price update submitted to Telegram API. "
-					 "For owned unique gifts, provide the saved gift message ID as gift_id.";
-
-	return result;
+QJsonObject Server::toolDelistGift(const QJsonObject &args) {
+	// Price is not a parameter here -- delisting IS a price of zero, so the
+	// gift is forwarded with one and callers are never asked for a number
+	// whose only valid value is nothing.
+	return toolUpdateListing(QJsonObject{
+		{ "slug", args.value("slug") },
+		{ "msg_id", args.value("msg_id") },
+		{ "price", 0 },
+	});
 }
 
 QJsonObject Server::toolBuyGift(const QJsonObject &args) {
 	QJsonObject result;
-	QString listingId = args["listing_id"].toString();
+	const auto slug = args["slug"].toString();
 
-	if (listingId.isEmpty()) {
-		result["error"] = "Missing listing_id";
-		result["success"] = false;
-		return result;
-	}
-
-	if (!_session) {
-		result["error"] = "No active session";
-		result["success"] = false;
-		return result;
-	}
-
-	// Look up the listing details
-	QSqlQuery query(_db);
-	query.prepare("SELECT gift_id, price, status FROM marketplace_listings WHERE id = ?");
-	query.addBindValue(listingId);
-
-	if (query.exec() && query.next()) {
-		QString giftId = query.value(0).toString();
-		int price = query.value(1).toInt();
-		QString status = query.value(2).toString();
-
-		if (status != "active") {
-			result["error"] = QString("Listing is %1, not available for purchase").arg(status);
-			result["success"] = false;
-			return result;
-		}
-
-		// Credits API not available in this version - skip balance check
-		qint64 balance = 0;
-
-		// Mark listing as sold locally
-		QSqlQuery updateQuery(_db);
-		updateQuery.prepare("UPDATE marketplace_listings SET status = 'sold' WHERE id = ?");
-		updateQuery.addBindValue(listingId);
-		updateQuery.exec();
-
-		// Record the purchase in wallet_spending
-		QSqlQuery spendQuery(_db);
-		spendQuery.prepare("INSERT INTO wallet_spending (date, amount, category, description) "
-						   "VALUES (date('now'), ?, 'gift_purchase', ?)");
-		spendQuery.addBindValue(-price);
-		spendQuery.addBindValue(QString("Purchased gift %1 from listing %2").arg(giftId).arg(listingId));
-		spendQuery.exec();
-
-		// Record in gift_transfers
-		QSqlQuery giftQuery(_db);
-		giftQuery.prepare("INSERT INTO gift_transfers (gift_id, direction, peer_id, stars_amount, created_at) "
-						  "VALUES (?, 'received', 0, ?, datetime('now'))");
-		giftQuery.addBindValue(giftId);
-		giftQuery.addBindValue(price);
-		giftQuery.exec();
-
-		result["success"] = true;
-		result["listing_id"] = listingId;
-		result["gift_id"] = giftId;
-		result["price_paid"] = price;
-		result["current_balance"] = balance;
-		result["status"] = "purchased";
-		result["note"] = "Purchase recorded locally. For Telegram marketplace purchases, "
-						 "the payment is processed through the Star Gift payment form in the UI.";
-	} else {
-		result["success"] = false;
-		result["error"] = "Listing not found";
-	}
-
-	return result;
-}
-
-QJsonObject Server::toolDelistGift(const QJsonObject &args) {
-	QJsonObject result;
-	QString listingId = args["listing_id"].toString();
-
-	if (listingId.isEmpty()) {
-		result["error"] = "Missing listing_id";
-		result["success"] = false;
-		return result;
-	}
-
-	QSqlQuery query(_db);
-	query.prepare("UPDATE marketplace_listings SET status = 'delisted' WHERE id = ? AND status = 'active'");
-	query.addBindValue(listingId);
-
-	if (query.exec() && query.numRowsAffected() > 0) {
-		result["success"] = true;
-		result["listing_id"] = listingId;
-		result["delisted"] = true;
-
-		// MTPpayments_UpdateStarGiftPrice API not available in this version
-		// Delisting would be done here if the API supported it
-		if (_session) {
-			qWarning() << "MCP: Delist API not available - skipped for listing" << listingId;
-		}
-	} else {
-		result["success"] = false;
-		result["listing_id"] = listingId;
-		result["delisted"] = false;
-		result["error"] = "Listing not found or not active";
-	}
-
+	// Buying a resold gift is a purchase: inputInvoiceStarGiftResale ->
+	// payments.getPaymentForm -> payments.sendStarsForm, debiting real stars.
+	//
+	// The old body was the most damaging thing in this file. It marked a local
+	// listing sold, wrote a NEGATIVE amount into wallet_spending, and inserted
+	// a gift_transfers row saying a gift had been received -- so a purchase
+	// that never happened corrupted the very ledger get_balance_history and
+	// the gift tools read back. It then reported status "purchased".
+	result["success"] = false;
+	result["implemented"] = false;
+	result["slug"] = slug;
+	result["error"] = "Buying a resold gift is not implemented";
+	result["reason"] = "This spends stars through the payment-form flow "
+		"(inputInvoiceStarGiftResale). Nothing is written locally: a purchase "
+		"this client did not make must never appear in the spending history.";
 	return result;
 }
 

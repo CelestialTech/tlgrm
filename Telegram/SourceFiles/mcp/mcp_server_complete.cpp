@@ -1809,9 +1809,9 @@ void Server::initializeToolHandlers() {
 
 	// ADDITIONAL STARS TOOLS
 	_toolHandlers["create_gift_collection"] = [this](const QJsonObject &args) { return toolCreateGiftCollection(args); };
+	_toolHandlers["delete_gift_collection"] = [this](const QJsonObject &args) { return toolDeleteGiftCollection(args); };
 	_toolHandlers["add_to_collection"] = [this](const QJsonObject &args) { return toolAddToCollection(args); };
 	_toolHandlers["remove_from_collection"] = [this](const QJsonObject &args) { return toolRemoveFromCollection(args); };
-	_toolHandlers["share_collection"] = [this](const QJsonObject &args) { return toolShareCollection(args); };
 	_toolHandlers["list_auctions"] = [this](const QJsonObject &args) { return toolListAuctions(args); };
 	_toolHandlers["place_bid"] = [this](const QJsonObject &args) { return toolPlaceBid(args); };
 	_toolHandlers["get_auction_status"] = [this](const QJsonObject &args) { return toolGetAuctionStatus(args); };
