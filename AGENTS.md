@@ -188,6 +188,9 @@ build, since a stable client refuses alpha entries outright.
 | `cloudflare-worker/` | **Superseded** — no longer serves updates. |
 | `DesktopPrivate/` | RSA update-signing keys. Never commit, print, or upload. |
 | `docs/UPDATE_SYSTEM.md` | How updates work, both paths. |
+| `docs/MCP_STAR_GIFTS.md` | Which star/gift/wallet tools are real, and the rule that keeps them so. |
+| `PROPOSAL_REFACTOR.md` | Splitting the local-only surface out (the telebox direction). |
+| `PROPOSAL_MCP_CONTROL_PANEL.md` | Proposed UI to run/configure the server, with a Claude DBA agent. |
 
 ### Branches, and one sharp edge
 
