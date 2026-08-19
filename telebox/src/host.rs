@@ -1,10 +1,11 @@
-// The host: shared state the UI reads, plus the relay lifecycle the controls
-// drive.
+// The host: all render-relevant state, the relay lifecycle, and the operations
+// the controls invoke.
 //
-// Two Arcs behind the HostState handle: the Inner state (read every frame,
-// written by the relay) and the RelayCtl (the stop flag + join handle that
-// Start / Stop / Restart act on). They are separate so stopping the host can
-// join the relay thread without holding the state lock the relay itself takes.
+// Everything the panel displays lives here — including the current view and the
+// per-plugin enabled bits — so that BOTH the on-screen controls and the QA API
+// (qa.rs) drive one identical code path. A button's on_click calls the same
+// HostState method the QA socket calls; there is no second implementation to
+// drift.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,6 +27,31 @@ impl Runtime {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum PanelView {
+    Plugins,
+    Permissions,
+    Activity,
+}
+
+impl PanelView {
+    pub fn name(self) -> &'static str {
+        match self {
+            PanelView::Plugins => "plugins",
+            PanelView::Permissions => "permissions",
+            PanelView::Activity => "activity",
+        }
+    }
+    pub fn from_name(s: &str) -> Option<Self> {
+        match s {
+            "plugins" => Some(PanelView::Plugins),
+            "permissions" => Some(PanelView::Permissions),
+            "activity" => Some(PanelView::Activity),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Plugin {
     pub name: &'static str,
@@ -36,7 +62,6 @@ pub struct Plugin {
     pub live: bool,
 }
 
-// The seven Host API families, in matrix order.
 pub const FAMILIES: [&str; 7] = [
     "session", "invoke", "model", "settings", "files", "ui", "events",
 ];
@@ -58,6 +83,11 @@ pub struct Inner {
     pub endpoint: String,
     pub upstream: String,
     pub token: String,
+    pub view: PanelView,
+    pub enabled: Vec<bool>,
+    pub shot_request: Option<String>,
+    pub shot_armed: bool,
+    pub shot_result: Option<(u32, u32, bool)>,
 }
 
 pub struct RelayCtl {
@@ -77,8 +107,6 @@ fn hhmmss() -> String {
     format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
 }
 
-// The rack template — names, runtimes, permissions. `active` here is a default;
-// the view sets it from the live host and the operator's toggles.
 pub fn plugin_templates() -> Vec<Plugin> {
     vec![
         Plugin { name: "MCP", slot: "slot 01 · aggregated endpoint", runtime: Runtime::Rust,
@@ -112,6 +140,15 @@ pub fn plugin_templates() -> Vec<Plugin> {
     ]
 }
 
+// What the panel shows for plugin `i`: MCP tracks the relay, the rest their bit.
+pub fn plugin_active(i: usize, running: bool, enabled: &[bool]) -> bool {
+    if i == 0 {
+        running
+    } else {
+        *enabled.get(i).unwrap_or(&false)
+    }
+}
+
 impl HostState {
     pub fn new(endpoint: String, upstream: String, token: String) -> Self {
         HostState(
@@ -125,6 +162,12 @@ impl HostState {
                 endpoint,
                 upstream,
                 token,
+                view: PanelView::Plugins,
+                // Export, Retention, Archiver, Bots on; Wallet, AI off.
+                enabled: vec![true, true, true, true, true, false, false],
+                shot_request: None,
+                shot_armed: false,
+                shot_result: None,
             })),
             Arc::new(Mutex::new(RelayCtl { stop: None, join: None })),
         )
@@ -161,6 +204,42 @@ impl HostState {
 
     pub fn is_running(&self) -> bool {
         self.0.lock().map(|i| i.running).unwrap_or(false)
+    }
+
+    pub fn view(&self) -> PanelView {
+        self.0.lock().map(|i| i.view).unwrap_or(PanelView::Plugins)
+    }
+
+    pub fn enabled_vec(&self) -> Vec<bool> {
+        self.0.lock().map(|i| i.enabled.clone()).unwrap_or_default()
+    }
+
+    // --- the operations the controls invoke -------------------------------
+
+    pub fn set_view(&self, v: PanelView) {
+        if let Ok(mut i) = self.0.lock() {
+            i.view = v;
+        }
+        self.log("ui", format!("view → {}", v.name()));
+    }
+
+    pub fn toggle_plugin(&self, i: usize) {
+        if i == 0 {
+            if self.is_running() {
+                self.stop();
+            } else {
+                self.start();
+            }
+            return;
+        }
+        let (name, on) = {
+            let mut inner = self.0.lock().unwrap();
+            if i < inner.enabled.len() {
+                inner.enabled[i] = !inner.enabled[i];
+            }
+            (plugin_templates()[i].name, *inner.enabled.get(i).unwrap_or(&false))
+        };
+        self.log("ui", format!("{name} {}", if on { "enabled" } else { "bypassed" }));
     }
 
     // Start the relay: bind the endpoint and begin accepting. No-op if running.
@@ -201,7 +280,6 @@ impl HostState {
             i.upstream_connected = false;
         }
         self.log("host", "host stopping");
-        // Join OUTSIDE the state lock — the relay locks state while shutting down.
         if let Some(j) = join {
             let _ = j.join();
         }
@@ -212,6 +290,83 @@ impl HostState {
         self.stop();
         self.start();
     }
+
+    // --- QA screenshot handshake ------------------------------------------
+    // The QA thread requests a shot; the GPUI render loop fulfills it with
+    // Window::render_to_image and reports the result back here.
+
+    pub fn request_shot(&self, path: String) {
+        if let Ok(mut i) = self.0.lock() {
+            i.shot_request = Some(path);
+            i.shot_armed = false;
+            i.shot_result = None;
+        }
+    }
+
+    // Two-phase so the captured frame reflects the latest state:
+    // first tick arms (and repaints), the next tick captures.
+    pub fn peek_shot(&self) -> (Option<String>, bool) {
+        self.0
+            .lock()
+            .map(|i| (i.shot_request.clone(), i.shot_armed))
+            .unwrap_or((None, false))
+    }
+
+    pub fn arm_shot(&self) {
+        if let Ok(mut i) = self.0.lock() {
+            i.shot_armed = true;
+        }
+    }
+
+    pub fn finish_shot(&self, w: u32, h: u32, ok: bool) {
+        if let Ok(mut i) = self.0.lock() {
+            i.shot_result = Some((w, h, ok));
+            i.shot_request = None;
+            i.shot_armed = false;
+        }
+    }
+
+    pub fn poll_shot(&self) -> Option<(u32, u32, bool)> {
+        self.0.lock().ok().and_then(|i| i.shot_result)
+    }
+
+    // A structured view of exactly what the panel displays — the render grabbed
+    // as data, for deterministic QA assertions.
+    pub fn snapshot(&self) -> serde_json::Value {
+        let i = self.0.lock().unwrap();
+        let running = i.running;
+        let plugins: Vec<serde_json::Value> = plugin_templates()
+            .iter()
+            .enumerate()
+            .map(|(idx, p)| {
+                serde_json::json!({
+                    "name": p.name,
+                    "runtime": p.runtime.label(),
+                    "live": p.live,
+                    "active": plugin_active(idx, running, &i.enabled),
+                })
+            })
+            .collect();
+        let log_tail: Vec<String> = i
+            .log
+            .iter()
+            .rev()
+            .take(8)
+            .map(|e| format!("{} [{}] {}", e.t, e.src, e.msg))
+            .collect();
+        serde_json::json!({
+            "host": if running { "running" } else { "stopped" },
+            "running": running,
+            "upstream_connected": i.upstream_connected,
+            "requests": i.requests,
+            "clients": i.clients,
+            "endpoint": i.endpoint,
+            "bridge": i.upstream,
+            "view": i.view.name(),
+            "plugins": plugins,
+            "log_tail": log_tail,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -220,45 +375,38 @@ mod tests {
     use std::path::Path;
     use std::time::Duration;
 
-    // The lifecycle that Start / Stop / Restart drive. The buttons' on_click
-    // handlers call exactly these methods, so this verifies the real behavior:
-    // Stop unbinds the endpoint (not cosmetic), Start and Restart rebind it.
+    // The lifecycle Start / Stop / Restart drive: Stop must unbind the endpoint.
     #[test]
     fn host_lifecycle_binds_and_unbinds() {
         let ep = "/tmp/telebox_test_host.sock".to_string();
         let _ = std::fs::remove_file(&ep);
         let st = HostState::new(ep.clone(), "/tmp/telebox_test_upstream.sock".into(), "/tmp/auth_token".into());
-
         assert!(!st.is_running());
-
         st.start();
         assert!(st.is_running());
         std::thread::sleep(Duration::from_millis(250));
         assert!(Path::new(&ep).exists(), "Start must bind the endpoint");
-
         st.stop();
         assert!(!st.is_running());
         std::thread::sleep(Duration::from_millis(250));
         assert!(!Path::new(&ep).exists(), "Stop must unbind the endpoint");
-
         st.restart();
         assert!(st.is_running());
         std::thread::sleep(Duration::from_millis(250));
         assert!(Path::new(&ep).exists(), "Restart must rebind the endpoint");
-
         st.stop();
         let _ = std::fs::remove_file(&ep);
     }
 
-    // Toggling a modelled plugin flips its enabled bit; that is all the six
-    // unwired modules do today. (MCP's toggle drives the relay above.)
+    // The control operations reflected in the snapshot — what QA drives.
     #[test]
-    fn modelled_toggle_flips_state() {
-        let mut enabled = vec![true, true, true, true, true, false, false];
-        let i = 5; // Wallet, off by default
-        enabled[i] = !enabled[i];
-        assert!(enabled[i], "toggling an off module turns it on");
-        enabled[i] = !enabled[i];
-        assert!(!enabled[i], "toggling it again turns it off");
+    fn toggle_and_view_show_in_snapshot() {
+        let st = HostState::new("/tmp/telebox_test_none.sock".into(), "u".into(), "t".into());
+        assert_eq!(st.snapshot()["plugins"][1]["active"], serde_json::json!(true));
+        st.toggle_plugin(1); // Export off
+        assert_eq!(st.snapshot()["plugins"][1]["active"], serde_json::json!(false));
+        assert_eq!(st.snapshot()["view"], serde_json::json!("plugins"));
+        st.set_view(PanelView::Permissions);
+        assert_eq!(st.snapshot()["view"], serde_json::json!("permissions"));
     }
 }

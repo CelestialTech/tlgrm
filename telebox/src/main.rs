@@ -1,17 +1,18 @@
 // TeleBox — the plugin-hosted controller for the Tlgrm client.
 //
-// M0+controls: a GPUI control panel with real interactivity.
-//  - Host Start / Stop / Restart actually bind and unbind the aggregated MCP
-//    endpoint (see host.rs / mcp_relay.rs).
-//  - Each plugin's bypass toggle flips it; MCP's toggle drives the real relay,
-//    the other six flip modelled state (they are not wired yet).
-//  - The left rail switches views: Plugins (the rack), Permissions (the Host
-//    API grant matrix), Activity (the live log).
+// M0 + interactive controls + a QA API.
+//  - Host Start / Stop / Restart bind and unbind the aggregated MCP endpoint.
+//  - Bypass toggles flip each module (MCP's drives the real relay).
+//  - The rail switches Plugins / Permissions / Activity.
+//  - The MCP module proxies to the client's bridge, end-to-end.
 //
-// The MCP module is wired end-to-end: TeleBox proxies to the client's bridge.
+// Every control is a thin wrapper over a HostState method, so the QA socket
+// (qa.rs) drives the identical path — and can grab the rendered window as a PNG
+// via render_to_image, no visible screen needed.
 
 mod host;
 mod mcp_relay;
+mod qa;
 
 use std::time::Duration;
 
@@ -19,7 +20,7 @@ use gpui::{App, Bounds, Context, Div, FontWeight, Window, WindowBounds, WindowOp
     prelude::*, px, rgb, size};
 use gpui_platform::application;
 
-use host::{plugin_templates, HostState, Plugin, Runtime, FAMILIES};
+use host::{plugin_active, plugin_templates, HostState, PanelView, Plugin, Runtime, FAMILIES};
 
 const GROUND: u32 = 0x121319;
 const PANEL: u32 = 0x1B1D26;
@@ -39,18 +40,11 @@ const RS: u32 = 0xE0854E;
 const ENDPOINT: &str = "/tmp/telebox_host.sock";
 const UPSTREAM: &str = "/tmp/tlgrm_mcp.sock";
 const TOKEN: &str = "/tmp/auth_token";
-
-#[derive(Clone, Copy, PartialEq)]
-enum PanelView {
-    Plugins,
-    Permissions,
-    Activity,
-}
+const QA_SOCK: &str = "/tmp/telebox_qa.sock";
 
 struct TeleBox {
     state: HostState,
-    view: PanelView,
-    enabled: Vec<bool>, // per plugin; index 0 (MCP) mirrors the relay, unused here
+    loop_started: bool,
 }
 
 impl TeleBox {
@@ -58,6 +52,7 @@ impl TeleBox {
         let state = HostState::new(ENDPOINT.into(), UPSTREAM.into(), TOKEN.into());
         state.log("host", "TeleBox host starting");
         state.start();
+        qa::spawn(state.clone(), QA_SOCK.into());
 
         cx.spawn(async move |this, cx| loop {
             cx.background_executor()
@@ -69,27 +64,7 @@ impl TeleBox {
         })
         .detach();
 
-        Self {
-            state,
-            view: PanelView::Plugins,
-            // Export, Retention, Archiver, Bots on; Wallet, AI off.
-            enabled: vec![true, true, true, true, true, false, false],
-        }
-    }
-
-    fn toggle_plugin(&mut self, i: usize) {
-        if i == 0 {
-            if self.state.is_running() {
-                self.state.stop();
-            } else {
-                self.state.start();
-            }
-        } else if i < self.enabled.len() {
-            self.enabled[i] = !self.enabled[i];
-            let name = plugin_templates()[i].name;
-            let word = if self.enabled[i] { "enabled" } else { "bypassed" };
-            self.state.log("host", format!("{name} {word}"));
-        }
+        Self { state, loop_started: false }
     }
 }
 
@@ -134,7 +109,6 @@ impl TeleBox {
         let led = if active { LED } else { INK3 };
         let name_color = if active { INK } else { INK3 };
 
-        // bypass toggle — real interactivity
         let knob_ml = if active { 18. } else { 2. };
         let toggle = div()
             .id(("toggle", i))
@@ -143,16 +117,9 @@ impl TeleBox {
             .rounded_full()
             .bg(rgb(if active { LED } else { LINE }))
             .cursor_pointer()
-            .child(
-                div()
-                    .size(px(16.))
-                    .rounded_full()
-                    .bg(rgb(0xFFFFFF))
-                    .ml(px(knob_ml))
-                    .mt(px(2.)),
-            )
+            .child(div().size(px(16.)).rounded_full().bg(rgb(0xFFFFFF)).ml(px(knob_ml)).mt(px(2.)))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.toggle_plugin(i);
+                this.state.toggle_plugin(i);
                 cx.notify();
             }));
 
@@ -161,12 +128,7 @@ impl TeleBox {
             .items_center()
             .gap_2()
             .child(dot(led, 8.))
-            .child(
-                div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(name_color))
-                    .child(p.name),
-            );
+            .child(div().font_weight(FontWeight::SEMIBOLD).text_color(rgb(name_color)).child(p.name));
         if p.live {
             header = header.child(
                 div()
@@ -179,10 +141,7 @@ impl TeleBox {
                     .child(mono(LED).text_xs().child("● live")),
             );
         }
-        header = header
-            .child(div().flex_1())
-            .child(runtime_badge(p.runtime))
-            .child(toggle);
+        header = header.child(div().flex_1()).child(runtime_badge(p.runtime)).child(toggle);
 
         div()
             .flex()
@@ -212,16 +171,12 @@ impl TeleBox {
         );
         let rows = plugins.iter().map(|p| {
             div().flex().items_center().py_2().px_3().border_b_1().border_color(rgb(0x212D39)).children(
-                std::iter::once(
-                    div().w(px(150.)).child(
-                        div().font_weight(FontWeight::SEMIBOLD).text_sm().text_color(rgb(INK)).child(p.name),
-                    ),
-                )
+                std::iter::once(div().w(px(150.)).child(
+                    div().font_weight(FontWeight::SEMIBOLD).text_sm().text_color(rgb(INK)).child(p.name),
+                ))
                 .chain(FAMILIES.iter().map(|f| {
-                    let granted = p.perms.contains(f);
-                    let cell = if granted {
-                        let c = if *f == "invoke" { ACCENT } else { ACCENT };
-                        div().size(px(14.)).rounded_md().bg(rgb(c))
+                    let cell = if p.perms.contains(f) {
+                        div().size(px(14.)).rounded_md().bg(rgb(ACCENT))
                     } else {
                         div().size(px(5.)).rounded_full().bg(rgb(LINE))
                     };
@@ -242,7 +197,46 @@ impl TeleBox {
 }
 
 impl Render for TeleBox {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Start the render/QA loop once — it repaints, and fulfills any pending
+        // screenshot request by rendering the window to a PNG offscreen.
+        if !self.loop_started {
+            self.loop_started = true;
+            cx.spawn_in(window, async move |this, cx| loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(250))
+                    .await;
+                let r = this.update_in(cx, |this, window, cx| {
+                    // Two-phase: arm first (this frame repaints the current
+                    // state), capture on the next tick so the image is fresh.
+                    let (path, armed) = this.state.peek_shot();
+                    if let Some(path) = path {
+                        if armed {
+                            match window.render_to_image() {
+                                Ok(img) => {
+                                    let (w, h) = (img.width(), img.height());
+                                    let ok = img.save(&path).is_ok();
+                                    this.state.finish_shot(w, h, ok);
+                                    this.state.log("qa", format!("shot → {path} ({w}x{h})"));
+                                }
+                                Err(e) => {
+                                    this.state.finish_shot(0, 0, false);
+                                    this.state.log("qa", format!("shot failed: {e}"));
+                                }
+                            }
+                        } else {
+                            this.state.arm_shot();
+                        }
+                    }
+                    cx.notify();
+                });
+                if r.is_err() {
+                    break;
+                }
+            })
+            .detach();
+        }
+
         let (running, upstream, requests, clients, endpoint, bridge, logs) = {
             let i = self.state.0.lock().unwrap();
             (
@@ -255,11 +249,10 @@ impl Render for TeleBox {
                 i.log.iter().rev().take(16).cloned().collect::<Vec<_>>(),
             )
         };
-        let view = self.view;
-        let enabled = self.enabled.clone();
+        let view = self.state.view();
+        let enabled = self.state.enabled_vec();
         let plugins = plugin_templates();
 
-        // titlebar
         let titlebar = div()
             .flex()
             .items_center()
@@ -272,12 +265,7 @@ impl Render for TeleBox {
             .child(div().font_weight(FontWeight::BOLD).text_color(rgb(INK)).child("TELEBOX"))
             .child(mono(INK3).child("· plugin host"));
 
-        // status pill reflects the real relay state
-        let (pill_color, pill_text) = if running {
-            (LED, "Host running")
-        } else {
-            (CRIT, "Host stopped")
-        };
+        let (pill_color, pill_text) = if running { (LED, "Host running") } else { (CRIT, "Host stopped") };
         let pill = div()
             .flex()
             .items_center()
@@ -289,15 +277,8 @@ impl Render for TeleBox {
             .border_1()
             .border_color(rgb(LINE))
             .child(dot(pill_color, 8.))
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(pill_color))
-                    .child(pill_text),
-            );
+            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(rgb(pill_color)).child(pill_text));
 
-        // lifecycle buttons — real
         let ctrl = |label: &'static str, id: &'static str, color: u32, cx: &mut Context<Self>, act: fn(&mut TeleBox)| {
             div()
                 .id(id)
@@ -343,7 +324,6 @@ impl Render for TeleBox {
             .child(stat("Endpoint", endpoint, INK2))
             .child(stat("Bridge", bridge, INK2));
 
-        // rail — switches views
         let rail_item = |label: &'static str, v: PanelView, id: &'static str, cx: &mut Context<Self>| {
             let selected = view == v;
             div()
@@ -356,7 +336,7 @@ impl Render for TeleBox {
                 .text_color(rgb(if selected { INK } else { INK2 }))
                 .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(label))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.view = v;
+                    this.state.set_view(v);
                     cx.notify();
                 }))
         };
@@ -374,7 +354,6 @@ impl Render for TeleBox {
             .child(rail_item("Permissions", PanelView::Permissions, "rail-perms", cx))
             .child(rail_item("Activity", PanelView::Activity, "rail-activity", cx));
 
-        // main content by view
         let heading = |t: &'static str| {
             div().text_lg().font_weight(FontWeight::BOLD).text_color(rgb(INK)).child(t)
         };
@@ -382,15 +361,13 @@ impl Render for TeleBox {
             PanelView::Plugins => {
                 let mut cards: Vec<Div> = Vec::new();
                 for (i, p) in plugins.iter().enumerate() {
-                    let active = if i == 0 { running } else { enabled[i] };
+                    let active = plugin_active(i, running, &enabled);
                     cards.push(self.module_card(i, p, active, cx));
                 }
                 let mut rack = div().flex().flex_col().gap_3();
                 let mut it = cards.into_iter();
                 loop {
-                    let a = it.next();
-                    let b = it.next();
-                    match (a, b) {
+                    match (it.next(), it.next()) {
                         (Some(a), Some(b)) => {
                             rack = rack.child(div().flex().gap_3().child(a).child(b));
                         }
@@ -431,13 +408,7 @@ impl Render for TeleBox {
             .text_color(rgb(INK))
             .child(titlebar)
             .child(hostbar)
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .child(rail)
-                    .child(div().flex_1().p_5().child(content)),
-            )
+            .child(div().flex().flex_1().child(rail).child(div().flex_1().p_5().child(content)))
     }
 }
 

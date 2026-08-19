@@ -40,14 +40,47 @@ The panel is interactive:
 - **Left rail** — switches between Plugins, Permissions (the Host API grant
   matrix) and Activity (the live log).
 
-**Verification status, precisely.** The control *behavior* is tested:
-`cargo test` asserts that Stop unbinds the socket and Start/Restart rebind it —
-the buttons' click handlers call exactly those methods. What is **not yet
-visually verified** is the GPUI click plumbing and the rendered interactive
-layout, because the machine's screen was locked when this was built (a locked
-screen blanks screencapture and won't route synthetic clicks to the window).
-That check — click each control on screen and confirm the panel reacts — is
-outstanding, and is the one thing to do first when picking this up.
+Every control is a thin wrapper over a `HostState` method — the same method the
+QA API calls — so there is one implementation, not two that can drift.
+
+## QA API — drive the app and grab the render without a screen
+
+`qa.rs` opens a second socket, `/tmp/telebox_qa.sock`, speaking newline JSON.
+It exists because the usual way to verify a GUI — screenshot the screen, click
+coordinates — fails when the machine's screen is locked (a locked screen blanks
+screencapture and won't route synthetic clicks). This drives the app directly
+and renders the window to a PNG **offscreen**, so QA works headless.
+
+```
+{"cmd":"snapshot"}                    -> full render state as JSON
+{"cmd":"start"|"stop"|"restart"}      -> lifecycle, then snapshot
+{"cmd":"toggle","i":1}                -> flip plugin i, then snapshot
+{"cmd":"view","name":"permissions"}   -> switch view, then snapshot
+{"cmd":"shot","path":"/tmp/x.png"}    -> render the live window to a PNG {w,h,ok}
+```
+
+`snapshot` grabs the rendered view *as data* — running state, per-plugin
+active/enabled, current view, log tail — which is what QA asserts on. `shot`
+grabs it as *pixels*: the render loop fulfills it with GPUI's
+`Window::render_to_image` (a real Metal offscreen render), captured two-phase so
+the image reflects the latest state rather than the previous frame.
+
+**This is tested and passing.** `qa/smoke.py` drives the whole surface —
+start/stop/restart, every toggle (including MCP's, which drives the real relay),
+view switching — asserting the snapshot each step, then captures PNGs of the
+Plugins and Permissions views. It was run with the screen **locked** and every
+control verified from the resulting renders. `cargo test` additionally asserts
+the lifecycle at the unit level (Stop unbinds the socket; Start/Restart rebind).
+
+> `render_to_image` is gated behind gpui's `test-support` feature, so
+> `Cargo.toml` enables it. That pulls test-only deps into the build; gating the
+> QA surface behind a dedicated `qa` cargo feature for production builds is a
+> follow-up.
+
+```bash
+cargo run &                 # launch the app (window may be offscreen if locked)
+python3 qa/smoke.py         # drive it, assert, and write /tmp/telebox_qa_shot*.png
+```
 
 ## Layout
 
@@ -58,6 +91,8 @@ outstanding, and is the one thing to do first when picking this up.
 | `src/main.rs` | App entry — the GPUI window and the control panel. |
 | `src/host.rs` | The host: shared state and the plugin registry. |
 | `src/mcp_relay.rs` | The MCP plugin — aggregated endpoint proxying to the client bridge. |
+| `src/qa.rs` | The QA socket — drive controls and render the window to a PNG offscreen. |
+| `qa/smoke.py` | The QA driver: exercises every control and captures renders. |
 | `design/` | The approved control-panel designs (HTML). |
 
 ## Build & run
