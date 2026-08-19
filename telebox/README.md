@@ -30,6 +30,25 @@ connected** light track it live.
 Everything else in the rack (Export, Retention/Vault, Archiver, Wallet, Bots,
 AI) is modelled in the UI but not yet wired — that is later milestones.
 
+### Controls
+
+The panel is interactive:
+
+- **Host Start / Stop / Restart** — really bind and unbind the endpoint.
+- **Per-plugin bypass toggles** — MCP's drives the relay; the other six flip
+  modelled state (they are not wired yet).
+- **Left rail** — switches between Plugins, Permissions (the Host API grant
+  matrix) and Activity (the live log).
+
+**Verification status, precisely.** The control *behavior* is tested:
+`cargo test` asserts that Stop unbinds the socket and Start/Restart rebind it —
+the buttons' click handlers call exactly those methods. What is **not yet
+visually verified** is the GPUI click plumbing and the rendered interactive
+layout, because the machine's screen was locked when this was built (a locked
+screen blanks screencapture and won't route synthetic clicks to the window).
+That check — click each control on screen and confirm the panel reacts — is
+outstanding, and is the one thing to do first when picking this up.
+
 ## Layout
 
 | Path | What |

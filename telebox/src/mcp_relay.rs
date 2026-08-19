@@ -10,14 +10,26 @@
 // requests for the panel and to inject the token on initialize.
 
 use std::fs::Permissions;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use crate::host::HostState;
 
-pub fn spawn(state: HostState, listen: String, upstream: String, token_path: String) {
+// Spawn the accept loop. Returns the thread handle so the host can join it on
+// stop. The loop is non-blocking so it can notice `stop` between polls, unbind
+// the socket and exit — that is what makes Stop real rather than cosmetic.
+pub fn spawn(
+    state: HostState,
+    listen: String,
+    upstream: String,
+    token_path: String,
+    stop: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let _ = std::fs::remove_file(&listen);
         let listener = match UnixListener::bind(&listen) {
@@ -28,16 +40,31 @@ pub fn spawn(state: HostState, listen: String, upstream: String, token_path: Str
             }
         };
         let _ = std::fs::set_permissions(&listen, Permissions::from_mode(0o600));
+        let _ = listener.set_nonblocking(true);
         state.log("host", format!("MCP endpoint listening on {listen}"));
 
-        for conn in listener.incoming() {
-            let Ok(down) = conn else { continue };
-            let state = state.clone();
-            let upstream = upstream.clone();
-            let token_path = token_path.clone();
-            thread::spawn(move || handle(state, down, upstream, token_path));
+        loop {
+            if stop.load(Ordering::SeqCst) {
+                break;
+            }
+            match listener.accept() {
+                Ok((down, _)) => {
+                    // The accepted socket inherits non-blocking on some
+                    // platforms; the handler wants plain blocking I/O.
+                    let _ = down.set_nonblocking(false);
+                    let state = state.clone();
+                    let upstream = upstream.clone();
+                    let token_path = token_path.clone();
+                    thread::spawn(move || handle(state, down, upstream, token_path));
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(60));
+                }
+                Err(_) => break,
+            }
         }
-    });
+        let _ = std::fs::remove_file(&listen);
+    })
 }
 
 fn handle(state: HostState, down: UnixStream, upstream: String, token_path: String) {
