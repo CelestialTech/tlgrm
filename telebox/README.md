@@ -11,14 +11,21 @@ endpoint that Claude and other clients connect to.
 
 ## Status
 
-Milestone **M0 — first vertical slice**. Not the whole host yet: one plugin
-wired end-to-end to prove the architecture.
+Milestone **M0 — first vertical slice: done and verified.** One plugin wired
+end-to-end through a real native app, to prove the architecture.
 
-- **App shell** — the GPUI control panel: host status, the plugin rack, a live
-  activity log.
-- **MCP plugin, real** — TeleBox listens on its own aggregated MCP socket and
-  proxies to the client's existing MCP bridge, re-exposing the full tool
-  surface. No client changes: it rides the socket the client already serves.
+- **App shell** — the GPUI control panel: host status bar, the plugin rack, a
+  live activity log. Native macOS window, no webview.
+- **MCP plugin, real** — TeleBox listens on its own aggregated MCP socket
+  (`/tmp/telebox_host.sock`) and proxies every connection to the client's
+  existing bridge (`/tmp/tlgrm_mcp.sock`), owning the endpoint: it injects the
+  bridge's auth token into `initialize`, so downstream callers never handle it.
+  No client changes — it rides the socket the client already serves.
+
+Verified: a client pointed at TeleBox's socket, sending a deliberately wrong
+token, gets `tools/list` = the full surface and real `tools/call` results
+proxied through — while the panel's **MCP requests** counter and **Upstream:
+connected** light track it live.
 
 Everything else in the rack (Export, Retention/Vault, Archiver, Wallet, Bots,
 AI) is modelled in the UI but not yet wired — that is later milestones.
@@ -27,9 +34,10 @@ AI) is modelled in the UI but not yet wired — that is later milestones.
 
 | Path | What |
 |---|---|
-| `Cargo.toml` | The app crate. `gpui` is a pinned git dependency on the Zed repo. |
+| `Cargo.toml` | The app crate. `gpui` + `gpui_platform` are pinned git deps on the Zed repo. |
+| `rust-toolchain.toml` | Pins Rust 1.95.0 — the toolchain Zed v1.15.1 needs. |
 | `src/main.rs` | App entry — the GPUI window and the control panel. |
-| `src/host.rs` | The host: plugin registry and lifecycle. |
+| `src/host.rs` | The host: shared state and the plugin registry. |
 | `src/mcp_relay.rs` | The MCP plugin — aggregated endpoint proxying to the client bridge. |
 | `design/` | The approved control-panel designs (HTML). |
 
@@ -39,6 +47,20 @@ AI) is modelled in the UI but not yet wired — that is later milestones.
 cargo run          # from telebox/
 ```
 
-The first build compiles GPUI from source and is slow. `gpui` is pinned to a
-specific Zed revision in `Cargo.toml` — bump it deliberately, not casually,
-because its API moves between commits.
+The MCP plugin proxies to a **running Tlgrm client** (it needs
+`/tmp/tlgrm_mcp.sock`); the app still builds and runs without one — the panel
+just shows `Upstream: —` until a client is up.
+
+### Two gotchas, both load-bearing
+
+- **Toolchain.** `gpui` at v1.15.1 uses stdlib features stabilized in **1.95.0**
+  (e.g. `slice_as_array`); an older stable fails to compile `gpui_util`.
+  `rust-toolchain.toml` pins it, matching Zed's own pin. `gpui` and
+  `gpui_platform` must share the same tag.
+- **Fonts.** `gpui_platform` needs the **`font-kit`** feature on macOS or text
+  renders as nothing — the layout draws but every label is invisible. It is set
+  in `Cargo.toml`; do not drop it.
+
+The first build compiles GPUI from source and is slow (~minutes); incremental
+builds are seconds. Bump the pinned Zed revision deliberately, not casually —
+its API moves between commits.

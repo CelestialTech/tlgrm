@@ -191,6 +191,7 @@ build, since a stable client refuses alpha entries outright.
 | `docs/MCP_STAR_GIFTS.md` | Which star/gift/wallet tools are real, and the rule that keeps them so. |
 | `PROPOSAL_REFACTOR.md` | Splitting the local-only surface out (the telebox direction). |
 | `PROPOSAL_MCP_CONTROL_PANEL.md` | Proposed UI to run/configure the server, with a Claude DBA agent. |
+| `telebox/` | The TeleBox app (GPUI/Rust). M0 done: shell + MCP re-host plugin, proxying to the client bridge. Pins Rust 1.95; needs `font-kit`. See `telebox/README.md`. |
 
 ### Branches, and one sharp edge
 

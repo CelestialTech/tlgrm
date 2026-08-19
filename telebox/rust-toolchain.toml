@@ -1,0 +1,5 @@
+# Matches the toolchain Zed v1.15.1 pins for gpui. gpui uses stdlib features
+# (e.g. slice_as_array) stabilized in 1.95 — an older stable will not compile it.
+[toolchain]
+channel = "1.95.0"
+profile = "minimal"
