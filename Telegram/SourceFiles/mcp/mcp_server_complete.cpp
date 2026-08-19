@@ -1802,7 +1802,6 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["withdraw_earnings"] = [this](const QJsonObject &args) { return toolWithdrawEarnings(args); };
 	_toolHandlers["set_spending_budget"] = [this](const QJsonObject &args) { return toolSetSpendingBudget(args); };
 	_toolHandlers["set_budget_alert"] = [this](const QJsonObject &args) { return toolSetBudgetAlert(args); };
-	_toolHandlers["request_stars"] = [this](const QJsonObject &args) { return toolRequestStars(args); };
 	_toolHandlers["get_stars_history"] = [this](const QJsonObject &args) { return toolGetStarsHistory(args); };
 	_toolHandlers["convert_stars"] = [this](const QJsonObject &args) { return toolConvertStars(args); };
 	_toolHandlers["get_stars_rate"] = [this](const QJsonObject &args) { return toolGetStarsRate(args); };

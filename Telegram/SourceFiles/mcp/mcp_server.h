@@ -588,7 +588,6 @@ private:
 	QJsonObject toolWithdrawEarnings(const QJsonObject &args);
 	QJsonObject toolSetSpendingBudget(const QJsonObject &args);
 	QJsonObject toolSetBudgetAlert(const QJsonObject &args);
-	QJsonObject toolRequestStars(const QJsonObject &args);
 	QJsonObject toolGetStarsHistory(const QJsonObject &args);
 	QJsonObject toolConvertStars(const QJsonObject &args);
 	QJsonObject toolGetStarsRate(const QJsonObject &args);

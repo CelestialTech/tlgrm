@@ -938,53 +938,55 @@ QJsonObject Server::toolListPurchasedContent(const QJsonObject &args) {
 
 QJsonObject Server::toolRefundContent(const QJsonObject &args) {
 	QJsonObject result;
-	qint64 contentId = args["content_id"].toVariant().toLongLong();
-	QString reason = args.value("reason").toString();
+	const auto userId = qint64(args["user_id"].toDouble());
+	const auto chargeId = args["charge_id"].toString();
 
-	if (contentId == 0) {
-		result["error"] = "Missing content_id";
+	if (!userId || chargeId.isEmpty()) {
+		result["error"] = "Missing user_id or charge_id";
 		result["success"] = false;
 		return result;
 	}
 
-	// Check if content exists and get price
-	QSqlQuery query(_db);
-	query.prepare("SELECT price, unlocks FROM paid_content WHERE id = ?");
-	query.addBindValue(contentId);
-
-	if (query.exec() && query.next()) {
-		int price = query.value(0).toInt();
-		int unlocks = query.value(1).toInt();
-
-		// Record the refund in wallet_spending
-		QSqlQuery refundQuery(_db);
-		refundQuery.prepare("INSERT INTO wallet_spending (date, amount, category, description) "
-						   "VALUES (date('now'), ?, 'refund', ?)");
-		refundQuery.addBindValue(price);  // Positive = refund back to balance
-		refundQuery.addBindValue(QString("Refund for content #%1: %2").arg(contentId).arg(reason));
-		refundQuery.exec();
-
-		// Decrement unlock count
-		if (unlocks > 0) {
-			QSqlQuery updateQuery(_db);
-			updateQuery.prepare("UPDATE paid_content SET unlocks = unlocks - 1 WHERE id = ?");
-			updateQuery.addBindValue(contentId);
-			updateQuery.exec();
-		}
-
-		result["success"] = true;
-		result["content_id"] = contentId;
-		result["refund_amount"] = price;
-		result["reason"] = reason;
-		result["status"] = "refunded";
-		result["note"] = "Refund recorded locally. Telegram Stars refunds for channel content "
-						 "are processed automatically by Telegram within the refund window.";
-	} else {
+	if (!_session) {
+		result["error"] = "No active session";
 		result["success"] = false;
-		result["error"] = "Content not found";
+		return result;
 	}
 
-	return result;
+	const auto user = _session->data().peer(PeerId(userId))->asUser();
+	if (!user) {
+		result["error"] = QString("User %1 not found").arg(userId);
+		result["success"] = false;
+		return result;
+	}
+
+	// Refunds a star charge someone paid you, which is what
+	// payments.refundStarsCharge does and what a refund actually is.
+	//
+	// The old version refunded nothing. It looked up a row in a local
+	// paid_content table, wrote a POSITIVE wallet_spending row -- money coming
+	// back to a balance it never left -- decremented a local unlock counter,
+	// and answered status "refunded". The payer was never told, and no charge
+	// was reversed.
+	//
+	// A charge is identified by its charge_id, which arrives with the payment;
+	// there is no "content id" in this flow.
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpayments_RefundStarsCharge(
+			user->inputUser(),
+			MTP_string(chargeId)
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["user_id"] = userId;
+			value["charge_id"] = chargeId;
+			value["refunded"] = true;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 // Portfolio Management

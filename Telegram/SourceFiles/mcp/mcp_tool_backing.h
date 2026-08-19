@@ -306,7 +306,7 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"purge_archive",                 Backing::LocalOnly },
 	{"queue_gradual_export",          Backing::LiveSession },
 	{"read_messages",                 Backing::LiveSession },
-	{"refund_content",                Backing::LocalOnly },
+	{"refund_content",                Backing::Mtproto },
 	{"remove_chat_from_community",    Backing::Mtproto },
 	{"remove_from_collection",        Backing::Mtproto },
 	{"remove_message_tag",            Backing::LocalOnly },
@@ -314,7 +314,6 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"reorder_folders",               Backing::LiveSession },
 	{"reorder_profile_gifts",         Backing::Mtproto },
 	{"request_message_summary",       Backing::Mtproto },
-	{"request_stars",                 Backing::LiveSession },
 	{"resume_chatbot",                Backing::LocalOnly },
 	{"resume_deleted_archive",        Backing::LocalOnly },
 	{"resume_gradual_export",         Backing::LocalOnly },
@@ -330,7 +329,7 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"semantic_search",               Backing::LocalOnly },
 	{"send_bot_command",              Backing::LocalOnly },
 	{"send_document",                 Backing::Mtproto },
-	{"send_gift",                     Backing::Mtproto },
+	{"send_gift",                     Backing::Unimplemented },
 	{"send_message",                  Backing::Mtproto },
 	{"send_quick_reply",              Backing::Mtproto },
 	{"send_star_gift",                Backing::Mtproto },
@@ -364,7 +363,7 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"start_bot",                     Backing::LocalOnly },
 	{"start_gradual_export",          Backing::LiveSession },
 	{"stop_bot",                      Backing::LocalOnly },
-	{"subscribe_to_channel",          Backing::LocalOnly },
+	{"subscribe_to_channel",          Backing::Unimplemented },
 	{"tag_message",                   Backing::LocalOnly },
 	{"terminate_session",             Backing::Mtproto },
 	{"test_auto_reply_rule",          Backing::LocalOnly },
@@ -406,7 +405,7 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"update_task",                   Backing::LocalOnly },
 	{"upload_avatar_source",          Backing::LocalOnly },
 	{"use_quick_reply",               Backing::Mtproto },
-	{"withdraw_earnings",             Backing::Mtproto },
+	{"withdraw_earnings",             Backing::Unimplemented },
 });
 
 // Backing recorded for `name`, or Unimplemented when the name is unknown --

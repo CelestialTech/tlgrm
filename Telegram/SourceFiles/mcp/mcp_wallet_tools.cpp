@@ -327,39 +327,30 @@ QJsonObject Server::toolSendGift(const QJsonObject &args) {
 		return result;
 	}
 
-	// MTPpayments_CheckCanSendGift API not available in this version
-	// Gift check would be done here if the API supported it
-	if (giftId > 0) {
-		qWarning() << "MCP: Gift API not available - gift check skipped for gift" << giftId << "to" << recipientId;
-	}
-
-	// Record locally
-	QSqlQuery query(_db);
-	query.prepare("INSERT INTO wallet_spending (date, amount, category, description, peer_id) "
-				  "VALUES (date('now'), ?, 'gift', ?, ?)");
-	query.addBindValue(-starsAmount);
-	query.addBindValue(QString("Gift (id:%1) to %2: %3").arg(giftId).arg(recipientId).arg(message));
-	query.addBindValue(recipientId);
-	query.exec();
-
-	// Also record in gift_transfers
-	QSqlQuery giftQuery(_db);
-	giftQuery.prepare("INSERT INTO gift_transfers (gift_id, direction, peer_id, stars_amount, created_at) "
-					  "VALUES (?, 'sent', ?, ?, datetime('now'))");
-	giftQuery.addBindValue(QString::number(giftId));
-	giftQuery.addBindValue(recipientId);
-	giftQuery.addBindValue(starsAmount);
-	giftQuery.exec();
-
-	result["success"] = true;
-	result["transaction_id"] = query.lastInsertId().toLongLong();
+	// Sending a gift is a purchase: payments.getPaymentForm on an
+	// inputInvoiceStarGift, then payments.sendStarsForm. It debits real stars.
+	//
+	// This used to write a NEGATIVE row into wallet_spending and a
+	// gift_transfers row marked 'sent', then return success with a
+	// transaction_id that was a SQLite rowid -- so a gift nobody received
+	// appeared in the spending history and in the gift log, and the id looked
+	// like Telegram's. The comment above it claimed checkCanSendGift was "not
+	// available in this version"; payments.checkCanSendGift exists.
+	//
+	// Nothing is recorded. The recipient has been resolved and validated
+	// above, so the arguments are known-good -- what is missing is the payment,
+	// and inventing it is what this whole cleanup is about.
+	result["success"] = false;
+	result["implemented"] = false;
 	result["recipient_id"] = recipientId;
 	result["gift_id"] = giftId;
 	result["stars_amount"] = starsAmount;
 	result["anonymous"] = anonymous;
-	result["status"] = "gift_check_submitted";
-	result["note"] = "Gift eligibility check submitted via Telegram API. "
-					 "Complete the gift via Telegram UI to finalize payment.";
+	result["error"] = "Sending a gift is not implemented";
+	result["reason"] = "A gift is bought through the payment-form flow and "
+		"debits real stars. Nothing was written locally, because a gift this "
+		"client did not send must not appear in the spending or gift history.";
+	Q_UNUSED(message);
 
 	return result;
 }
@@ -570,21 +561,22 @@ QJsonObject Server::toolSubscribeToChannel(const QJsonObject &args) {
 		return result;
 	}
 
-	// Record subscription intent locally
-	QSqlQuery query(_db);
-	query.prepare("INSERT INTO wallet_spending (date, amount, category, description, peer_id) "
-				  "VALUES (date('now'), 0, 'subscription', ?, ?)");
-	query.addBindValue(QString("Subscribe to channel %1 (tier: %2)").arg(channelId).arg(tier));
-	query.addBindValue(channelId);
-	query.exec();
-
-	result["success"] = true;
+	// A star subscription is bought through the payment form behind the
+	// channel's invite link, and recurs. There is no client method that starts
+	// one from a channel id alone.
+	//
+	// "Subscription intent recorded" was not a smaller version of subscribing.
+	// It put a row in the spending log for something that had not begun, and
+	// answered success, so a caller could believe it was subscribed.
+	result["success"] = false;
+	result["implemented"] = false;
 	result["channel_id"] = channelId;
 	result["tier"] = tier;
-	result["status"] = "recorded";
-	result["note"] = "Subscription intent recorded. To subscribe with Stars, "
-					 "use the Telegram UI on the channel's profile page. "
-					 "Channel subscriptions require the channel's invite link and payment form.";
+	result["error"] = "Subscribing to a paid channel is not implemented";
+	result["reason"] = "A star subscription goes through the payment form behind "
+		"the channel's invite link and debits real stars on a recurring basis. "
+		"No intent was recorded: an intent is not a subscription, and storing it "
+		"only made the two hard to tell apart.";
 
 	return result;
 }
@@ -763,38 +755,31 @@ QJsonObject Server::toolWithdrawEarnings(const QJsonObject &args) {
 		return result;
 	}
 
-	// Initiate withdrawal - this will fail with PASSWORD_REQUIRED if 2FA is needed,
-	// which is expected. The actual withdrawal needs UI confirmation (password input).
-	using F = MTPpayments_getStarsRevenueWithdrawalUrl::Flag;
-	bool isTon = (method == "ton");
-
-	_session->api().request(MTPpayments_GetStarsRevenueWithdrawalUrl(
-		MTP_flags(isTon ? F::f_ton : F::f_amount),
-		withdrawPeer->input(),
-		MTP_long(isTon ? 0 : amount),
-		MTP_inputCheckPasswordEmpty()  // Empty password triggers 2FA prompt
-	)).fail([amount, method](const MTP::Error &error) {
-		// PASSWORD_HASH_INVALID or similar is expected - user must enter password via UI
-		qWarning() << "MCP: Withdrawal initiation:" << error.type()
-				   << "(password required for" << amount << method << ")";
-	}).send();
-
-	// Record withdrawal intent
-	QSqlQuery query(_db);
-	query.prepare("INSERT INTO wallet_spending (date, amount, category, description) "
-				  "VALUES (date('now'), ?, 'withdrawal', ?)");
-	query.addBindValue(-amount);
-	query.addBindValue(QString("Withdrawal via %1").arg(method));
-	query.exec();
-
-	result["success"] = true;
+	// getStarsRevenueWithdrawalUrl takes an InputCheckPasswordSRP -- the
+	// account's 2FA password, run through SRP against a fresh challenge from
+	// account.getPassword. inputCheckPasswordEmpty is not a way to "trigger a
+	// prompt"; it is a password the server rejects, and there is no prompt to
+	// trigger from here.
+	//
+	// So the old body sent a request that could only fail, attached a .fail()
+	// that logged and a .done() that did not exist, and then wrote a NEGATIVE
+	// row into wallet_spending and answered success with status
+	// "password_required" -- recording money as leaving an account that had not
+	// paid out a thing.
+	//
+	// Doing this properly means holding the user's 2FA password, which this
+	// server does not and should not.
+	result["success"] = false;
+	result["implemented"] = false;
 	result["amount"] = amount;
 	result["method"] = method;
 	result["channel_id"] = channelId;
-	result["status"] = "password_required";
-	result["note"] = "Withdrawal initiated via Telegram API. "
-					 "Two-factor authentication (2FA password) is required to complete. "
-					 "Please finalize in Telegram UI Settings > Monetization.";
+	result["error"] = "Withdrawing earnings is not implemented";
+	result["reason"] = "The withdrawal URL is gated on an SRP proof of the "
+		"account's 2FA password, which this server does not hold. Nothing was "
+		"recorded: a withdrawal that never started must not appear in the "
+		"spending history. Withdraw from Settings > Monetization.";
+	Q_UNUSED(withdrawPeer);
 
 	return result;
 }
@@ -1107,58 +1092,6 @@ QJsonObject Server::toolSendStars(const QJsonObject &args) {
 		"convert -- a different operation, not an equivalent transfer. Nothing "
 		"was recorded locally.";
 	Q_UNUSED(message);
-
-	return result;
-}
-
-QJsonObject Server::toolRequestStars(const QJsonObject &args) {
-	QJsonObject result;
-	qint64 fromUserId = args["from_user_id"].toVariant().toLongLong();
-	int amount = args["amount"].toInt();
-	QString reason = args.value("reason").toString();
-
-	if (fromUserId == 0 || amount <= 0) {
-		result["error"] = "Missing from_user_id or invalid amount";
-		result["success"] = false;
-		return result;
-	}
-
-	if (!_session) {
-		result["error"] = "No active session";
-		result["success"] = false;
-		return result;
-	}
-
-	// Send a message to the user requesting stars
-	PeerId peerId(fromUserId);
-	auto peer = resolvePeer(peerId);
-	if (peer) {
-		auto history = _session->data().history(peerId);
-		if (history) {
-			QString requestText = QString("Could you send me %1 stars?").arg(amount);
-			if (!reason.isEmpty()) {
-				requestText += QString(" Reason: %1").arg(reason);
-			}
-			// We could send a message here, but that's intrusive.
-			// Just record the request locally.
-		}
-	}
-
-	// Record locally
-	QSqlQuery query(_db);
-	query.prepare("INSERT INTO wallet_spending (date, amount, category, description, peer_id) "
-				  "VALUES (date('now'), 0, 'star_request', ?, ?)");
-	query.addBindValue(QString("Request %1 stars: %2").arg(amount).arg(reason));
-	query.addBindValue(fromUserId);
-	query.exec();
-
-	result["success"] = true;
-	result["from_user_id"] = fromUserId;
-	result["amount"] = amount;
-	result["reason"] = reason;
-	result["status"] = "recorded";
-	result["note"] = "Star request recorded locally. Telegram does not have a native "
-					 "'request stars' feature. Consider sending a message to the user instead.";
 
 	return result;
 }

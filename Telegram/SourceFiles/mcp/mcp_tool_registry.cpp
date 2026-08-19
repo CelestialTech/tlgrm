@@ -3039,7 +3039,7 @@ void Server::registerTools() {
 		}}}},
 
 		// --- Wallet/Gifts ---
-		Tool{"send_gift", "Send a gift to a user", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+		Tool{"send_gift", "Send a star gift to a user. NOT IMPLEMENTED: a gift is bought through the payment-form flow and debits real stars, so this always reports failure and records nothing", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"recipient_id", QJsonObject{{"type", "integer"}, {"description", "Recipient user ID"}}},
 			{"stars_amount", QJsonObject{{"type", "integer"}, {"description", "Amount in stars"}}},
 					{"anonymous", QJsonObject{{"type", "boolean"}, {"description", "Hide the sender's identity from the recipient (default false)."}}},
@@ -3060,7 +3060,7 @@ void Server::registerTools() {
 				}}, {"required", QJsonArray{"gift_type"}}}},
 
 		// --- Subscriptions ---
-		Tool{"subscribe_to_channel", "Subscribe to a channel", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+		Tool{"subscribe_to_channel", "Subscribe to a paid channel. NOT IMPLEMENTED: a star subscription goes through the payment form behind the channel's invite link and recurs, so this always reports failure and records nothing.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"channel_id", QJsonObject{{"type", "integer"}, {"description", "Channel ID"}}},
 					{"tier", QJsonObject{{"type", "string"}, {"description", "Subscription tier (default basic)."}}},
 				}}, {"required", QJsonArray{"channel_id"}}}},
@@ -3074,7 +3074,7 @@ void Server::registerTools() {
 		Tool{"get_earnings", "Get creator earnings data", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 					{"channel_id", QJsonObject{{"type", "integer"}, {"description", "Channel this applies to."}}},
 				}}}},
-		Tool{"withdraw_earnings", "Withdraw earnings to wallet", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+		Tool{"withdraw_earnings", "Withdraw star earnings. NOT IMPLEMENTED: the withdrawal URL is gated on an SRP proof of the account 2FA password, which this server does not hold. Withdraw from Settings > Monetization", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"amount", QJsonObject{{"type", "number"}, {"description", "Amount to withdraw"}}},
 			{"method", QJsonObject{{"type", "string"}, {"description", "Withdrawal method (ton/fragment)"}, {"default", "ton"}}},
 					{"channel_id", QJsonObject{{"type", "integer"}, {"description", "Channel this applies to."}}},
@@ -3098,11 +3098,11 @@ void Server::registerTools() {
 				}}, {"required", QJsonArray{"threshold"}}}},
 
 		// --- Stars ---
-		Tool{"request_stars", "Request stars from a user", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"from_user_id", QJsonObject{{"type", "integer"}, {"description", "User to request from"}}},
-			{"amount", QJsonObject{{"type", "integer"}, {"description", "Stars amount"}}},
-					{"reason", QJsonObject{{"type", "string"}, {"description", "Reason recorded with the request."}}},
-				}}, {"required", QJsonArray{"from_user_id", "amount"}}}},
+		// request_stars used to be advertised here. Telegram has no such
+		// feature -- the tool's own note said so -- and its body composed a
+		// message, deliberately declined to send it, wrote a local row and
+		// answered success, so the person being asked was never contacted.
+		// Ask with send_message.
 		Tool{"get_stars_leaderboard", "Get stars leaderboard", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 		}}}},
 		Tool{"get_stars_history", "Get stars transaction history", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
@@ -3187,10 +3187,10 @@ void Server::registerTools() {
 			{"content_id", QJsonObject{{"type", "integer"}, {"description", "Content ID to unlock"}}}
 		}}, {"required", QJsonArray{"content_id"}}}},
 		Tool{"list_purchased_content", "List purchased content", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
-		Tool{"refund_content", "Request refund for content", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"content_id", QJsonObject{{"type", "integer"}, {"description", "Content ID"}}},
-					{"reason", QJsonObject{{"type", "string"}, {"description", "Reason recorded with the request."}}},
-				}}, {"required", QJsonArray{"content_id"}}}},
+		Tool{"refund_content", "Refund a star charge someone paid you. A charge is identified by the charge_id issued with the payment; there is no content id in this flow.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"user_id", QJsonObject{{"type", "integer"}, {"description", "User who made the payment being refunded."}}},
+			{"charge_id", QJsonObject{{"type", "string"}, {"description", "Charge ID issued with the payment."}}},
+				}}, {"required", QJsonArray{"user_id", "charge_id"}}}},
 
 		// --- Creator ---
 		Tool{"create_exclusive_content", "Create exclusive content for subscribers", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
