@@ -1,0 +1,634 @@
+<title>MCP Server Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#EEF2F7; --surface:#FFFFFF; --surface-2:#F5F8FC; --raise:#FFFFFF;
+  --line:#DCE4EE; --line-2:#E9EEF4;
+  --ink:#141E29; --ink-2:#44515F; --ink-3:#78848F;
+  --accent:#2E7FC2; --accent-ink:#FFFFFF; --accent-soft:#2670AE;
+  --agent:#BC603D; --agent-ink:#FFFFFF;
+  --ok:#1E9E6A; --warn:#B0771B; --crit:#CE4A66;
+  --teal:#2E93A6; --viol:#7A6CC4;
+  --shadow:0 1px 2px rgba(20,30,41,.06), 0 12px 32px -14px rgba(20,30,41,.22);
+  --shadow-sm:0 1px 2px rgba(20,30,41,.07);
+  --sp1:4px; --sp2:8px; --sp3:12px; --sp4:16px; --sp5:24px; --sp6:32px; --sp7:48px;
+  --r1:7px; --r2:11px; --r3:16px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E1620; --surface:#141E29; --surface-2:#18232F; --raise:#1B2836;
+    --line:#26333F; --line-2:#212D39;
+    --ink:#E8EEF4; --ink-2:#A6B3BF; --ink-3:#6E7C89;
+    --accent:#4EA1E6; --accent-ink:#0B1420; --accent-soft:#63AEEA;
+    --agent:#E0987A; --agent-ink:#20120B;
+    --ok:#3FB98A; --warn:#E0A54A; --crit:#E5647D;
+    --teal:#48B6C6; --viol:#9E90E6;
+    --shadow:0 1px 2px rgba(0,0,0,.35), 0 20px 44px -18px rgba(0,0,0,.6);
+    --shadow-sm:0 1px 2px rgba(0,0,0,.3);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1620; --surface:#141E29; --surface-2:#18232F; --raise:#1B2836;
+  --line:#26333F; --line-2:#212D39;
+  --ink:#E8EEF4; --ink-2:#A6B3BF; --ink-3:#6E7C89;
+  --accent:#4EA1E6; --accent-ink:#0B1420; --accent-soft:#63AEEA;
+  --agent:#E0987A; --agent-ink:#20120B;
+  --ok:#3FB98A; --warn:#E0A54A; --crit:#E5647D;
+  --teal:#48B6C6; --viol:#9E90E6;
+  --shadow:0 1px 2px rgba(0,0,0,.35), 0 20px 44px -18px rgba(0,0,0,.6);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.3);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Archivo","Segoe UI",system-ui,sans-serif;
+  font-size:14.5px; line-height:1.6; letter-spacing:.005em;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+.mono{font-family:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace; font-variant-numeric:tabular-nums}
+.num{font-variant-numeric:tabular-nums}
+a{color:var(--accent); text-decoration:none}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
+button{font-family:inherit; cursor:pointer}
+
+/* ---- window shell ---- */
+.shell{max-width:1180px; margin:0 auto; padding:clamp(16px,3.5vw,44px) clamp(14px,3vw,32px)}
+.window{
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r3);
+  box-shadow:var(--shadow); overflow:clip;
+}
+.titlebar{
+  display:flex; align-items:center; gap:var(--sp4);
+  padding:11px 16px; border-bottom:1px solid var(--line);
+  background:var(--surface-2);
+  position:sticky; top:0; z-index:6;
+}
+.lights{display:flex; gap:8px}
+.lights i{width:12px; height:12px; border-radius:50%; display:block}
+.lights i:nth-child(1){background:#E5644E}
+.lights i:nth-child(2){background:#E6A93C}
+.lights i:nth-child(3){background:#43B04A}
+.wm{display:flex; align-items:baseline; gap:8px; min-width:0}
+.wm b{font-weight:700; letter-spacing:.14em; text-transform:uppercase; font-size:12.5px}
+.wm span{color:var(--ink-3); font-size:12.5px}
+.titlebar .spacer{flex:1}
+.themebtn{
+  border:1px solid var(--line); background:var(--surface); color:var(--ink-2);
+  width:30px; height:30px; border-radius:8px; display:grid; place-items:center;
+  font-size:14px; line-height:1;
+}
+.themebtn:hover{color:var(--ink); border-color:var(--ink-3)}
+
+/* ---- status bar ---- */
+.statusbar{
+  display:flex; align-items:center; gap:clamp(12px,2vw,26px); flex-wrap:wrap;
+  padding:14px 18px; border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,var(--surface),var(--surface-2));
+  position:sticky; top:47px; z-index:5;
+}
+.pill{
+  display:inline-flex; align-items:center; gap:8px; font-weight:600; font-size:13px;
+  padding:6px 12px 6px 10px; border-radius:999px;
+  color:var(--ok); background:color-mix(in srgb,var(--ok) 13%,transparent);
+  border:1px solid color-mix(in srgb,var(--ok) 32%,transparent);
+}
+.dot{width:8px; height:8px; border-radius:50%; background:currentColor; position:relative}
+.dot::after{content:""; position:absolute; inset:-4px; border-radius:50%;
+  background:currentColor; opacity:.35; animation:pulse 2.4s ease-out infinite}
+@keyframes pulse{0%{transform:scale(.5);opacity:.5}70%{transform:scale(2.1);opacity:0}100%{opacity:0}}
+.ctrls{display:flex; gap:8px}
+.btn{
+  border:1px solid var(--line); background:var(--raise); color:var(--ink);
+  font-weight:600; font-size:12.5px; padding:7px 13px; border-radius:9px;
+  display:inline-flex; align-items:center; gap:7px; box-shadow:var(--shadow-sm);
+}
+.btn:hover{border-color:var(--ink-3)}
+.btn .g{width:9px;height:9px;border-radius:2px;background:var(--ink-3)}
+.btn.stop .g{background:var(--crit)}
+.btn.restart .g{background:var(--warn); border-radius:50%}
+.btn.primary{background:var(--accent); color:var(--accent-ink); border-color:transparent}
+.btn.primary:hover{background:var(--accent-soft)}
+.vitals{display:flex; gap:clamp(12px,1.8vw,22px); flex-wrap:wrap; margin-left:auto}
+.vital{display:flex; flex-direction:column; gap:1px}
+.vital .k{font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); font-weight:600}
+.vital .v{font-size:13px; font-weight:500}
+
+/* ---- body: rail + main ---- */
+.body{display:grid; grid-template-columns:212px 1fr}
+.rail{
+  border-right:1px solid var(--line); padding:18px 12px; background:var(--surface-2);
+  position:sticky; top:96px; align-self:start; height:calc(100vh - 96px); overflow:auto;
+}
+.rail .lead{font-size:10px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3);
+  font-weight:600; padding:0 10px 10px}
+.rail a{display:flex; align-items:center; gap:11px; padding:9px 11px; border-radius:9px;
+  color:var(--ink-2); font-weight:500; font-size:13.5px; margin-bottom:2px; transition:background .15s,color .15s}
+.rail a .ic{width:16px; height:16px; flex:none; color:var(--ink-3)}
+.rail a:hover{background:var(--line-2); color:var(--ink)}
+.rail a.active{background:color-mix(in srgb,var(--accent) 14%,transparent); color:var(--ink)}
+.rail a.active .ic{color:var(--accent)}
+.rail a.agentlink.active{background:color-mix(in srgb,var(--agent) 16%,transparent)}
+.rail a.agentlink.active .ic{color:var(--agent)}
+.rail .tag{margin-left:auto; font-size:11px; color:var(--ink-3)}
+.rail .foot{margin-top:16px; padding:12px 10px 4px; border-top:1px solid var(--line); color:var(--ink-3); font-size:11.5px; line-height:1.5}
+
+.main{padding:clamp(20px,2.4vw,34px) clamp(18px,2.4vw,34px); min-width:0}
+.view{scroll-margin-top:112px; padding-bottom:38px; margin-bottom:38px; border-bottom:1px solid var(--line-2)}
+.view:last-child{border-bottom:0; margin-bottom:0}
+.eyebrow{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--accent); font-weight:600; display:flex; align-items:center; gap:9px}
+.eyebrow.warm{color:var(--agent)}
+.eyebrow .n{color:var(--ink-3)}
+h2{font-size:clamp(20px,2.4vw,25px); font-weight:700; letter-spacing:-.01em; margin:8px 0 6px; text-wrap:balance}
+.lede{color:var(--ink-2); max-width:64ch; margin:0 0 20px}
+
+/* cards */
+.cards{display:grid; gap:14px}
+.grid-4{grid-template-columns:repeat(4,1fr)}
+.grid-2{grid-template-columns:1fr 1fr}
+.card{background:var(--raise); border:1px solid var(--line); border-radius:var(--r2); padding:16px 17px}
+.stat .k{font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-3); font-weight:600}
+.stat .v{font-family:"IBM Plex Mono",monospace; font-size:25px; font-weight:500; margin-top:6px; letter-spacing:-.01em}
+.stat .s{font-size:12px; color:var(--ink-3); margin-top:2px}
+.stat .v.ok{color:var(--ok)} .stat .v small{font-size:14px; color:var(--ink-3)}
+
+/* backing bar */
+.panel{background:var(--raise); border:1px solid var(--line); border-radius:var(--r2); padding:18px 19px; margin-top:14px}
+.panel h3{margin:0 0 3px; font-size:14px; font-weight:600}
+.panel .sub{color:var(--ink-3); font-size:12.5px; margin:0 0 15px}
+.bar{display:flex; height:15px; border-radius:5px; overflow:hidden; gap:2px; background:transparent}
+.bar span{display:block; min-width:2px}
+.legend{display:flex; flex-wrap:wrap; gap:6px 18px; margin-top:15px}
+.leg{display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink-2)}
+.leg i{width:9px; height:9px; border-radius:2px; flex:none}
+.leg b{font-family:"IBM Plex Mono",monospace; color:var(--ink); font-weight:500}
+.leg em{color:var(--ink-3); font-style:normal; font-size:11.5px}
+.c-mt{background:var(--accent)} .c-ls{background:var(--teal)} .c-lo{background:var(--ink-3)}
+.c-pc{background:var(--viol)} .c-un{background:var(--crit)}
+
+/* config */
+.form{display:grid; gap:2px}
+.row{display:grid; grid-template-columns:1fr auto; align-items:center; gap:16px;
+  padding:14px 4px; border-bottom:1px solid var(--line-2)}
+.row:last-child{border-bottom:0}
+.row .lab{font-weight:600; font-size:13.5px}
+.row .hint{color:var(--ink-3); font-size:12px; margin-top:2px}
+.row .hint .mono{font-size:11.5px}
+.seg{display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--surface-2)}
+.seg button{border:0; background:transparent; color:var(--ink-2); font-weight:600; font-size:12.5px; padding:7px 14px}
+.seg button.on{background:var(--accent); color:var(--accent-ink)}
+.toggle{width:42px; height:24px; border-radius:999px; background:var(--line); border:1px solid var(--line);
+  position:relative; padding:0; flex:none; transition:background .18s}
+.toggle::after{content:""; position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%;
+  background:var(--surface); box-shadow:var(--shadow-sm); transition:left .18s}
+.toggle.on{background:var(--accent); border-color:transparent}
+.toggle.on::after{left:20px; background:#fff}
+.token{display:flex; align-items:center; gap:8px}
+.token .val{font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--ink-2); background:var(--surface-2);
+  border:1px solid var(--line); border-radius:7px; padding:6px 10px; letter-spacing:.04em}
+.mini{border:1px solid var(--line); background:var(--raise); color:var(--ink-2); font-weight:600; font-size:11.5px;
+  padding:6px 10px; border-radius:7px}
+.mini:hover{color:var(--ink); border-color:var(--ink-3)}
+
+/* tools */
+.toolbar{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px}
+.search{flex:1; min-width:190px; display:flex; align-items:center; gap:9px; background:var(--raise);
+  border:1px solid var(--line); border-radius:9px; padding:8px 12px; color:var(--ink-3)}
+.search input{border:0; background:transparent; color:var(--ink); font-family:inherit; font-size:13.5px; width:100%; outline:none}
+.chips{display:flex; gap:7px; flex-wrap:wrap}
+.chip{display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:600; padding:6px 11px;
+  border-radius:999px; border:1px solid var(--line); background:var(--raise); color:var(--ink-2)}
+.chip i{width:8px; height:8px; border-radius:50%; flex:none}
+.chip.sel{border-color:var(--ink-3); color:var(--ink)}
+.i-mt{background:var(--accent)} .i-ls{background:var(--teal)} .i-lo{background:var(--ink-3)}
+.i-pc{background:var(--viol)} .i-un{background:var(--crit)}
+.tool{display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:14px;
+  padding:12px 15px; border:1px solid var(--line); border-radius:10px; background:var(--raise); margin-bottom:8px}
+.tool .nm{font-family:"IBM Plex Mono",monospace; font-size:13px; font-weight:500}
+.tool .ds{color:var(--ink-3); font-size:12px; margin-top:2px}
+.tool .last{color:var(--ink-3); font-size:11.5px; font-family:"IBM Plex Mono",monospace}
+.bk{display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:600; padding:4px 9px;
+  border-radius:999px; background:var(--surface-2); color:var(--ink-2); border:1px solid var(--line)}
+.bk i{width:7px; height:7px; border-radius:50%}
+
+/* activity */
+.log{background:var(--raise); border:1px solid var(--line); border-radius:var(--r2); overflow:hidden}
+.log .lrow{display:grid; grid-template-columns:92px 1fr 62px 56px 128px; gap:12px; align-items:center;
+  padding:9px 15px; border-bottom:1px solid var(--line-2); font-family:"IBM Plex Mono",monospace; font-size:12px}
+.log .lrow>span:last-child{text-align:right}
+.log .lrow:last-child{border-bottom:0}
+.log .lrow.head{color:var(--ink-3); font-weight:600; font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; background:var(--surface-2)}
+.log .t{color:var(--ink-3)}
+.log .m{color:var(--ink)}
+.log .tl{color:var(--accent)}
+.st{font-weight:600; font-size:11px; white-space:nowrap}
+.st.ok2{color:var(--ok)} .st.err{color:var(--crit)}
+
+/* ---- DBA agent ---- */
+.agentwrap{display:grid; grid-template-columns:1.35fr 1fr; gap:16px; align-items:start}
+.chat{background:var(--raise); border:1px solid var(--line); border-radius:var(--r2); overflow:hidden}
+.chat .top{display:flex; align-items:center; gap:11px; padding:14px 16px; border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--agent) 9%,var(--surface)),var(--surface))}
+.avatar{width:30px; height:30px; border-radius:9px; flex:none; display:grid; place-items:center;
+  background:color-mix(in srgb,var(--agent) 22%,transparent); color:var(--agent); font-weight:700; font-size:14px;
+  border:1px solid color-mix(in srgb,var(--agent) 40%,transparent)}
+.chat .top .who{font-weight:600; font-size:13.5px}
+.chat .top .role{color:var(--ink-3); font-size:11.5px}
+.chat .top .live{margin-left:auto; font-size:11px; color:var(--ink-3); display:flex; align-items:center; gap:6px}
+.chat .top .live .d{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.stream{padding:16px; display:flex; flex-direction:column; gap:14px}
+.msg{max-width:92%}
+.msg.you{align-self:flex-end}
+.msg .b{padding:11px 14px; border-radius:13px; font-size:13.5px; line-height:1.55}
+.msg.you .b{background:var(--accent); color:var(--accent-ink); border-bottom-right-radius:5px}
+.msg.ai .b{background:var(--surface-2); border:1px solid var(--line); border-bottom-left-radius:5px}
+.msg .who{font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3); font-weight:600; margin:0 4px 5px}
+.msg.you .who{text-align:right}
+.msg.ai .who{color:var(--agent)}
+.sql{font-family:"IBM Plex Mono",monospace; font-size:12px; background:var(--ground); border:1px solid var(--line);
+  border-radius:9px; padding:11px 13px; margin:11px 0; overflow-x:auto; line-height:1.55}
+.sql .kw{color:var(--accent); font-weight:600}
+.sql .cm{color:var(--ink-3)}
+.finding{display:flex; gap:11px; padding:10px 0; border-top:1px solid var(--line-2)}
+.finding:first-of-type{border-top:0}
+.finding .stripe{width:3px; border-radius:2px; flex:none; background:var(--crit)}
+.finding.warn .stripe{background:var(--warn)}
+.finding .tbl{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:13px}
+.finding .why{color:var(--ink-2); font-size:12.5px; margin-top:1px}
+.finding .cnt{margin-left:auto; font-family:"IBM Plex Mono",monospace; color:var(--ink-3); font-size:12px; white-space:nowrap}
+.act{display:flex; gap:9px; align-items:center; margin-top:13px; flex-wrap:wrap}
+.act .g{border:1px solid color-mix(in srgb,var(--agent) 45%,var(--line)); background:color-mix(in srgb,var(--agent) 12%,transparent);
+  color:var(--agent); font-weight:600; font-size:12.5px; padding:8px 13px; border-radius:9px}
+.act .g:hover{background:color-mix(in srgb,var(--agent) 20%,transparent)}
+.act .note{color:var(--ink-3); font-size:11.5px}
+.preview{margin-top:12px; border:1px dashed color-mix(in srgb,var(--crit) 40%,var(--line)); border-radius:10px;
+  padding:13px 14px; background:color-mix(in srgb,var(--crit) 6%,transparent)}
+.preview.hidden{display:none}
+.preview .h{font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--crit); font-weight:600; margin-bottom:8px}
+.preview .stmt{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink); line-height:1.7}
+.preview .conf{display:flex; gap:9px; align-items:center; margin-top:12px}
+.preview .apply{background:var(--crit); color:#fff; border:0; font-weight:600; font-size:12.5px; padding:8px 14px; border-radius:8px}
+.preview .cancel{background:transparent; border:1px solid var(--line); color:var(--ink-2); font-weight:600; font-size:12.5px; padding:8px 13px; border-radius:8px}
+.compose{display:flex; gap:9px; padding:13px 16px; border-top:1px solid var(--line); align-items:center}
+.compose .field{flex:1; background:var(--surface-2); border:1px solid var(--line); border-radius:10px; padding:9px 13px;
+  color:var(--ink-3); font-size:13px}
+.compose .send{width:36px; height:36px; border-radius:10px; background:var(--agent); color:var(--agent-ink); border:0;
+  display:grid; place-items:center; flex:none}
+
+/* agent sidebar */
+.side{display:flex; flex-direction:column; gap:16px}
+.side .box{background:var(--raise); border:1px solid var(--line); border-radius:var(--r2); overflow:hidden}
+.side .bh{display:flex; align-items:center; justify-content:space-between; padding:12px 15px; border-bottom:1px solid var(--line)}
+.side .bh h4{margin:0; font-size:12.5px; font-weight:600}
+.side .bh .meta{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3)}
+.schema{max-height:236px; overflow:auto}
+.srow{display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; padding:8px 15px;
+  border-bottom:1px solid var(--line-2); font-family:"IBM Plex Mono",monospace; font-size:12px}
+.srow:last-child{border-bottom:0}
+.srow .nm{color:var(--ink-2); display:flex; align-items:center; gap:8px}
+.srow .nm .warnflag{color:var(--warn); font-size:11px}
+.srow .nm.zero{color:var(--ink-3)}
+.srow .rc{color:var(--ink); font-weight:500}
+.srow .rc.z{color:var(--warn)}
+.integrity{padding:6px 4px 4px}
+.iline{display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px}
+.iline .ic{width:22px; height:22px; border-radius:6px; display:grid; place-items:center; font-size:12px; font-weight:700; flex:none}
+.iline.bad .ic{background:color-mix(in srgb,var(--crit) 16%,transparent); color:var(--crit)}
+.iline.warn .ic{background:color-mix(in srgb,var(--warn) 16%,transparent); color:var(--warn)}
+.iline.ok .ic{background:color-mix(in srgb,var(--ok) 16%,transparent); color:var(--ok)}
+.iline .tx{font-size:12.5px}
+.iline .tx b{font-weight:600}
+.iline .tx span{color:var(--ink-3); display:block; font-size:11.5px}
+.guards{display:flex; flex-wrap:wrap; gap:6px; padding:0 15px 15px}
+.guard{font-size:11px; font-weight:600; color:var(--ink-2); background:var(--surface-2); border:1px solid var(--line);
+  padding:5px 9px; border-radius:7px; display:inline-flex; gap:6px; align-items:center}
+.guard i{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+
+/* footer */
+.footer{padding:20px 26px; border-top:1px solid var(--line); background:var(--surface-2);
+  display:flex; gap:14px; align-items:center; flex-wrap:wrap; color:var(--ink-3); font-size:12.5px}
+.footer .rule{font-family:"IBM Plex Mono",monospace; color:var(--ink-2)}
+.footer .sp{flex:1}
+
+svg.spark{display:block}
+@media (max-width:920px){
+  .body{grid-template-columns:1fr}
+  .rail{display:none}
+  .grid-4{grid-template-columns:1fr 1fr}
+  .agentwrap{grid-template-columns:1fr}
+}
+@media (max-width:560px){
+  .grid-4,.grid-2{grid-template-columns:1fr}
+  .vitals{width:100%; margin-left:0}
+  .log .lrow{grid-template-columns:80px 1fr 56px; }
+  .log .lrow .hd-dur,.log .lrow .dur,.log .lrow .hd-sz,.log .lrow .sz{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none !important; transition:none !important}
+}
+</style>
+
+<div class="shell">
+<div class="window">
+
+  <!-- titlebar -->
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="wm"><b>Tlgrm</b><span>· MCP Server</span></div>
+    <div class="spacer"></div>
+    <button class="themebtn" id="theme" title="Toggle light / dark" aria-label="Toggle theme">◑</button>
+  </div>
+
+  <!-- status bar -->
+  <div class="statusbar">
+    <span class="pill"><span class="dot"></span>Running</span>
+    <div class="ctrls">
+      <button class="btn stop"><span class="g"></span>Stop</button>
+      <button class="btn restart"><span class="g"></span>Restart</button>
+    </div>
+    <div class="vitals">
+      <div class="vital"><span class="k">Uptime</span><span class="v mono">4h 12m</span></div>
+      <div class="vital"><span class="k">Transport</span><span class="v">IPC · unix socket</span></div>
+      <div class="vital"><span class="k">Socket</span><span class="v mono">…/mcp/bridge.sock&nbsp;<span style="color:var(--ink-3)">0600</span></span></div>
+      <div class="vital"><span class="k">Clients</span><span class="v mono">1</span></div>
+      <div class="vital"><span class="k">Req / min</span><span class="v mono">37</span></div>
+    </div>
+  </div>
+
+  <!-- body -->
+  <div class="body">
+    <nav class="rail">
+      <div class="lead">Server</div>
+      <a href="#status" class="active" data-view="status"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 8h3l2-5 2 10 2-5h3"/></svg>Status</a>
+      <a href="#config" data-view="config"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4"/></svg>Configuration</a>
+      <a href="#tools" data-view="tools"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2.5" width="12" height="3" rx="1"/><rect x="2" y="6.5" width="12" height="3" rx="1"/><rect x="2" y="10.5" width="12" height="3" rx="1"/></svg>Tools<span class="tag mono">352</span></a>
+      <a href="#activity" data-view="activity"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 12l3-3 2 2 4-6 3 4"/></svg>Activity</a>
+      <a href="#dba" class="agentlink" data-view="dba"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><ellipse cx="8" cy="4" rx="5" ry="2.2"/><path d="M3 4v8c0 1.2 2.2 2.2 5 2.2s5-1 5-2.2V4M3 8c0 1.2 2.2 2.2 5 2.2s5-1 5-2.2"/></svg>DBA Agent<span class="tag" style="color:var(--agent)">●</span></a>
+      <div class="foot">Local socket only. The server never binds to a network interface.</div>
+    </nav>
+
+    <main class="main">
+
+      <!-- STATUS -->
+      <section class="view" id="status">
+        <div class="eyebrow"><span class="n">01</span>Status</div>
+        <h2>The server, made visible</h2>
+        <p class="lede">Everything the server already knows and never showed. Start, stop and restart live in the bar above — a headless server you cannot stop is a lock with no key.</p>
+        <div class="cards grid-4">
+          <div class="card stat"><div class="k">State</div><div class="v ok">Running</div><div class="s">since 14:47, healthy</div></div>
+          <div class="card stat"><div class="k">Tools loaded</div><div class="v">352</div><div class="s">four sites in agreement</div></div>
+          <div class="card stat"><div class="k">Requests today</div><div class="v">12,847</div><div class="s">0 errors</div></div>
+          <div class="card stat"><div class="k">DB size</div><div class="v">214<small> MB</small></div><div class="s">51 tables</div></div>
+        </div>
+
+        <div class="panel">
+          <h3>Tool surface by backing</h3>
+          <p class="sub">What actually answers a call. The neutral block is the local-only surface — the part with no Telegram behind it, and the part this console exists to keep honest.</p>
+          <div class="bar" role="img" aria-label="Tool backing distribution">
+            <span class="c-mt" style="width:28.1%"></span>
+            <span class="c-ls" style="width:11.6%"></span>
+            <span class="c-lo" style="width:57.1%"></span>
+            <span class="c-pc" style="width:1.1%"></span>
+            <span class="c-un" style="width:2.1%"></span>
+          </div>
+          <div class="legend">
+            <span class="leg"><i class="c-mt"></i><b>99</b>&nbsp;Mtproto <em>· asks Telegram</em></span>
+            <span class="leg"><i class="c-ls"></i><b>41</b>&nbsp;LiveSession <em>· synced state</em></span>
+            <span class="leg"><i class="c-lo"></i><b>201</b>&nbsp;LocalOnly <em>· local DB</em></span>
+            <span class="leg"><i class="c-pc"></i><b>4</b>&nbsp;PureCompute <em>· args only</em></span>
+            <span class="leg"><i class="c-un"></i><b>7</b>&nbsp;Unimplemented <em>· refuses</em></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- CONFIG -->
+      <section class="view" id="config">
+        <div class="eyebrow"><span class="n">02</span>Configuration</div>
+        <h2>Everything that was frozen at launch</h2>
+        <p class="lede">Transport, socket, auth and autostart were compile-time or launch-time facts. Here they are editable, with the security posture shown rather than assumed.</p>
+        <div class="panel">
+          <div class="form">
+            <div class="row">
+              <div><div class="lab">Transport</div><div class="hint">IPC for the desktop app; stdio for a launched client.</div></div>
+              <div class="seg"><button class="on">IPC</button><button>stdio</button></div>
+            </div>
+            <div class="row">
+              <div><div class="lab">Socket path</div><div class="hint"><span class="mono">~/Library/Caches/tlgrm/mcp/bridge.sock</span> — owner-only, <span class="mono">0600</span></div></div>
+              <button class="mini">Change…</button>
+            </div>
+            <div class="row">
+              <div><div class="lab">Auth token</div><div class="hint">Required in every <span class="mono">initialize</span>. Rotate to drop existing sessions.</div></div>
+              <div class="token"><span class="val">a4f1··········9e2c</span><button class="mini">Copy</button><button class="mini">Rotate</button></div>
+            </div>
+            <div class="row">
+              <div><div class="lab">Start with app</div><div class="hint">Bring the server up automatically at launch.</div></div>
+              <button class="toggle on" role="switch" aria-checked="true" aria-label="Start with app"></button>
+            </div>
+            <div class="row">
+              <div><div class="lab">Enable local-only tools</div><div class="hint">Turn off the whole class that never reaches Telegram — one switch, not a rebuild.</div></div>
+              <button class="toggle on" role="switch" aria-checked="true" aria-label="Enable local-only tools"></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TOOLS -->
+      <section class="view" id="tools">
+        <div class="eyebrow"><span class="n">03</span>Tools</div>
+        <h2>The whole surface, browsable</h2>
+        <p class="lede">The four-site contract the build enforces, made something a person can read. Filter by what backs a tool; see when it last ran.</p>
+        <div class="toolbar">
+          <label class="search"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="M11 11l3 3"/></svg><input placeholder="Search 352 tools…" aria-label="Search tools"></label>
+          <div class="chips">
+            <span class="chip sel"><i class="i-mt"></i>Mtproto</span>
+            <span class="chip"><i class="i-ls"></i>LiveSession</span>
+            <span class="chip"><i class="i-lo"></i>LocalOnly</span>
+            <span class="chip"><i class="i-un"></i>Unimplemented</span>
+          </div>
+        </div>
+        <div class="tool">
+          <div><div class="nm">get_stars_history</div><div class="ds">Real transactions from payments.getStarsTransactions</div></div>
+          <span class="bk"><i class="i-mt"></i>Mtproto</span><span class="last">14:59</span>
+        </div>
+        <div class="tool">
+          <div><div class="nm">list_marketplace</div><div class="ds">Resale listings for one gift type</div></div>
+          <span class="bk"><i class="i-mt"></i>Mtproto</span><span class="last">14:58</span>
+        </div>
+        <div class="tool">
+          <div><div class="nm">list_gift_collections</div><div class="ds">The account's real star-gift collections</div></div>
+          <span class="bk"><i class="i-mt"></i>Mtproto</span><span class="last">14:52</span>
+        </div>
+        <div class="tool">
+          <div><div class="nm">send_stars</div><div class="ds">No user-to-user transfer exists — refuses, records nothing</div></div>
+          <span class="bk"><i class="i-un"></i>Unimplemented</span><span class="last">—</span>
+        </div>
+        <div class="tool">
+          <div><div class="nm">export_portfolio_report</div><div class="ds">Reads the local portfolio ledger</div></div>
+          <span class="bk"><i class="i-lo"></i>LocalOnly</span><span class="last">13:20</span>
+        </div>
+      </section>
+
+      <!-- ACTIVITY -->
+      <section class="view" id="activity">
+        <div class="eyebrow"><span class="n">04</span>Activity</div>
+        <h2>The live request stream</h2>
+        <p class="lede">The JSON-RPC traffic the audit logger already records, read as it happens. The thing you watch when a client misbehaves.</p>
+        <div class="log">
+          <div class="lrow head"><span>Time</span><span>Method</span><span class="hd-dur">Dur</span><span class="hd-sz">Size</span><span>Status</span></div>
+          <div class="lrow"><span class="t">14:59:02</span><span class="m">tools/call · <span class="tl">get_stars_history</span></span><span class="dur">41ms</span><span class="sz">2.1 KB</span><span class="st ok2">ok</span></div>
+          <div class="lrow"><span class="t">14:58:44</span><span class="m">tools/call · <span class="tl">list_marketplace</span></span><span class="dur">88ms</span><span class="sz">6.4 KB</span><span class="st err">STARGIFT_INVALID</span></div>
+          <div class="lrow"><span class="t">14:58:41</span><span class="m">tools/call · <span class="tl">list_auctions</span></span><span class="dur">63ms</span><span class="sz">0.3 KB</span><span class="st ok2">ok</span></div>
+          <div class="lrow"><span class="t">14:58:12</span><span class="m">tools/call · <span class="tl">send_stars</span></span><span class="dur">2ms</span><span class="sz">0.4 KB</span><span class="st err">refused</span></div>
+          <div class="lrow"><span class="t">14:57:55</span><span class="m">tools/list</span><span class="dur">7ms</span><span class="sz">88 KB</span><span class="st ok2">ok</span></div>
+        </div>
+      </section>
+
+      <!-- DBA AGENT -->
+      <section class="view" id="dba">
+        <div class="eyebrow warm"><span class="n">05</span>DBA Agent · Claude</div>
+        <h2>The question no one asked for twenty tools</h2>
+        <p class="lede">A Claude agent scoped to the local database, holding the same rule as the tools it inspects: report what the database contains, never invent. Its first job is the audit that would have caught the fabrication — <em>which tables are real, and which are telling a story?</em></p>
+
+        <div class="agentwrap">
+          <!-- conversation -->
+          <div class="chat">
+            <div class="top">
+              <div class="avatar">✦</div>
+              <div><div class="who">DBA Agent</div><div class="role">Claude · scoped to telegram_mcp_archive</div></div>
+              <div class="live"><span class="d"></span>read-only</div>
+            </div>
+            <div class="stream">
+              <div class="msg you"><div class="who">You</div><div class="b">Which tables have no live writer any more?</div></div>
+
+              <div class="msg ai"><div class="who">DBA Agent</div><div class="b">
+                Three. I listed the empty tables, then checked each one's writers against the current tool bodies and the backing table:
+                <div class="sql"><span class="cm">-- tables holding no rows</span><br><span class="kw">SELECT</span> name <span class="kw">FROM</span> tables<br><span class="kw">WHERE</span> row_count = 0 <span class="kw">ORDER BY</span> name;</div>
+                <div class="finding"><span class="stripe"></span><div><div class="tbl">auctions</div><div class="why">Writers <span class="mono">create_gift_auction</span>, <span class="mono">cancel_auction</span> were removed — no method backs them.</div></div><span class="cnt">0 rows · orphaned</span></div>
+                <div class="finding"><span class="stripe"></span><div><div class="tbl">marketplace_listings</div><div class="why">Writers now query Telegram (<span class="mono">getResaleStarGifts</span>) instead of writing here.</div></div><span class="cnt">0 rows · orphaned</span></div>
+                <div class="finding warn"><span class="stripe"></span><div><div class="tbl">wallet_spending</div><div class="why">Writers <span class="mono">send_gift</span>, <span class="mono">send_stars</span>, <span class="mono">withdraw_earnings</span> now record nothing.</div></div><span class="cnt">0 rows · vestigial</span></div>
+                None is read for correctness by any remaining tool. They're safe to drop.
+                <div class="act"><button class="g" id="previewBtn">Preview DROP · 3 tables</button><span class="note">nothing runs until you confirm</span></div>
+                <div class="preview hidden" id="preview">
+                  <div class="h">Pending — review before apply</div>
+                  <div class="stmt"><span style="color:var(--crit)">DROP TABLE</span> auctions;<br><span style="color:var(--crit)">DROP TABLE</span> marketplace_listings;<br><span style="color:var(--crit)">DROP TABLE</span> wallet_spending;</div>
+                  <div class="conf"><button class="apply">Apply · 0 rows lost</button><button class="cancel" id="cancelBtn">Cancel</button><span class="note" style="color:var(--ink-3)">logged to audit · reversible via migration</span></div>
+                </div>
+              </div></div>
+            </div>
+            <div class="compose">
+              <div class="field">Ask about the schema, run a check, propose a migration…</div>
+              <button class="send" aria-label="Send"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 8h10M8 4l4 4-4 4"/></svg></button>
+            </div>
+          </div>
+
+          <!-- sidebar -->
+          <div class="side">
+            <div class="box">
+              <div class="bh"><h4>Schema</h4><span class="meta">51 tables · 214 MB</span></div>
+              <div class="schema">
+                <div class="srow"><span class="nm">messages</span><span class="rc">48,201</span></div>
+                <div class="srow"><span class="nm">message_embeddings</span><span class="rc">48,201</span></div>
+                <div class="srow"><span class="nm">audit_log</span><span class="rc">12,847</span></div>
+                <div class="srow"><span class="nm">chat_activity_summary</span><span class="rc">1,204</span></div>
+                <div class="srow"><span class="nm">translation_cache</span><span class="rc">642</span></div>
+                <div class="srow"><span class="nm zero">wallet_spending <span class="warnflag">⚠</span></span><span class="rc z">0</span></div>
+                <div class="srow"><span class="nm zero">auctions <span class="warnflag">⚠</span></span><span class="rc z">0</span></div>
+                <div class="srow"><span class="nm zero">marketplace_listings <span class="warnflag">⚠</span></span><span class="rc z">0</span></div>
+                <div class="srow"><span class="nm zero">gift_collections</span><span class="rc z">0</span></div>
+                <div class="srow"><span class="nm zero">collection_items</span><span class="rc z">0</span></div>
+              </div>
+            </div>
+
+            <div class="box">
+              <div class="bh"><h4>Integrity</h4><span class="meta">last run 14:59</span></div>
+              <div class="integrity">
+                <div class="iline bad"><span class="ic">3</span><div class="tx"><b>Orphaned tables</b><span>no live writer — safe to prune</span></div></div>
+                <div class="iline ok"><span class="ic">✓</span><div class="tx"><b>0 referential gaps</b><span>collection_items ↔ gift_collections consistent</span></div></div>
+                <div class="iline warn"><span class="ic">!</span><div class="tx"><b>VACUUM overdue</b><span>last run 6 days ago · 31 MB reclaimable</span></div></div>
+              </div>
+              <div class="guards">
+                <span class="guard"><i></i>Read-only default</span>
+                <span class="guard"><i></i>Scoped to archive DB</span>
+                <span class="guard"><i></i>Every statement audited</span>
+                <span class="guard"><i></i>Never fabricates</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- footer -->
+  <div class="footer">
+    <span class="rule">A tool reports what happened — never what it wishes had happened.</span>
+    <span class="sp"></span>
+    <span>Proposal · <span class="mono">PROPOSAL_MCP_CONTROL_PANEL.md</span></span>
+  </div>
+
+</div>
+</div>
+
+<script>
+(function(){
+  // theme toggle: stamp explicit choice, honoring the 3-state model
+  var root=document.documentElement, tb=document.getElementById('theme');
+  tb.addEventListener('click',function(){
+    var cur=root.getAttribute('data-theme');
+    if(!cur){ // no explicit choice yet — flip away from what the OS shows
+      var sysDark=window.matchMedia('(prefers-color-scheme:dark)').matches;
+      root.setAttribute('data-theme', sysDark?'light':'dark');
+    } else {
+      root.setAttribute('data-theme', cur==='dark'?'light':'dark');
+    }
+  });
+
+  // DROP preview reveal
+  var pb=document.getElementById('previewBtn'), pv=document.getElementById('preview'),
+      cb=document.getElementById('cancelBtn');
+  if(pb){ pb.addEventListener('click',function(){ pv.classList.remove('hidden'); pb.style.display='none'; }); }
+  if(cb){ cb.addEventListener('click',function(){ pv.classList.add('hidden'); pb.style.display=''; }); }
+
+  // toggle switches
+  document.querySelectorAll('.toggle').forEach(function(t){
+    t.addEventListener('click',function(){
+      var on=t.classList.toggle('on');
+      t.setAttribute('aria-checked', on?'true':'false');
+    });
+  });
+
+  // backing filter chips (visual selection only)
+  document.querySelectorAll('.chip').forEach(function(c){
+    c.addEventListener('click',function(){ c.classList.toggle('sel'); });
+  });
+
+  // scroll-spy on the rail
+  var links=[].slice.call(document.querySelectorAll('.rail a'));
+  var map={}; links.forEach(function(a){ map[a.dataset.view]=a; });
+  var views=[].slice.call(document.querySelectorAll('.view'));
+  var spy=new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){
+        links.forEach(function(a){a.classList.remove('active');});
+        var a=map[e.target.id]; if(a) a.classList.add('active');
+      }
+    });
+  },{rootMargin:'-120px 0px -60% 0px', threshold:0});
+  views.forEach(function(v){spy.observe(v);});
+
+  links.forEach(function(a){
+    a.addEventListener('click',function(ev){
+      ev.preventDefault();
+      var el=document.getElementById(a.dataset.view);
+      if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    });
+  });
+})();
+</script>
