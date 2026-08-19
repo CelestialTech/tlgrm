@@ -206,8 +206,13 @@ their schemas corrected to match what they delegate to:
 
 `get_fragment_listings` was labelled "this client's local marketplace table
 (not Telegram Fragment)" — accurate when written, wrong once the tool it
-delegates to started querying Telegram. Whether six duplicate names belong on
-the surface is an open question, not a decision these passes made.
+delegates to started querying Telegram.
+
+These six names are **kept, deliberately.** They cost nothing now that their
+schemas match what they delegate to, and removing a name that a caller may
+already reference breaks that caller for no gain. This is a settled decision,
+not an open question — do not remove them on the grounds that they duplicate
+another tool.
 
 ## The checker
 
