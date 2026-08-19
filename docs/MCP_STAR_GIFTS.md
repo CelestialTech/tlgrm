@@ -1,4 +1,4 @@
-# Star gifts, auctions and the marketplace — what is real
+# Stars — gifts, auctions, the marketplace and the wallet: what is real
 
 The star-gift corner of the MCP surface was the worst offender for inventing
 answers. Around twenty tools were backed by local SQLite tables — `auctions`,
@@ -145,6 +145,52 @@ also inserted a `gift_transfers` row claiming a gift had arrived. Both
 corrupted the very ledger `get_balance_history` and `get_stars_history` read
 back; both now write nothing.
 
+## The wallet and earnings
+
+Fixing the tools above orphaned `wallet_spending` — and that exposed five more
+writers of it, all fabricating in the same way.
+
+| Tool | Now | Why |
+|---|---|---|
+| `send_gift` | refuses | spends stars through the payment form |
+| `subscribe_to_channel` | refuses | a recurring purchase behind an invite link |
+| `withdraw_earnings` | refuses | needs an SRP proof of the 2FA password |
+| `refund_content` | real | `payments.refundStarsCharge` |
+| `request_stars` | **removed** | Telegram has no such feature |
+
+`send_gift` was the one I had previously called "deferred" — wrongly. It wrote a
+negative `wallet_spending` row and a `gift_transfers` row marked `sent`, then
+returned a `transaction_id` that was a SQLite rowid dressed as Telegram's. It
+also claimed `checkCanSendGift` was "not available in this version"; that method
+exists.
+
+`withdraw_earnings` is the clearest case of a request that could only fail being
+used as cover for a fabricated row. It passed `inputCheckPasswordEmpty` — not a
+way to "trigger a 2FA prompt", just a password the server rejects — attached a
+`.fail()` that logged, **had no `.done()` at all**, then wrote a negative row and
+answered success with status `"password_required"`. Money recorded as leaving an
+account that had paid out nothing.
+
+`subscribe_to_channel` recorded "subscription intent". An intent is not a
+subscription, and storing one in the spending log only made the two hard to tell
+apart.
+
+`request_stars` composed a message asking for stars, decided sending it was
+"intrusive", stored a row and reported success — so the person being asked was
+never contacted. Its own note said Telegram has no native request feature. Use
+`send_message`.
+
+`refund_content` now calls the real method, and testing turned up its ceiling:
+it answers **`USER_BOT_REQUIRED`**. `refundStarsCharge` is bot-only, so this
+tool is correct but unusable from a user account — worth knowing before
+debugging it as broken. Its arguments changed from a local `content_id` to the
+`user_id` and `charge_id` that identify an actual charge.
+
+With those five fixed, `get_balance_history` returns an empty history rather
+than a fictional one. That is the honest answer for an account with no
+recorded activity, and it stays `LocalOnly` because it reads a local ledger by
+design — `get_stars_history` is the tool that asks Telegram.
+
 ## Aliases
 
 Several names are pass-throughs, kept so existing callers keep working, with
@@ -175,9 +221,10 @@ answer is real, which is why this document exists.
 
 ## Count
 
-353 tools, 613 described parameters, four declaration sites agreeing — down
-from 355 by three removals (`create_gift_auction`, `cancel_auction`,
-`share_collection`).
+352 tools, 610 described parameters, four declaration sites agreeing — down
+from 355 by four removals (`create_gift_auction`, `cancel_auction`,
+`share_collection`, `request_stars`) against one addition
+(`delete_gift_collection`).
 
 ## Still local, deliberately
 

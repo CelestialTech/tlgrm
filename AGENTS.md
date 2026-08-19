@@ -224,7 +224,7 @@ working directory.
 - `ENABLE_APP_SANDBOX = NO` on every target.
 - No AI attribution in commit messages, ever.
 - Use `uv` for Python, never raw `python3`/`pip`.
-- MCP: 353 tools, 613 described parameters, four declaration sites must agree — see
+- MCP: 352 tools, 610 described parameters, four declaration sites must agree — see
   `tdesktop/Telegram/SourceFiles/mcp/mcp_tool_backing.h` for the backing table.
   `tools/check_mcp_tools.py` enforces this at build time.
 - **A tool reports what happened; it never records what it wishes had happened.**
