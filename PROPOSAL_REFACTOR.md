@@ -1,6 +1,13 @@
 # Refactoring proposal
 
-Draft. Nothing here is implemented; this is a proposal to argue with.
+**Status (2026-08-30):** no longer a pure proposal. P1, P3, P4 and P5 shipped;
+P2 (TeleBox) is reframed and its first milestone **M0 is built** — a native
+GPUI/Rust controller re-hosting the MCP surface end-to-end, at `telebox/` on the
+`telebox` branch. The per-item scoreboard at the bottom is the current record;
+M1–M6 of P2 (client Host API, relocating the remaining feature families,
+cutover) are not started. What follows is the original argument, kept intact
+because the reasoning — including the two big proposals the minimalism gate
+rejected — is the useful part.
 
 Grounded in the codebase as of 16 August 2026 (Tlgrm 7.0.9a) and the audit
 under [`docs/audit-2026-08-11/`](docs/audit-2026-08-11/). Where a claim comes
