@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "countries/countries_instance.h"
 #include "export/data/export_data_types.h"
 #include "export/output/export_output_result.h"
+#include "ui/grouped_layout_geometry.h"
 #include "ui/text/format_values.h"
 
 #include <cmath>
@@ -18,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QRect>
 #include <QtCore/QSize>
 #include <QtCore/QUrl>
 #include <QtGui/QImageReader>
@@ -43,6 +45,9 @@ constexpr auto kStickerMinWidth = 80;
 constexpr auto kStickerMinHeight = 80;
 constexpr auto kStoryThumbWidth = 45;
 constexpr auto kStoryThumbHeight = 80;
+constexpr auto kGroupWidthMax = 430;
+constexpr auto kGroupWidthMin = 100;
+constexpr auto kGroupSkip = 4;
 
 constexpr auto kChatsPriority = 0;
 constexpr auto kContactsPriority = 2;
@@ -277,6 +282,17 @@ QByteArray JoinList(
 	return result;
 }
 
+std::optional<QByteArray> SafeMessageHref(const QByteArray &value);
+
+QByteArray FormatTextLink(
+		const QByteArray &text,
+		const QByteArray &target) {
+	const auto href = SafeMessageHref(target);
+	return href
+		? "<a href=\"" + SerializeString(*href) + "\">" + text + "</a>"
+		: text;
+}
+
 QByteArray FormatCustomEmoji(
 		const Data::Utf8String &custom_emoji,
 		const QByteArray &text,
@@ -317,9 +333,7 @@ QByteArray FormatText(
 			"onclick=\"return ShowBotCommand("
 			+ SerializeString('"' + text.mid(1) + '"')
 			+ ")\">" + text + "</a>";
-		case Type::Url: return "<a href=\""
-			+ text
-			+ "\">" + text + "</a>";
+		case Type::Url: return FormatTextLink(text, part.text);
 		case Type::Email: return "<a href=\"mailto:"
 			+ text
 			+ "\">" + text + "</a>";
@@ -327,9 +341,7 @@ QByteArray FormatText(
 		case Type::Italic: return "<em>" + text + "</em>";
 		case Type::Code: return "<code>" + text + "</code>";
 		case Type::Pre: return "<pre>" + text + "</pre>";
-		case Type::TextUrl: return "<a href=\""
-			+ SerializeString(part.additional)
-			+ "\">" + text + "</a>";
+		case Type::TextUrl: return FormatTextLink(text, part.additional);
 		case Type::MentionName: return "<a href=\"\" "
 			"onclick=\"return ShowMentionName()\">" + text + "</a>";
 		case Type::Phone: return "<a href=\"tel:"
@@ -557,10 +569,21 @@ MediaData PrepareAudioMediaData(const Data::Document &data) {
 	return result;
 }
 
+MediaData PrepareFileMediaData(const Data::Document &data) {
+	auto result = MediaData();
+	result.title = data.name.isEmpty() ? QByteArray("File") : data.name;
+	result.status = Data::FormatFileSize(data.file.size);
+	result.classes = "media_file";
+	result.link = data.file.relativePath;
+	result.description = NoFileDescription(data.file.skipReason);
+	return result;
+}
+
 struct RichMediaCallbacks {
 	Fn<QByteArray(const Data::Photo*)> photo = {};
 	Fn<QByteArray(const Data::Document*)> video = {};
 	Fn<QByteArray(const Data::Document*)> audio = {};
+	Fn<QByteArray(const Data::Document*)> file = {};
 	Fn<QByteArray(const MediaData&)> generic = {};
 	Fn<QByteArray(const MediaData&, const Data::Photo*)> photoCard = {};
 };
@@ -602,6 +625,10 @@ public:
 private:
 	[[nodiscard]] const Data::Photo *findPhoto(uint64 id) const;
 	[[nodiscard]] const Data::Document *findDocument(uint64 id) const;
+	[[nodiscard]] std::optional<QSize> mediaItemSize(
+		const Data::RichBlock &block) const;
+	[[nodiscard]] std::vector<QSize> mediaGroupSizes(
+		const std::vector<Data::RichBlock> &blocks) const;
 	[[nodiscard]] RichTailState tailState(
 		const Data::RichBlock &block) const;
 	[[nodiscard]] RichTailState tailState(
@@ -614,6 +641,11 @@ private:
 		const Data::RichText &text,
 		const std::optional<QByteArray> &href,
 		std::map<QByteArray, QByteArray> attributes);
+	[[nodiscard]] QByteArray renderButton(
+		const Data::RichText &button,
+		bool inlineButton);
+	[[nodiscard]] QByteArray renderButtonRow(
+		const Data::RichBlock &block);
 	[[nodiscard]] QByteArray renderCustomEmojiLink(
 		const QByteArray &alt,
 		std::map<QByteArray, QByteArray> attributes);
@@ -623,10 +655,13 @@ private:
 	[[nodiscard]] QByteArray renderPhoto(const Data::RichBlock &block);
 	[[nodiscard]] QByteArray renderVideo(const Data::RichBlock &block);
 	[[nodiscard]] QByteArray renderAudio(const Data::RichBlock &block);
+	[[nodiscard]] QByteArray renderFile(const Data::RichBlock &block);
 	[[nodiscard]] QByteArray renderMediaGroup(
 		const Data::RichBlock &block,
 		const QByteArray &kind,
 		bool renderGroupCaption);
+	[[nodiscard]] QByteArray renderCollage(const Data::RichBlock &block);
+	[[nodiscard]] QByteArray renderSlideshow(const Data::RichBlock &block);
 	[[nodiscard]] QByteArray renderEmbed(const Data::RichBlock &block);
 	[[nodiscard]] QByteArray renderEmbedPost(const Data::RichBlock &block);
 	[[nodiscard]] QByteArray renderChannel(const Data::RichBlock &block);
@@ -718,6 +753,126 @@ QByteArray RichBoolAttribute(bool value) {
 	return value ? QByteArray("true") : QByteArray("false");
 }
 
+QByteArray RichButtonMetadata(const QByteArray &value) {
+	return QUrl::toPercentEncoding(QString::fromUtf8(value));
+}
+
+QByteArray RichButtonPeerTypes(
+		const std::vector<Data::InlineButtonPeerType> &types) {
+	auto result = QByteArray("[");
+	auto first = true;
+	for (const auto type : types) {
+		if (!first) {
+			result += ',';
+		}
+		first = false;
+		result += '"';
+		result += Data::InlineButtonPeerTypeToString(type);
+		result += '"';
+	}
+	return RichButtonMetadata(result + ']');
+}
+
+std::map<QByteArray, QByteArray> RichButtonAttributes(
+		const Data::InlineButtonAction &action,
+		const std::optional<Data::RichButtonStyle> &style,
+		bool inlineButton) {
+	using Type = Data::InlineButtonAction::Type;
+
+	const auto resolvedStyle = style.value_or(Data::RichButtonStyle::Default);
+	const auto styleName = Data::RichButtonStyleToString(resolvedStyle);
+	auto classes = QByteArray("rich_button ")
+		+ (inlineButton
+			? QByteArray("rich_button_inline")
+			: QByteArray("rich_button_block"))
+		+ " rich_button_style_"
+		+ styleName
+		+ " rich_button_action_"
+		+ Data::InlineButtonAction::TypeToString(action);
+	auto result = std::map<QByteArray, QByteArray>{
+		{ "class", std::move(classes) },
+		{
+			"data-button-type",
+			Data::InlineButtonAction::TypeToString(action),
+		},
+		{ "inline", QByteArray() },
+	};
+	if (style) {
+		result.emplace("data-button-style", styleName);
+	}
+	switch (action.type) {
+	case Type::Url:
+	case Type::Auth:
+	case Type::WebView:
+		result.emplace("data-button-url", RichButtonMetadata(action.url));
+		if (action.type == Type::Auth) {
+			if (action.forwardText) {
+				result.emplace(
+					"data-button-forward-text",
+					RichButtonMetadata(*action.forwardText));
+			}
+			result.emplace(
+				"data-button-id",
+				Data::NumberToString(action.buttonId));
+		}
+		break;
+	case Type::Callback:
+	case Type::CallbackWithPassword:
+		result.emplace(
+			"data-callback-data-base64",
+			action.callbackData.toBase64(
+				QByteArray::Base64UrlEncoding
+				| QByteArray::OmitTrailingEquals));
+		result.emplace(
+			"data-button-requires-password",
+			RichBoolAttribute(action.requiresPassword));
+		break;
+	case Type::Game:
+	case Type::Buy:
+	case Type::Disabled:
+		break;
+	case Type::SwitchInline:
+	case Type::SwitchInlineSame:
+		result.emplace(
+			"data-button-query",
+			RichButtonMetadata(action.query));
+		result.emplace(
+			"data-button-same-peer",
+			RichBoolAttribute(action.samePeer));
+		if (action.peerTypes) {
+			result.emplace(
+				"data-button-peer-types",
+				RichButtonPeerTypes(*action.peerTypes));
+		}
+		break;
+	case Type::UserProfile:
+		result.emplace(
+			"data-button-user-id",
+			Data::NumberToString(action.userId));
+		break;
+	case Type::CopyText:
+		result.emplace(
+			"data-copy-text",
+			RichButtonMetadata(action.copyText));
+		break;
+	}
+	if (action.type == Type::Disabled) {
+		result.emplace("aria-disabled", "true");
+	}
+	return result;
+}
+
+QByteArray RichPercentValue(int value, int total) {
+	return QByteArray::number(value * 100. / total, 'f', 3) + '%';
+}
+
+QByteArray RichAspectRatioStyle(QSize size) {
+	return "aspect-ratio: "
+		+ Data::NumberToString(size.width())
+		+ " / "
+		+ Data::NumberToString(size.height());
+}
+
 bool RichTextHasOutput(const Data::RichText &text) {
 	using Type = Data::RichText::Type;
 	switch (text.type) {
@@ -759,6 +914,7 @@ bool RichTextHasOutput(const Data::RichText &text) {
 	case Type::FormattedDate:
 	case Type::InlineImage:
 	case Type::Diff:
+	case Type::Button:
 		return true;
 	}
 	Unexpected("Type in RichTextHasOutput.");
@@ -821,6 +977,43 @@ bool IsStrictTarget(const QByteArray &value) {
 		}
 	}
 	return true;
+}
+
+std::optional<QByteArray> SafeMessageHref(const QByteArray &value) {
+	if (!IsStrictTarget(value)
+		|| value.startsWith("//")
+		|| HasEncodedControl(value)) {
+		return std::nullopt;
+	}
+	auto source = value;
+	auto url = QUrl::fromEncoded(source, QUrl::StrictMode);
+	if (url.scheme().isEmpty()) {
+		source.prepend("https://");
+		url = QUrl::fromEncoded(source, QUrl::StrictMode);
+	}
+	const auto scheme = url.scheme().toLower();
+	static const auto kAllowedSchemes = std::array{
+		u"http"_q,
+		u"https"_q,
+		u"mailto"_q,
+		u"tel"_q,
+		u"tg"_q,
+	};
+	static const auto kHostSchemes = std::array{
+		u"http"_q,
+		u"https"_q,
+	};
+	if (!url.isValid()
+		|| url.isRelative()
+		|| !ranges::contains(kAllowedSchemes, scheme)
+		|| (ranges::contains(kHostSchemes, scheme)
+			&& url.host().isEmpty())) {
+		return std::nullopt;
+	}
+	const auto result = url.toEncoded(QUrl::FullyEncoded);
+	return (IsStrictTarget(result) && !HasEncodedControl(result))
+		? std::make_optional(result)
+		: std::nullopt;
 }
 
 std::optional<QByteArray> SafeHttpHref(const QByteArray &value) {
@@ -1188,6 +1381,8 @@ bool AppendPlainTarget(
 	case Type::MentionName:
 	case Type::FormattedDate:
 		return AppendPlainTarget(result, text.children);
+	case Type::Button:
+		return false;
 	case Type::CustomEmoji:
 		return AppendPlainTarget(result, text.text);
 	case Type::Diff:
@@ -1266,6 +1461,50 @@ const Data::Document *RichHtmlRenderer::findDocument(uint64 id) const {
 	return (i != end(_message.documents)) ? &i->second : nullptr;
 }
 
+std::optional<QSize> RichHtmlRenderer::mediaItemSize(
+		const Data::RichBlock &block) const {
+	using Kind = Data::RichBlock::Kind;
+
+	const auto valid = [](QSize size) {
+		return !size.isEmpty()
+			? std::make_optional(size)
+			: std::nullopt;
+	};
+	if (block.kind == Kind::Photo) {
+		const auto photo = findPhoto(block.photoId);
+		return (photo && !photo->image.file.relativePath.isEmpty())
+			? valid(QSize(photo->image.width, photo->image.height))
+			: std::nullopt;
+	} else if (block.kind == Kind::Video) {
+		const auto document = findDocument(block.documentId);
+		return (document
+			&& !document->file.relativePath.isEmpty()
+			&& !document->thumb.file.relativePath.isEmpty())
+			? valid(QSize(document->width, document->height))
+			: std::nullopt;
+	}
+	return std::nullopt;
+}
+
+std::vector<QSize> RichHtmlRenderer::mediaGroupSizes(
+		const std::vector<Data::RichBlock> &blocks) const {
+	if (blocks.empty()) {
+		return {};
+	}
+	auto result = std::vector<QSize>();
+	result.reserve(blocks.size());
+	for (const auto &block : blocks) {
+		const auto size = mediaItemSize(block);
+		if (!size
+			|| RichCaptionHasOutput(block.caption)
+			|| (block.optionalUrl && !block.optionalUrl->isEmpty())) {
+			return {};
+		}
+		result.push_back(*size);
+	}
+	return result;
+}
+
 RichTailState RichHtmlRenderer::tailState(
 		const std::vector<Data::RichBlock> &blocks) const {
 	for (auto i = blocks.rbegin(); i != blocks.rend(); ++i) {
@@ -1294,6 +1533,7 @@ RichTailState RichHtmlRenderer::tailState(
 	case Kind::Divider:
 	case Kind::Math:
 	case Kind::Table:
+	case Kind::ButtonRow:
 	case Kind::Unknown:
 		return RichTailState::Other;
 	case Kind::Anchor:
@@ -1329,6 +1569,7 @@ RichTailState RichHtmlRenderer::tailState(
 			: RichTailState::Media;
 	case Kind::Video:
 	case Kind::Audio:
+	case Kind::File:
 	case Kind::Map:
 	case Kind::InputMap:
 		return RichCaptionHasOutput(block.caption)
@@ -1538,6 +1779,19 @@ QByteArray RichHtmlRenderer::renderAudio(
 	return result;
 }
 
+QByteArray RichHtmlRenderer::renderFile(
+		const Data::RichBlock &block) {
+	auto attributes = RichBlockAttributes("rich_media_item", "file");
+	attributes.emplace(
+		"data-document-id",
+		Data::NumberToString(block.documentId));
+	auto result = _context.pushTag("figure", std::move(attributes));
+	result += _media.file(findDocument(block.documentId));
+	result += renderCaption(block.caption);
+	result += _context.popTag();
+	return result;
+}
+
 QByteArray RichHtmlRenderer::renderMediaGroup(
 		const Data::RichBlock &block,
 		const QByteArray &kind,
@@ -1559,6 +1813,118 @@ QByteArray RichHtmlRenderer::renderMediaGroup(
 	if (renderGroupCaption) {
 		result += renderCaption(block.caption);
 	}
+	result += _context.popTag();
+	return result;
+}
+
+QByteArray RichHtmlRenderer::renderCollage(const Data::RichBlock &block) {
+	const auto sizes = mediaGroupSizes(block.blocks);
+	if (sizes.empty()) {
+		return renderMediaGroup(block, "collage", true);
+	}
+	const auto layout = Ui::LayoutMediaGroupGeometry(
+		sizes,
+		kGroupWidthMax,
+		kGroupWidthMin,
+		kGroupSkip);
+	auto full = QRect();
+	for (const auto &part : layout) {
+		full = full.united(part);
+	}
+	if (layout.size() != sizes.size() || full.isEmpty()) {
+		return renderMediaGroup(block, "collage", true);
+	}
+	auto attributes = RichBlockAttributes("rich_media_group", "collage");
+	attributes.emplace("data-rich-has-items", RichBoolAttribute(true));
+	attributes.emplace("data-rich-items-end-media", RichBoolAttribute(true));
+	auto result = _context.pushTag("section", std::move(attributes));
+	result += _context.pushTag("div", {
+		{ "class", "rich_collage_box" },
+		{ "style", RichAspectRatioStyle(full.size()) },
+	});
+	for (auto i = 0, count = int(block.blocks.size()); i != count; ++i) {
+		const auto &geometry = layout[i];
+		result += _context.pushTag("div", {
+			{ "class", "rich_collage_item" },
+			{ "style", "left: "
+				+ RichPercentValue(geometry.x() - full.x(), full.width())
+				+ "; top: "
+				+ RichPercentValue(geometry.y() - full.y(), full.height())
+				+ "; width: "
+				+ RichPercentValue(geometry.width(), full.width())
+				+ "; height: "
+				+ RichPercentValue(geometry.height(), full.height()) },
+		});
+		result += renderBlock(block.blocks[i]);
+		result += _context.popTag();
+	}
+	result += _context.popTag();
+	result += renderCaption(block.caption);
+	result += _context.popTag();
+	return result;
+}
+
+QByteArray RichHtmlRenderer::renderSlideshow(const Data::RichBlock &block) {
+	const auto sizes = mediaGroupSizes(block.blocks);
+	if (sizes.empty()) {
+		return renderMediaGroup(block, "slideshow", true);
+	}
+	auto widest = sizes.front();
+	for (const auto &size : sizes) {
+		if (int64(size.width()) * widest.height()
+			> int64(widest.width()) * size.height()) {
+			widest = size;
+		}
+	}
+	const auto count = int(block.blocks.size());
+	const auto controls = (count > 1);
+	auto attributes = RichBlockAttributes("rich_media_group", "slideshow");
+	attributes.emplace("data-rich-has-items", RichBoolAttribute(true));
+	attributes.emplace("data-rich-items-end-media", RichBoolAttribute(true));
+	auto result = _context.pushTag("section", std::move(attributes));
+	result += _context.pushTag("div", {
+		{ "class", "rich_slideshow_box" },
+		{ "style", RichAspectRatioStyle(widest) },
+	});
+	result += _context.pushTag("div", {
+		{ "class", "rich_slideshow_track" },
+	});
+	for (const auto &item : block.blocks) {
+		result += _context.pushTag("div", { { "class", "rich_slide" } });
+		result += renderBlock(item);
+		result += _context.popTag();
+	}
+	result += _context.popTag();
+	if (controls) {
+		result += _context.pushTag("button", {
+			{ "class", "rich_slideshow_prev" },
+			{ "type", "button" },
+			{ "inline", QByteArray() },
+		});
+		result += "&#8592;";
+		result += _context.popTag();
+		result += _context.pushTag("button", {
+			{ "class", "rich_slideshow_next" },
+			{ "type", "button" },
+			{ "inline", QByteArray() },
+		});
+		result += "&#8594;";
+		result += _context.popTag();
+		result += _context.pushTag("div", {
+			{ "class", "rich_slideshow_dots" },
+		});
+		for (auto i = 0; i != count; ++i) {
+			result += _context.pushTag("button", {
+				{ "class", "rich_slideshow_dot" },
+				{ "type", "button" },
+				{ "inline", QByteArray() },
+			});
+			result += _context.popTag();
+		}
+		result += _context.popTag();
+	}
+	result += _context.popTag();
+	result += renderCaption(block.caption);
 	result += _context.popTag();
 	return result;
 }
@@ -1904,6 +2270,7 @@ void RichHtmlRenderer::collectTextAnchors(const Data::RichText &text) {
 	case Type::BankCard:
 	case Type::MentionName:
 	case Type::FormattedDate:
+	case Type::Button:
 		collectTextAnchors(text.children);
 		break;
 	case Type::Diff:
@@ -1983,6 +2350,7 @@ void RichHtmlRenderer::collectBlockAnchors(const Data::RichBlock &block) {
 	case Kind::Photo:
 	case Kind::Video:
 	case Kind::Audio:
+	case Kind::File:
 	case Kind::Embed:
 	case Kind::Map:
 	case Kind::InputMap:
@@ -2016,6 +2384,11 @@ void RichHtmlRenderer::collectBlockAnchors(const Data::RichBlock &block) {
 		break;
 	case Kind::RelatedArticles:
 		collectTextAnchors(block.text);
+		break;
+	case Kind::ButtonRow:
+		for (const auto &button : block.buttons) {
+			collectTextAnchors(button);
+		}
 		break;
 	case Kind::Unsupported:
 	case Kind::Divider:
@@ -2097,6 +2470,64 @@ QByteArray RichHtmlRenderer::renderTextLink(
 	_linkActive = true;
 	const auto guard = gsl::finally([&] { _linkActive = previous; });
 	result += renderTextChildren(text);
+	result += _context.popTag();
+	return result;
+}
+
+QByteArray RichHtmlRenderer::renderButton(
+		const Data::RichText &button,
+		bool inlineButton) {
+	using Type = Data::InlineButtonAction::Type;
+	Expects(button.type == Data::RichText::Type::Button);
+	Expects(button.children.size() == 1);
+	Expects(button.button != nullptr);
+	const auto &action = button.button->action;
+
+	auto attributes = RichButtonAttributes(
+		action,
+		button.button->style,
+		inlineButton);
+	auto tag = QByteArray("span");
+	const auto nested = _linkActive;
+	const auto url = (action.type == Type::Url)
+		? SafeMessageHref(action.url)
+		: std::optional<QByteArray>();
+	if (!nested && url) {
+		tag = "a";
+		attributes.emplace("href", *url);
+	} else if (!nested && action.type == Type::CopyText) {
+		tag = "button";
+		attributes.emplace("type", "button");
+		attributes.emplace(
+			"onclick",
+			"return ShowTextCopied(decodeURIComponent(this.dataset.copyText))");
+	}
+
+	auto result = _context.pushTag(tag, std::move(attributes));
+	const auto previous = _linkActive;
+	_linkActive = true;
+	const auto guard = gsl::finally([&] { _linkActive = previous; });
+	result += renderText(button.children.front());
+	result += _context.popTag();
+	return result;
+}
+
+QByteArray RichHtmlRenderer::renderButtonRow(
+		const Data::RichBlock &block) {
+	const auto alignment = Data::RichButtonAlignmentToString(
+		block.buttonAlignment);
+	auto attributes = RichBlockAttributes(
+		QByteArray("rich_button_row rich_button_align_") + alignment,
+		"button-row");
+	attributes.emplace("data-button-alignment", alignment);
+	auto result = _context.pushTag("div", std::move(attributes));
+	result += _context.pushTag("div", {
+		{ "class", "rich_button_group" },
+	});
+	for (const auto &button : block.buttons) {
+		result += renderButton(button, false);
+	}
+	result += _context.popTag();
 	result += _context.popTag();
 	return result;
 }
@@ -2372,6 +2803,8 @@ QByteArray RichHtmlRenderer::renderText(const Data::RichText &text) {
 		result += _context.popTag();
 		return result;
 	}
+	case Type::Button:
+		return renderButton(text, true);
 	}
 	Unexpected("Type in RichHtmlRenderer::renderText.");
 }
@@ -2619,6 +3052,9 @@ QByteArray RichHtmlRenderer::renderTable(const Data::RichBlock &block) {
 	if (block.striped) {
 		classes += " striped";
 	}
+	if (block.compact) {
+		classes += " compact";
+	}
 	result += _context.pushTag("table", {
 		{ "class", std::move(classes) },
 	});
@@ -2790,13 +3226,15 @@ QByteArray RichHtmlRenderer::renderBlock(const Data::RichBlock &block) {
 	case Kind::EmbedPost:
 		return renderEmbedPost(block);
 	case Kind::Collage:
-		return renderMediaGroup(block, "collage", true);
+		return renderCollage(block);
 	case Kind::Slideshow:
-		return renderMediaGroup(block, "slideshow", true);
+		return renderSlideshow(block);
 	case Kind::Channel:
 		return renderChannel(block);
 	case Kind::Audio:
 		return renderAudio(block);
+	case Kind::File:
+		return renderFile(block);
 	case Kind::Math: {
 		auto attributes = RichBlockAttributes("rich_math_display", "math");
 		attributes.emplace("dir", "ltr");
@@ -2816,6 +3254,8 @@ QByteArray RichHtmlRenderer::renderBlock(const Data::RichBlock &block) {
 		return renderMap(block, "map");
 	case Kind::InputMap:
 		return renderMap(block, "input-map");
+	case Kind::ButtonRow:
+		return renderButtonRow(block);
 	case Kind::Unknown:
 		return renderFallback("unknown", "Unknown rich content");
 	}
@@ -2972,6 +3412,8 @@ private:
 		const Data::Document *data,
 		const QString &basePath);
 	[[nodiscard]] QByteArray pushRichAudioMedia(
+		const Data::Document *data);
+	[[nodiscard]] QByteArray pushRichFileMedia(
 		const Data::Document *data);
 	[[nodiscard]] QByteArray pushRichReferenceMedia(
 		MediaData data,
@@ -3682,6 +4124,9 @@ auto HtmlWriter::Wrap::pushMessage(
 	}, [&](const ActionChatJoinedByRequest &data) {
 		return serviceFrom
 			+ " joined group by request";
+	}, [&](const ActionChatJoinedViaCommunity &data) {
+		return serviceFrom
+			+ " joined group via a community";
 	}, [&](const ActionWebViewDataSent &data) {
 		return "You have just successfully transferred data from the &laquo;"
 			+ SerializeString(data.text)
@@ -4082,6 +4527,9 @@ auto HtmlWriter::Wrap::pushMessage(
 			},
 			.audio = [this](const Data::Document *document) {
 				return pushRichAudioMedia(document);
+			},
+			.file = [this](const Data::Document *document) {
+				return pushRichFileMedia(document);
 			},
 			.generic = [this](const MediaData &data) {
 				return pushGenericMedia(data);
@@ -4610,6 +5058,12 @@ QByteArray HtmlWriter::Wrap::pushRichAudioMedia(
 	return pushGenericMedia(PrepareAudioMediaData(presentation));
 }
 
+QByteArray HtmlWriter::Wrap::pushRichFileMedia(
+		const Data::Document *data) {
+	const auto presentation = RichDocumentPresentation(data);
+	return pushGenericMedia(PrepareFileMediaData(presentation));
+}
+
 QByteArray HtmlWriter::Wrap::pushRichReferenceMedia(
 		MediaData data,
 		const Data::Photo *photo,
@@ -5026,11 +5480,7 @@ MediaData HtmlWriter::Wrap::prepareMediaData(
 		} else if (data.isAudioFile) {
 			result = PrepareAudioMediaData(data);
 		} else {
-			result.title = data.name.isEmpty()
-				? QByteArray("File")
-				: data.name;
-			result.status = FormatFileSize(data.file.size);
-			result.classes = "media_file";
+			result = PrepareFileMediaData(data);
 		}
 	}, [&](const SharedContact &data) {
 		result.title = data.info.firstName + ' ' + data.info.lastName;
