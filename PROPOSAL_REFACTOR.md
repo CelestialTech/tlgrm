@@ -9,6 +9,16 @@ cutover) are not started. What follows is the original argument, kept intact
 because the reasoning — including the two big proposals the minimalism gate
 rejected — is the useful part.
 
+**Requirements update (2026-09-01):** four late requirements — independent-product
+branch discipline (never push to upstream), the dual-path update system
+(Telegram + web), **lockstep versioning** of the client + TeleBox under one feed,
+and the agent surface (extend AGENTS.md + a minimal TLGRM.md skill) — are designed,
+Ponytail-gated and POSD-shaped, in
+[`docs/DESIGN_PRODUCT_UPDATE_AGENTS.md`](docs/DESIGN_PRODUCT_UPDATE_AGENTS.md). The
+verdict there is mostly *don't build* — three of the four already exist. The
+`upgrade-v7.1.3` port (7.0.9→7.1.3) is built and runtime-verified
+([`UPGRADE_7.0.9_7.1.3_PLAN.md`](UPGRADE_7.0.9_7.1.3_PLAN.md)).
+
 Grounded in the codebase as of 16 August 2026 (Tlgrm 7.0.9a) and the audit
 under [`docs/audit-2026-08-11/`](docs/audit-2026-08-11/). Where a claim comes
 from a measurement, the measurement is given. Where it comes from an incident,

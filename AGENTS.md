@@ -176,6 +176,35 @@ build, since a stable client refuses alpha entries outright.
 
 ---
 
+## Driving the product as an agent — the MCP surface
+
+What this fork *is*, to an operating agent: a Telegram client that exposes its
+capabilities as an **MCP tool surface — 352 tools** — over a local Unix socket,
+served by the in-process bridge (`tdesktop/.../mcp/mcp_bridge.cpp`). No HTTP, no
+cloud; the agent and the client share a machine.
+
+**Reach it (the same discovery `tools/publish_update.py` uses):**
+
+1. The running client writes its socket path to
+   `~/Library/Preferences/tlgrm/mcp_socket_path` (macOS; `$XDG_CONFIG_HOME/tlgrm/`
+   elsewhere), with the `auth_token` file **alongside** it. Read both. Never
+   assume `/tmp/tlgrm_mcp.sock` — that is an internal default, not the published
+   path.
+2. Connect the Unix socket, newline-delimited JSON-RPC:
+   `initialize` with `{"auth_token": "<token>"}` → `tools/list` → `tools/call`.
+3. The client must be **running and signed in** — most tools need a live MTProto
+   session.
+
+The governing rule is in Standing rules and it is load-bearing: **a tool reports
+what happened, never what it wishes had happened.** Trust a tool's result as the
+real server answer, and when a tool returns an error, that is the truth — do not
+route around it with a local guess.
+
+**After the TeleBox cutover** (P2/M6, `PROPOSAL_REFACTOR.md`) the aggregated
+endpoint moves to TeleBox, which takes over `mcp_socket_path` — **same protocol,
+same discovery**, so an agent written to the recipe above keeps working. The
+`tlgrm` skill (`~/.claude/skills/tlgrm/`) carries the copy-paste client.
+
 ## Layout
 
 | Path | What it is |
