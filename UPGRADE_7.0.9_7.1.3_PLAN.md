@@ -30,7 +30,8 @@ tags in the live `tdesktop` repo, not estimated.
 | New top-level subsystems | **none** (`Telegram/SourceFiles/` gained no new directory — unlike the prior port's +87k-line `iv/`) |
 | Qt toolchain | **unchanged** — pin identical at both tags in `Telegram/build/prepare/prepare.py` |
 | Submodule changes | **one, cosmetic** — `cmark-gfm` url `github/…` → `desktop-app/…` (mirror), no new modules |
-| Fork surface to re-apply | **79 non-`mcp/` edited files** + the additive `mcp/` tree; only **14 collide** with upstream changes |
+| Fork surface to re-apply | **79 non-`mcp/` edited files** + the additive `mcp/` tree; **14 both-touched**, of which a real 3-way merge shows only **3 textually conflict** |
+| Merge simulation (`git merge-tree`, in-memory) | **3 real conflicts** — `build/version`, `core/version.h`, `core/application.cpp`; the other **11 auto-merge textually** (semantic audit still required) |
 
 **Read:** the two risks that dominated the last port — the nine-minor **Qt 6.2→6.11**
 jump and a giant new subsystem — are **both absent here**. This is a
@@ -65,10 +66,20 @@ The only files both upstream (7.0.9→7.1.3) and the fork (7.0.9→HEAD) changed
 Everything else in the fork re-applies without reconciliation. Upstream churn is
 `+added/−deleted` at the two tags.
 
+**Measured, not assumed:** an in-memory 3-way merge of the fork against v7.1.3
+(`git merge-tree --write-tree HEAD v7.1.3`, base v7.0.9 — writes nothing) shows
+that **only 3 of these 14 textually conflict** — `build/version`,
+`core/version.h`, and `core/application.cpp`. The other **11 auto-merge**
+(marked ⋯ below). Caveat: a clean text-merge is **not** a correctness guarantee
+— git resolves non-overlapping hunks even when they are semantically
+incompatible, so the ⋯ files (above all `export_output_html.cpp`'s +463 rewrite
+and the export cluster) still need a **semantic** audit, just not manual
+conflict-marker surgery.
+
 | # | File | Upstream churn | Fork feature here | Action | Risk |
 |---|---|---|---|---|---|
-| 1 | `export/output/export_output_html.cpp` | **+463 / −13** | gradual-export HTML writer | Re-graft the fork's HTML hooks onto a heavily-reworked file, hunk by hunk. **The one hard reconciliation.** | **High** |
-| 2 | `core/application.cpp` | +108 / −5 | MCP bridge start (`:492`) + host hooks | Re-apply the ~4 host hooks onto new init flow; verify `_mcpBridge->start()` still lands after session init. | Med-High |
+| 1 ⋯ | `export/output/export_output_html.cpp` | **+463 / −13** | gradual-export HTML writer | **Auto-merges** (hooks and upstream's rewrite touch different regions). No conflict surgery — but the +463 rewrite demands a **semantic render-diff** to confirm the gradual-export hooks still fire. | Med (semantic) |
+| 2 ⚠ | `core/application.cpp` | +108 / −5 | MCP bridge start (`:492`) + host hooks | **Real conflict.** Re-apply the host hooks onto new init flow by hand; verify `_mcpBridge->start()` still lands after session init. | **High** |
 | 3 | `window/main_window.cpp` | +85 / −10 | fork window hooks | Re-apply; inspect for moved construction. | Medium |
 | 4 | `export/data/export_data_types.h` | +81 / −1 | fork export types | Mostly additive upstream → likely append-compatible; check field order (TDF layout, risk #10 prior). | Medium |
 | 5 | `Telegram/CMakeLists.txt` | +79 / −1 | `mcp/` sources + `Qt::Sql` | Mechanical: re-add the guarded `mcp/` source list + Sql find_package. | Low (mechanical) |
@@ -79,8 +90,10 @@ Everything else in the fork re-applies without reconciliation. Upstream churn is
 | 10 | `export/export_api_wrap.cpp` | **+9 / −3** | **the gradual-export engine** | Small upstream drift — the fork's core export logic largely survives. **Was High(#5) last port; now Low.** Still re-audit the resume path. | Low |
 | 11 | `export/view/export_view_panel_controller.cpp` | +3 / 0 | export panel | Trivial re-apply. | Low |
 | 12 | `storage/localstorage.cpp` | +1 / −1 | fork storage hook | One-line re-apply. | Low |
-| 13 | `Telegram/build/version` | +5 / −5 | version stamp | **Re-stamp — see risk #1.** | Low value / **Critical if wrong** |
-| 14 | `core/version.h` | +2 / −2 | version constants | Keep in lockstep with #13. | Low value / **Critical if wrong** |
+| 13 ⚠ | `Telegram/build/version` | +5 / −5 | version stamp | **Real conflict — and that's good:** it forces the AppVersion decision instead of silently taking one side. Resolve per risk #1. | Trivial edit / **Critical if wrong** |
+| 14 ⚠ | `core/version.h` | +2 / −2 | version constants | **Real conflict.** Keep in lockstep with #13. | Trivial edit / **Critical if wrong** |
+
+*(⚠ = one of the 3 real textual conflicts; ⋯ = auto-merges, semantic audit only. Rows without a mark auto-merge and are low-risk.)*
 
 The prior port's companion audit `docs/audit-2026-08-11/fork-divergence.md`
 covers the same divergence at the 7.0.6 base; the table above supersedes it for
@@ -106,8 +119,8 @@ Near-empty — the good news of a same-toolchain minor bump.
 | # | Risk | Severity | Mitigation |
 |---|---|---|---|
 | 1 | **AppVersion / tdata version gate** | **Critical — silent session loss** | The fork carries an inflated `AppVersion 700000901` (7.0.9a); upstream v7.1.3 is `7001003`. The tdata gate rejects any data file whose embedded version exceeds the running `AppVersion` and **regenerates the local key, destroying the session**. Re-stamp `build/version` + `core/version.h` in the **fork's** numbering (increment past 700000901), **never** adopt upstream's smaller 7001003. Migration is one-way — verify by loading a real `tdata` after the first build. |
-| 2 | **`export_output_html.cpp` re-graft** | High | Upstream reworked +463/−13. A verbatim replay of the fork's HTML hooks will miss moved anchors and silently drop gradual-export formatting. Reconcile hunk-by-hunk against the fork's `6b0fc1be..HEAD` intent, then render one real export and diff the HTML. |
-| 3 | **MCP bridge host-hook drift** (`application.cpp/.h`) | Med-High | +108 lines of new init flow around where `_mcpBridge->start("/tmp/tlgrm_mcp.sock")` is called. Re-verify the bridge starts *after* session availability; smoke-test `tools/list` responds. |
+| 2 | **`application.cpp` host-hook conflict** (the one real code conflict) | High | The merge sim's only substantive textual conflict. +108 lines of new init flow around `_mcpBridge->start("/tmp/tlgrm_mcp.sock")`. Resolve by hand; re-verify the bridge starts *after* session availability; smoke-test `tools/list` responds. |
+| 3 | **`export_output_html.cpp` semantic drift** | Med (not a conflict) | Upstream reworked +463/−13 but it **auto-merges** — which is the trap: git splices the fork's HTML hooks and upstream's rewrite without either failing. Do **not** trust the clean merge. Render one real gradual export and diff the HTML against a 7.0.9 export to confirm the hooks still fire. |
 | 4 | Bundle-name ↔ updater-path coupling | High — silent broken updates | Unchanged mechanism from prior #3: `output_name` (CMake), `updater_osx.m`, and `update_checker.cpp`'s `tupdates/temp/Tlgrm.app/…` must agree. Re-verify after branding re-stamp. |
 | 5 | Update feed/endpoint naming | High | `AutoUpdateVersion()` → channel `tlgrmfeed4` / path `current4`. A mismatch is a permanent silent no-check. Both HTTP (ironforge) and MTProto (@updates71grm) feeds must be re-pointed. |
 | 6 | Export resume assertions | Medium (down from High) | `export_api_wrap.cpp` barely moved (+9/−3), but re-audit the `Expects` in the file-load path against the fork's pacing-timer gap — a new assert can fire across the jitter window. |
