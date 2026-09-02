@@ -178,6 +178,12 @@ private:
 	QJsonObject toolConfigureEphemeralCapture(const QJsonObject &args);
 	QJsonObject toolGetEphemeralStats(const QJsonObject &args);
 	QJsonObject toolGetEphemeralMessages(const QJsonObject &args);
+	QJsonObject toolGetWelcomeMessages(const QJsonObject &args);
+	QJsonObject toolDeleteWelcomeMessage(const QJsonObject &args);
+	QJsonObject toolDeleteAllWelcomeMessages(const QJsonObject &args);
+	QJsonObject toolSetAdminRights(const QJsonObject &args);
+	QJsonObject toolGetWebPage(const QJsonObject &args);
+	QJsonObject toolGetChannelFull(const QJsonObject &args);
 	QJsonObject toolSearchArchive(const QJsonObject &args);
 	QJsonObject toolPurgeArchive(const QJsonObject &args);
 

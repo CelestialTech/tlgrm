@@ -1402,6 +1402,12 @@ void Server::initializeToolHandlers() {
 	// CORE TOOLS
 	_toolHandlers["list_chats"] = [this](const QJsonObject &args) { return toolListChats(args); };
 	_toolHandlers["get_chat_info"] = [this](const QJsonObject &args) { return toolGetChatInfo(args); };
+	_toolHandlers["get_welcome_messages"] = [this](const QJsonObject &args) { return toolGetWelcomeMessages(args); };
+	_toolHandlers["delete_welcome_message"] = [this](const QJsonObject &args) { return toolDeleteWelcomeMessage(args); };
+	_toolHandlers["delete_all_welcome_messages"] = [this](const QJsonObject &args) { return toolDeleteAllWelcomeMessages(args); };
+	_toolHandlers["set_admin_rights"] = [this](const QJsonObject &args) { return toolSetAdminRights(args); };
+	_toolHandlers["get_web_page"] = [this](const QJsonObject &args) { return toolGetWebPage(args); };
+	_toolHandlers["get_channel_full"] = [this](const QJsonObject &args) { return toolGetChannelFull(args); };
 	_toolHandlers["create_channel"] = [this](const QJsonObject &args) { return toolCreateChannel(args); };
 	_toolHandlers["delete_channel"] = [this](const QJsonObject &args) { return toolDeleteChannel(args); };
 	_toolHandlers["set_channel_username"] = [this](const QJsonObject &args) { return toolSetChannelUsername(args); };

@@ -261,6 +261,119 @@ void Server::registerTools() {
 			}
 		},
 		Tool{
+			"get_welcome_messages",
+			"Get a channel's or group's configured welcome messages "
+				"(layer 229, real MTProto: ephemeral.getWelcomeMessages).",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Channel/group chat ID"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id"}},
+			}
+		},
+		Tool{
+			"delete_welcome_message",
+			"Delete one welcome message by id from a channel/group "
+				"(layer 229: ephemeral.deleteWelcomeMessage).",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Channel/group chat ID"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Welcome message id to delete"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id"}},
+			}
+		},
+		Tool{
+			"delete_all_welcome_messages",
+			"Delete all welcome messages from a channel/group "
+				"(layer 229: ephemeral.deleteAllWelcomeMessages).",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Channel/group chat ID"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id"}},
+			}
+		},
+		Tool{
+			"set_admin_rights",
+			"Promote or demote a user's admin rights in a channel/supergroup "
+				"(layer 229: channels.editAdmin; supports manage_welcome_messages, "
+				"post/edit/delete_stories, manage_direct_messages).",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Channel/supergroup chat ID"}
+					}},
+					{"user_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "User to promote/demote"}
+					}},
+					{"rights", QJsonObject{
+						{"type", "object"},
+						{"description", "Admin rights, each a boolean: change_info, "
+							"post_messages, edit_messages, delete_messages, ban_users, "
+							"invite_users, pin_messages, add_admins, anonymous, manage_call, "
+							"manage_topics, post_stories, edit_stories, delete_stories, "
+							"manage_direct_messages, manage_welcome_messages"}
+					}},
+					{"rank", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional custom admin title/rank"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "user_id", "rights"}},
+			}
+		},
+		Tool{
+			"get_web_page",
+			"Fetch Telegram's web-page preview / Instant-View metadata for a URL "
+				"(layer 229: messages.getWebPage). Returns title, site_name, "
+				"description, author and whether an Instant-View page exists.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"url", QJsonObject{
+						{"type", "string"},
+						{"description", "URL to resolve a web-page preview for"}
+					}}
+				}},
+				{"required", QJsonArray{"url"}},
+			}
+		},
+		Tool{
+			"get_channel_full",
+			"Fetch a channel/supergroup's full server-side info "
+				"(layer 229: channels.getFullChannel). Surfaces has_welcome_messages, "
+				"paid_messages_available, stargifts_available/count, send_paid_messages_stars.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Channel/supergroup chat ID"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id"}},
+			}
+		},
+		Tool{
 			"search_archive",
 			"Search archived messages (faster than live search)",
 			QJsonObject{

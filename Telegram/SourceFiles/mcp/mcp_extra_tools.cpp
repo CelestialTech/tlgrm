@@ -829,4 +829,293 @@ void Server::processTopicMessages(
 	}
 }
 
+// ---------- get_welcome_messages (layer 229: ephemeral.getWelcomeMessages) ----------
+// Honest MTProto read: blocks on the async reply and returns the real
+// ephemeral.WelcomeMessages, never a "submitted" placeholder.
+QJsonObject Server::toolGetWelcomeMessages(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "No active session";
+		return error;
+	}
+	const auto peer = resolvePeer(args.value("chat_id").toVariant().toLongLong());
+	if (!peer) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Peer not found";
+		return error;
+	}
+	QJsonObject result;
+	QEventLoop loop;
+	_session->api().request(MTPephemeral_GetWelcomeMessages(
+		peer->input(),
+		MTP_long(0) // hash = 0 → always return the full list
+	)).done([&](const MTPephemeral_WelcomeMessages &response) {
+		response.match([&](const MTPDephemeral_welcomeMessages &data) {
+			QJsonArray msgs;
+			for (const auto &message : data.vmessages().v) {
+				const auto &md = message.data();
+				QJsonObject o;
+				o["id"] = md.vid().v;
+				o["message"] = qs(md.vmessage());
+				o["date"] = qint64(md.vdate().v);
+				msgs.append(o);
+			}
+			result["success"] = true;
+			result["count"] = msgs.size();
+			result["welcome_messages"] = msgs;
+		}, [&](const MTPDephemeral_welcomeMessagesNotModified &) {
+			result["success"] = true;
+			result["not_modified"] = true;
+			result["welcome_messages"] = QJsonArray();
+		});
+		loop.quit();
+	}).fail([&](const MTP::Error &error) {
+		result["success"] = false;
+		result["error"] = error.type();
+		loop.quit();
+	}).send();
+	QTimer::singleShot(15000, &loop, &QEventLoop::quit);
+	loop.exec();
+	return result;
+}
+
+// ---------- delete_welcome_message (layer 229: ephemeral.deleteWelcomeMessage) ----------
+QJsonObject Server::toolDeleteWelcomeMessage(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "No active session";
+		return error;
+	}
+	const auto peer = resolvePeer(args.value("chat_id").toVariant().toLongLong());
+	if (!peer) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Peer not found";
+		return error;
+	}
+	const int id = args.value("message_id").toInt();
+	QJsonObject result;
+	QEventLoop loop;
+	_session->api().request(MTPephemeral_DeleteWelcomeMessage(
+		peer->input(),
+		MTP_int(id)
+	)).done([&](const MTPBool &response) {
+		result["success"] = mtpIsTrue(response);
+		loop.quit();
+	}).fail([&](const MTP::Error &error) {
+		result["success"] = false;
+		result["error"] = error.type();
+		loop.quit();
+	}).send();
+	QTimer::singleShot(15000, &loop, &QEventLoop::quit);
+	loop.exec();
+	return result;
+}
+
+// ---------- delete_all_welcome_messages (layer 229) ----------
+QJsonObject Server::toolDeleteAllWelcomeMessages(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "No active session";
+		return error;
+	}
+	const auto peer = resolvePeer(args.value("chat_id").toVariant().toLongLong());
+	if (!peer) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Peer not found";
+		return error;
+	}
+	QJsonObject result;
+	QEventLoop loop;
+	_session->api().request(MTPephemeral_DeleteAllWelcomeMessages(
+		peer->input()
+	)).done([&](const MTPBool &response) {
+		result["success"] = mtpIsTrue(response);
+		loop.quit();
+	}).fail([&](const MTP::Error &error) {
+		result["success"] = false;
+		result["error"] = error.type();
+		loop.quit();
+	}).send();
+	QTimer::singleShot(15000, &loop, &QEventLoop::quit);
+	loop.exec();
+	return result;
+}
+
+// ---------- set_admin_rights (layer 229: channels.editAdmin, incl. manage_welcome_messages) ----------
+QJsonObject Server::toolSetAdminRights(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "No active session";
+		return error;
+	}
+	const auto peer = resolvePeer(args.value("chat_id").toVariant().toLongLong());
+	const auto channel = peer ? peer->asChannel() : nullptr;
+	if (!channel) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Channel/supergroup not found (channels.editAdmin needs a channel)";
+		return error;
+	}
+	const auto target = resolvePeer(args.value("user_id").toVariant().toLongLong());
+	const auto user = target ? target->asUser() : nullptr;
+	if (!user) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "User not found";
+		return error;
+	}
+	const auto rights = args.value("rights").toObject();
+	using Flag = MTPDchatAdminRights::Flag;
+	auto flags = MTPDchatAdminRights::Flags(0);
+	const auto set = [&](const char *key, Flag f) {
+		if (rights.value(QString::fromLatin1(key)).toBool()) {
+			flags |= f;
+		}
+	};
+	set("change_info", Flag::f_change_info);
+	set("post_messages", Flag::f_post_messages);
+	set("edit_messages", Flag::f_edit_messages);
+	set("delete_messages", Flag::f_delete_messages);
+	set("ban_users", Flag::f_ban_users);
+	set("invite_users", Flag::f_invite_users);
+	set("pin_messages", Flag::f_pin_messages);
+	set("add_admins", Flag::f_add_admins);
+	set("anonymous", Flag::f_anonymous);
+	set("manage_call", Flag::f_manage_call);
+	set("other", Flag::f_other);
+	set("manage_topics", Flag::f_manage_topics);
+	set("post_stories", Flag::f_post_stories);
+	set("edit_stories", Flag::f_edit_stories);
+	set("delete_stories", Flag::f_delete_stories);
+	set("manage_direct_messages", Flag::f_manage_direct_messages);
+	set("manage_welcome_messages", Flag::f_manage_welcome_messages);
+	const auto rank = args.value("rank").toString();
+	QJsonObject result;
+	QEventLoop loop;
+	auto methodFlags = MTPchannels_EditAdmin::Flags(0);
+	if (!rank.isEmpty()) {
+		methodFlags |= MTPchannels_EditAdmin::Flag::f_rank;
+	}
+	_session->api().request(MTPchannels_EditAdmin(
+		MTP_flags(methodFlags),
+		channel->inputChannel(),
+		user->inputUser(),
+		MTP_chatAdminRights(MTP_flags(flags)),
+		MTP_string(rank)
+	)).done([&](const MTPUpdates &) {
+		// ponytail: report the server's acceptance; the returned Updates reach the
+		// client through the normal update stream, so we do not re-apply them here.
+		result["success"] = true;
+		loop.quit();
+	}).fail([&](const MTP::Error &error) {
+		result["success"] = false;
+		result["error"] = error.type();
+		loop.quit();
+	}).send();
+	QTimer::singleShot(15000, &loop, &QEventLoop::quit);
+	loop.exec();
+	return result;
+}
+
+// ---------- get_web_page (layer 229 IV: messages.getWebPage) ----------
+QJsonObject Server::toolGetWebPage(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "No active session";
+		return error;
+	}
+	const auto url = args.value("url").toString();
+	if (url.isEmpty()) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "url is required";
+		return error;
+	}
+	QJsonObject result;
+	QEventLoop loop;
+	_session->api().request(MTPmessages_GetWebPage(
+		MTP_string(url),
+		MTP_int(0)
+	)).done([&](const MTPmessages_WebPage &response) {
+		response.data().vwebpage().match([&](const MTPDwebPage &data) {
+			result["success"] = true;
+			result["id"] = qint64(data.vid().v);
+			result["url"] = qs(data.vurl());
+			result["display_url"] = qs(data.vdisplay_url());
+			result["type"] = qs(data.vtype().value_or_empty());
+			result["site_name"] = qs(data.vsite_name().value_or_empty());
+			result["title"] = qs(data.vtitle().value_or_empty());
+			result["description"] = qs(data.vdescription().value_or_empty());
+			result["author"] = qs(data.vauthor().value_or_empty());
+			result["has_instant_view"] = data.vcached_page() ? true : false;
+		}, [&](const auto &) {
+			result["success"] = true;
+			result["has_webpage"] = false;
+		});
+		loop.quit();
+	}).fail([&](const MTP::Error &error) {
+		result["success"] = false;
+		result["error"] = error.type();
+		loop.quit();
+	}).send();
+	QTimer::singleShot(15000, &loop, &QEventLoop::quit);
+	loop.exec();
+	return result;
+}
+
+// ---------- get_channel_full (layer 229: channels.getFullChannel, decodes has_welcome_messages) ----------
+QJsonObject Server::toolGetChannelFull(const QJsonObject &args) {
+	if (!_session) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "No active session";
+		return error;
+	}
+	const auto peer = resolvePeer(args.value("chat_id").toVariant().toLongLong());
+	const auto channel = peer ? peer->asChannel() : nullptr;
+	if (!channel) {
+		QJsonObject error;
+		error["success"] = false;
+		error["error"] = "Channel/supergroup not found (getFullChannel needs a channel)";
+		return error;
+	}
+	QJsonObject result;
+	QEventLoop loop;
+	_session->api().request(MTPchannels_GetFullChannel(
+		channel->inputChannel()
+	)).done([&](const MTPmessages_ChatFull &response) {
+		response.data().vfull_chat().match([&](const MTPDchannelFull &data) {
+			result["success"] = true;
+			result["id"] = qint64(data.vid().v);
+			result["about"] = qs(data.vabout());
+			result["has_welcome_messages"] = data.is_has_welcome_messages();
+			result["paid_messages_available"] = data.is_paid_messages_available();
+			result["stargifts_available"] = data.is_stargifts_available();
+			result["stargifts_count"] = data.vstargifts_count().value_or_empty();
+			result["send_paid_messages_stars"] = qint64(data.vsend_paid_messages_stars().value_or_empty());
+			result["participants_count"] = data.vparticipants_count().value_or_empty();
+		}, [&](const auto &) {
+			// chatFull (basic group) or communityFull (layer 229) — channel-only flags omitted.
+			result["success"] = true;
+			result["note"] = "not a channel (basic group or community); channel-only flags omitted";
+		});
+		loop.quit();
+	}).fail([&](const MTP::Error &error) {
+		result["success"] = false;
+		result["error"] = error.type();
+		loop.quit();
+	}).send();
+	QTimer::singleShot(15000, &loop, &QEventLoop::quit);
+	loop.exec();
+	return result;
+}
+
 } // namespace MCP
