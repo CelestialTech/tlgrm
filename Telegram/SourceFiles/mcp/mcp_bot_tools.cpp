@@ -597,6 +597,9 @@ QJsonObject Server::toolGetEphemeralStats(const QJsonObject &args) {
 		result["vanishing_count"] = stats.vanishingCount;
 		result["media_saved"] = stats.mediaSaved;
 		result["last_captured"] = stats.lastCaptured.toString(Qt::ISODate);
+		result["capture_self_destruct"] = _ephemeralArchiver->captureSelfDestruct();
+		result["capture_view_once"] = _ephemeralArchiver->captureViewOnce();
+		result["capture_vanishing"] = _ephemeralArchiver->captureVanishing();
 		result["success"] = true;
 		return result;
 	}

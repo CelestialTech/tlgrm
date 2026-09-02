@@ -9,6 +9,7 @@
 #include "mcp_server_includes.h"
 
 #include "export/export_resume_state.h"
+#include "data/data_changes.h" // Data::MessageUpdate — edit-retention wiring
 #include <rpl/rpl.h>
 
 namespace MCP {
@@ -682,6 +683,32 @@ void Server::initializeSessionComponents() {
 			_botManager->dispatchMessage(msg);
 		}, _session->lifetime());
 		fprintf(stderr, "[MCP] BotManager wired to session newItemAdded events\n");
+		fflush(stderr);
+	}
+
+	// Git-style retention: append an immutable version on every edit, and
+	// preserve a message's content at the moment it is deleted. itemRemoved()
+	// fires while the item is still readable, so the deleted text is captured.
+	// Tied to session->lifetime() so both subscriptions auto-cancel.
+	if (_archiver) {
+		_session->changes().messageUpdates(
+			Data::MessageUpdate::Flag::Edited
+		) | rpl::on_next([this](const Data::MessageUpdate &update) {
+			if (_archiver) {
+				_archiver->recordEdit(update.item);
+			}
+		}, _session->lifetime());
+
+		_session->data().itemRemoved(
+		) | rpl::on_next([this](not_null<const HistoryItem*> item) {
+			if (_archiver) {
+				_archiver->recordDeletion(
+					item->history()->peer->id.value,
+					item->id.bare,
+					item->originalText().text);
+			}
+		}, _session->lifetime());
+		fprintf(stderr, "[MCP] Archiver wired to edit/delete retention\n");
 		fflush(stderr);
 	}
 
@@ -1421,6 +1448,9 @@ void Server::initializeToolHandlers() {
 
 	// ARCHIVE TOOLS
 	_toolHandlers["archive_chat"] = [this](const QJsonObject &args) { return toolArchiveChat(args); };
+	_toolHandlers["get_message_history"] = [this](const QJsonObject &args) { return toolGetMessageHistory(args); };
+	_toolHandlers["get_retention_stats"] = [this](const QJsonObject &args) { return toolGetRetentionStats(args); };
+	_toolHandlers["list_message_history"] = [this](const QJsonObject &args) { return toolListMessageHistory(args); };
 	_toolHandlers["export_chat"] = [this](const QJsonObject &args) { return toolExportChat(args); };
 	_toolHandlers["get_export_status"] = [this](const QJsonObject &args) { return toolGetExportStatus(args); };
 	_toolHandlers["list_archived_chats"] = [this](const QJsonObject &args) { return toolListArchivedChats(args); };

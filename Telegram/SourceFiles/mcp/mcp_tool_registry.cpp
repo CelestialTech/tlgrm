@@ -470,6 +470,50 @@ void Server::registerTools() {
 			}
 		},
 		Tool{
+			"get_message_history",
+			"Get the git-style version history of a single message: every "
+				"version captured, oldest first (created → edited → deleted), "
+				"with the content at each point. Requires the archiver running.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID the message belongs to"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "The message's id within the chat"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id"}},
+			}
+		},
+		Tool{
+			"get_retention_stats",
+			"Aggregate retention counters: total versions kept, distinct "
+				"messages tracked, and edits / deletions preserved.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{}},
+			}
+		},
+		Tool{
+			"list_message_history",
+			"List messages that have a version chain, latest state first — a "
+				"browsable index into get_message_history.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"limit", QJsonObject{
+						{"type", "integer"},
+						{"default", 50},
+						{"description", "Maximum number of tracked messages to return."}
+					}}
+				}},
+			}
+		},
+		Tool{
 			"search_archive",
 			"Search archived messages (faster than live search)",
 			QJsonObject{

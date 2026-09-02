@@ -78,6 +78,10 @@ bool ChatArchiver::start(const QString &databasePath) {
 		return false;
 	}
 
+	// Git-style retention: create the version log now, even for archive DBs
+	// that already have `messages` (which short-circuits initializeDatabase()).
+	ensureRetentionSchema();
+
 	// Start periodic message checking (every 5 seconds)
 	_checkTimer->start(5000);
 
@@ -1174,19 +1178,218 @@ void ChatArchiver::onNewMessage(HistoryItem *message) {
 }
 
 void ChatArchiver::onMessageEdited(HistoryItem *message) {
-	if (!message || !_isRunning) return;
+	// The private slot name is kept; the real work is the git-style append,
+	// which used to be a destructive UPDATE that clobbered the prior text.
+	recordEdit(message);
+}
 
-	qint64 chatId = message->history()->peer->id.value;
-	qint64 messageId = message->id.bare;
-	QString newContent = message->originalText().text;
+bool ChatArchiver::ensureRetentionSchema() {
+	if (!_db.isOpen()) {
+		return false;
+	}
+	QSqlQuery q(_db);
+	const bool table = q.exec(R"(CREATE TABLE IF NOT EXISTS message_versions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		chat_id INTEGER NOT NULL,
+		message_id INTEGER NOT NULL,
+		version INTEGER NOT NULL,
+		kind TEXT NOT NULL,
+		content TEXT,
+		edit_date INTEGER,
+		captured_at INTEGER NOT NULL,
+		UNIQUE(chat_id, message_id, version)
+	))");
+	const bool index = q.exec(
+		"CREATE INDEX IF NOT EXISTS idx_versions_msg "
+		"ON message_versions(chat_id, message_id, version)");
+	if (!table || !index) {
+		qWarning() << "ensureRetentionSchema failed:" << q.lastError().text();
+	}
+	return table && index;
+}
 
-	QSqlQuery query(_db);
-	query.prepare("UPDATE messages SET content = ?, date = ? WHERE chat_id = ? AND message_id = ?");
-	query.addBindValue(newContent);
-	query.addBindValue(QDateTime::fromSecsSinceEpoch(message->date()).toString(Qt::ISODate));
-	query.addBindValue(chatId);
-	query.addBindValue(messageId);
-	query.exec();
+int ChatArchiver::recordVersion(
+		qint64 chatId,
+		qint64 messageId,
+		const QString &content,
+		qint64 editDate,
+		const QString &kind) {
+	if (!_isRunning) {
+		return 0;
+	}
+	QSqlQuery mx(_db);
+	mx.prepare("SELECT COALESCE(MAX(version), 0) FROM message_versions "
+		"WHERE chat_id = ? AND message_id = ?");
+	mx.addBindValue(chatId);
+	mx.addBindValue(messageId);
+	int version = 1;
+	if (mx.exec() && mx.next()) {
+		version = mx.value(0).toInt() + 1;
+	}
+	QSqlQuery q(_db);
+	q.prepare(R"(INSERT INTO message_versions
+		(chat_id, message_id, version, kind, content, edit_date, captured_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?))");
+	q.addBindValue(chatId);
+	q.addBindValue(messageId);
+	q.addBindValue(version);
+	q.addBindValue(kind);
+	q.addBindValue(content);
+	q.addBindValue(editDate);
+	q.addBindValue(QDateTime::currentSecsSinceEpoch());
+	if (!q.exec()) {
+		qWarning() << "recordVersion failed:" << q.lastError().text();
+		return 0;
+	}
+	return version;
+}
+
+void ChatArchiver::ensureBaseline(qint64 chatId, qint64 messageId) {
+	// Already have history for this message? Nothing to seed.
+	QSqlQuery c(_db);
+	c.prepare("SELECT COUNT(*) FROM message_versions "
+		"WHERE chat_id = ? AND message_id = ?");
+	c.addBindValue(chatId);
+	c.addBindValue(messageId);
+	if (c.exec() && c.next() && c.value(0).toInt() > 0) {
+		return;
+	}
+	// Seed a 'created' baseline from the current archived snapshot, if any, so
+	// the first change still leaves the pre-change text in the chain.
+	QSqlQuery m(_db);
+	m.prepare("SELECT content, edit_date FROM messages "
+		"WHERE chat_id = ? AND message_id = ?");
+	m.addBindValue(chatId);
+	m.addBindValue(messageId);
+	if (m.exec() && m.next()) {
+		recordVersion(chatId, messageId, m.value(0).toString(),
+			m.value(1).toLongLong(), "created");
+	}
+}
+
+void ChatArchiver::recordEdit(HistoryItem *message) {
+	if (!message || !_isRunning) {
+		return;
+	}
+	const qint64 chatId = message->history()->peer->id.value;
+	const qint64 messageId = message->id.bare;
+	const QString newContent = message->originalText().text;
+	const qint64 editDate = message->date();
+
+	ensureBaseline(chatId, messageId);
+	// If ensureBaseline couldn't seed an original (the message was never
+	// archived before its first change), the earliest text we can capture IS
+	// the baseline — label it 'created', not 'edited'.
+	QSqlQuery cnt(_db);
+	cnt.prepare("SELECT COUNT(*) FROM message_versions "
+		"WHERE chat_id = ? AND message_id = ?");
+	cnt.addBindValue(chatId);
+	cnt.addBindValue(messageId);
+	const bool haveHistory = cnt.exec() && cnt.next() && cnt.value(0).toInt() > 0;
+	recordVersion(chatId, messageId, newContent, editDate,
+		haveHistory ? "edited" : "created");
+
+	// Keep the `messages` table as the current snapshot (latest text).
+	QSqlQuery q(_db);
+	q.prepare("UPDATE messages SET content = ?, edit_date = ?, date = ? "
+		"WHERE chat_id = ? AND message_id = ?");
+	q.addBindValue(newContent);
+	q.addBindValue(editDate);
+	q.addBindValue(
+		QDateTime::fromSecsSinceEpoch(editDate).toString(Qt::ISODate));
+	q.addBindValue(chatId);
+	q.addBindValue(messageId);
+	q.exec();
+}
+
+void ChatArchiver::recordDeletion(
+		qint64 chatId,
+		qint64 messageId,
+		const QString &lastContent) {
+	if (!_isRunning) {
+		return;
+	}
+	ensureBaseline(chatId, messageId);
+	// A 'deleted' marker preserving the content captured at deletion time.
+	recordVersion(chatId, messageId, lastContent, 0, "deleted");
+}
+
+QJsonArray ChatArchiver::messageHistory(qint64 chatId, qint64 messageId) {
+	QJsonArray out;
+	if (!_isRunning) {
+		return out;
+	}
+	QSqlQuery q(_db);
+	q.prepare(R"(SELECT version, kind, content, edit_date, captured_at
+		FROM message_versions
+		WHERE chat_id = ? AND message_id = ?
+		ORDER BY version ASC)");
+	q.addBindValue(chatId);
+	q.addBindValue(messageId);
+	if (q.exec()) {
+		while (q.next()) {
+			QJsonObject v;
+			v["version"] = q.value(0).toInt();
+			v["kind"] = q.value(1).toString();
+			v["content"] = q.value(2).toString();
+			v["edit_date"] = q.value(3).toLongLong();
+			v["captured_at"] = q.value(4).toLongLong();
+			out.append(v);
+		}
+	}
+	return out;
+}
+
+QJsonObject ChatArchiver::retentionStats() {
+	QJsonObject o;
+	if (!_isRunning) {
+		o["available"] = false;
+		return o;
+	}
+	const auto one = [&](const char *sql) -> qint64 {
+		QSqlQuery x(_db);
+		return (x.exec(sql) && x.next()) ? x.value(0).toLongLong() : 0;
+	};
+	o["available"] = true;
+	o["total_versions"] = one("SELECT COUNT(*) FROM message_versions");
+	o["messages_tracked"] = one("SELECT COUNT(*) FROM "
+		"(SELECT 1 FROM message_versions GROUP BY chat_id, message_id)");
+	o["edits"] = one("SELECT COUNT(*) FROM message_versions WHERE kind='edited'");
+	o["deletions"] = one(
+		"SELECT COUNT(*) FROM message_versions WHERE kind='deleted'");
+	return o;
+}
+
+QJsonArray ChatArchiver::listTrackedMessages(int limit) {
+	QJsonArray out;
+	if (!_isRunning) {
+		return out;
+	}
+	QSqlQuery q(_db);
+	q.prepare(R"(
+		SELECT v.chat_id, v.message_id, cnt.n, v.kind, v.content, v.captured_at
+		FROM message_versions v
+		JOIN (SELECT chat_id, message_id, MAX(version) AS mv, COUNT(*) AS n
+		      FROM message_versions GROUP BY chat_id, message_id) cnt
+		  ON v.chat_id = cnt.chat_id
+		 AND v.message_id = cnt.message_id
+		 AND v.version = cnt.mv
+		ORDER BY v.captured_at DESC
+		LIMIT ?)");
+	q.addBindValue(limit);
+	if (q.exec()) {
+		while (q.next()) {
+			QJsonObject m;
+			m["chat_id"] = q.value(0).toLongLong();
+			m["message_id"] = q.value(1).toLongLong();
+			m["versions"] = q.value(2).toInt();
+			m["latest_kind"] = q.value(3).toString();
+			m["latest_content"] = q.value(4).toString();
+			m["last_at"] = q.value(5).toLongLong();
+			out.append(m);
+		}
+	}
+	return out;
 }
 
 void ChatArchiver::checkForNewMessages() {

@@ -55,6 +55,62 @@ QJsonObject Server::toolArchiveChat(const QJsonObject &args) {
 	return result;
 }
 
+// The git-style version chain of a single message. Every edit appended a
+// version and a deletion preserved the last content, so this returns the trail
+// the message itself no longer shows -- created, each edit, and the deletion.
+QJsonObject Server::toolGetMessageHistory(const QJsonObject &args) {
+	if (!_archiver) {
+		return toolError("Archiver not available");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto messageId = args["message_id"].toVariant().toLongLong();
+	if (chatId == 0 || messageId == 0) {
+		return toolError("chat_id and message_id are required and non-zero");
+	}
+	if (!_archiver->isRunning()) {
+		return toolError("Archiver is not running; start it to record and "
+			"read message history");
+	}
+	const auto versions = _archiver->messageHistory(chatId, messageId);
+	QJsonObject result;
+	result["success"] = true;
+	result["chat_id"] = chatId;
+	result["message_id"] = messageId;
+	result["count"] = versions.size();
+	result["versions"] = versions;
+	return result;
+}
+
+// Aggregate retention counters for the whole version store.
+QJsonObject Server::toolGetRetentionStats(const QJsonObject &args) {
+	Q_UNUSED(args);
+	if (!_archiver) {
+		return toolError("Archiver not available");
+	}
+	if (!_archiver->isRunning()) {
+		return toolError("Archiver is not running");
+	}
+	QJsonObject result = _archiver->retentionStats();
+	result["success"] = true;
+	return result;
+}
+
+// The messages that have a version chain, latest state first — a browsable
+// index into get_message_history.
+QJsonObject Server::toolListMessageHistory(const QJsonObject &args) {
+	if (!_archiver) {
+		return toolError("Archiver not available");
+	}
+	if (!_archiver->isRunning()) {
+		return toolError("Archiver is not running");
+	}
+	const auto limit = clampLimit(args.value("limit").toInt(50));
+	QJsonObject result;
+	result["success"] = true;
+	result["messages"] = _archiver->listTrackedMessages(limit);
+	return result;
+}
+
 QJsonObject Server::toolExportChat(const QJsonObject &args) {
 	// Opens the gradual export UI for the specified peer.
 	// Pre-sets resume_from_message_id in export settings if provided,

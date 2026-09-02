@@ -172,6 +172,9 @@ private:
 
 	// Archive tools (10 tools - includes ephemeral capture + export status)
 	QJsonObject toolArchiveChat(const QJsonObject &args);
+	QJsonObject toolGetMessageHistory(const QJsonObject &args);
+	QJsonObject toolGetRetentionStats(const QJsonObject &args);
+	QJsonObject toolListMessageHistory(const QJsonObject &args);
 	QJsonObject toolExportChat(const QJsonObject &args);
 	QJsonObject toolGetExportStatus(const QJsonObject &args);
 	QJsonObject toolListArchivedChats(const QJsonObject &args);

@@ -136,6 +136,29 @@ public:
 	// Database access
 	[[nodiscard]] QSqlDatabase database() const { return _db; }
 
+	// --- git-style message retention -------------------------------------
+	// Append an immutable version whenever a message changes, so an edit or a
+	// deletion leaves a trail the message itself no longer shows. Both are fed
+	// by the live session signals (Server::setSession) and no-op when the
+	// archiver is off. The `messages` table stays the current snapshot;
+	// message_versions is the immutable history.
+	void recordEdit(HistoryItem *message);
+	void recordDeletion(qint64 chatId, qint64 messageId, const QString &lastContent);
+
+	// The full version chain for a message, oldest first — each entry
+	// {version, kind: created|edited|deleted, content, edit_date, captured_at}.
+	// Empty if the message has no recorded history.
+	[[nodiscard]] QJsonArray messageHistory(qint64 chatId, qint64 messageId);
+
+	// Aggregate retention counts across the whole store {total_versions,
+	// messages_tracked, edits, deletions}.
+	[[nodiscard]] QJsonObject retentionStats();
+
+	// Recently-changed messages — the latest version of each, newest first —
+	// so a UI can browse what has history: {chat_id, message_id, versions,
+	// latest_kind, latest_content, last_at}.
+	[[nodiscard]] QJsonArray listTrackedMessages(int limit = 50);
+
 Q_SIGNALS:
 	void messageArchived(qint64 chatId, qint64 messageId);
 	void chatArchived(qint64 chatId, int messageCount);
@@ -152,6 +175,17 @@ private:
 	bool initializeDatabase();
 	bool executeSQLFile(const QString &filePath);
 	QSqlQuery prepareQuery(const QString &sql);
+
+	// Retention helpers. ensureRetentionSchema() creates message_versions
+	// idempotently (existing archive DBs short-circuit initializeDatabase()'s
+	// early-return, so this runs separately from start()). ensureBaseline()
+	// seeds a 'created' version from the current snapshot when a message has no
+	// history yet, so the first change still preserves the pre-change text.
+	// recordVersion() appends one row numbered after the current max.
+	bool ensureRetentionSchema();
+	void ensureBaseline(qint64 chatId, qint64 messageId);
+	int recordVersion(qint64 chatId, qint64 messageId, const QString &content,
+		qint64 editDate, const QString &kind);
 
 	// Message conversion
 	QJsonObject messageToJson(const QSqlQuery &query) const;
@@ -204,6 +238,11 @@ public:
 	// Configuration
 	void setAutoCapture(bool enabled) { _autoCapture = enabled; }
 	void setCaptureTypes(bool selfDestruct, bool viewOnce, bool vanishing);
+	// Current per-type capture switches (so a UI can read the real state, not
+	// just the counts).
+	[[nodiscard]] bool captureSelfDestruct() const { return _captureSelfDestruct; }
+	[[nodiscard]] bool captureViewOnce() const { return _captureViewOnce; }
+	[[nodiscard]] bool captureVanishing() const { return _captureVanishing; }
 
 	// Statistics
 	struct EphemeralStats {
