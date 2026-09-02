@@ -100,8 +100,29 @@ fn stat(k: &'static str, v: String, color: u32) -> Div {
         .flex()
         .flex_col()
         .gap_1()
+        .flex_shrink_0()
         .child(mono(INK3).text_xs().child(k))
         .child(mono(color).child(v))
+}
+
+// A stat whose value is a long path — truncates with an ellipsis so it never
+// pushes the host bar off the window edge.
+fn stat_path(k: &'static str, v: String) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .min_w_0()
+        .max_w(px(210.))
+        .child(mono(INK3).text_xs().child(k))
+        .child(
+            mono(INK2)
+                .text_xs()
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .text_ellipsis()
+                .child(v),
+        )
 }
 
 impl TeleBox {
@@ -109,15 +130,19 @@ impl TeleBox {
         let led = if active { LED } else { INK3 };
         let name_color = if active { INK } else { INK3 };
 
+        // Track 40x24, knob 20, even 2px inset all around; knob travels 16px.
         let knob_ml = if active { 18. } else { 2. };
         let toggle = div()
             .id(("toggle", i))
-            .w(px(38.))
-            .h(px(22.))
+            .flex()
+            .items_center()
+            .flex_shrink_0()
+            .w(px(40.))
+            .h(px(24.))
             .rounded_full()
             .bg(rgb(if active { LED } else { LINE }))
             .cursor_pointer()
-            .child(div().size(px(16.)).rounded_full().bg(rgb(0xFFFFFF)).ml(px(knob_ml)).mt(px(2.)))
+            .child(div().size(px(20.)).rounded_full().bg(rgb(0xFFFFFF)).ml(px(knob_ml)))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.state.toggle_plugin(i);
                 cx.notify();
@@ -146,6 +171,7 @@ impl TeleBox {
         div()
             .flex()
             .flex_1()
+            .min_w_0()
             .flex_col()
             .gap_2()
             .p_4()
@@ -321,8 +347,8 @@ impl Render for TeleBox {
             .child(stat("MCP requests", requests.to_string(), ACCENT))
             .child(stat("Upstream", up_label.into(), up_color))
             .child(stat("Clients", clients.to_string(), INK))
-            .child(stat("Endpoint", endpoint, INK2))
-            .child(stat("Bridge", bridge, INK2));
+            .child(stat_path("Endpoint", endpoint))
+            .child(stat_path("Bridge", bridge));
 
         let rail_item = |label: &'static str, v: PanelView, id: &'static str, cx: &mut Context<Self>| {
             let selected = view == v;
@@ -364,15 +390,17 @@ impl Render for TeleBox {
                     let active = plugin_active(i, running, &enabled);
                     cards.push(self.module_card(i, p, active, cx));
                 }
-                let mut rack = div().flex().flex_col().gap_3();
+                let mut rack = div().flex().flex_col().gap_3().w_full();
                 let mut it = cards.into_iter();
                 loop {
                     match (it.next(), it.next()) {
                         (Some(a), Some(b)) => {
-                            rack = rack.child(div().flex().gap_3().child(a).child(b));
+                            rack = rack.child(div().flex().gap_3().w_full().child(a).child(b));
                         }
                         (Some(a), None) => {
-                            rack = rack.child(div().flex().gap_3().child(a));
+                            // Odd last card: pad with a phantom half so it keeps column width.
+                            rack = rack
+                                .child(div().flex().gap_3().w_full().child(a).child(div().flex_1().min_w_0()));
                             break;
                         }
                         _ => break,
@@ -408,13 +436,20 @@ impl Render for TeleBox {
             .text_color(rgb(INK))
             .child(titlebar)
             .child(hostbar)
-            .child(div().flex().flex_1().child(rail).child(div().flex_1().p_5().child(content)))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(rail)
+                    .child(div().id("content-scroll").flex_1().min_w_0().overflow_y_scroll().p_5().child(content)),
+            )
     }
 }
 
 fn main() {
     application().run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(1080.), px(820.)), cx);
+        let bounds = Bounds::centered(None, size(px(1200.), px(860.)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
