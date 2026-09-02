@@ -1,5 +1,29 @@
 # Feature → MCP → Tlgrm API map — v7.0.9 → v7.1.3 (MTProto layer 228 → 229)
 
+## Progress (2026-09-02) — 6 tools shipped, 4 gaps closed
+
+Implemented against [`PLAN_CLOSE_MCP_GAPS.md`](PLAN_CLOSE_MCP_GAPS.md): each an
+**honest** MTProto tool (blocks on the async reply and reports the real server
+result, never a "submitted" placeholder), registered across the four declaration
+sites, compile-verified, and — for the reads — **live-verified against a real
+signed-in account**. Surface: 352 → **358 tools**.
+
+| Gap | Tool | TL call | Compile | Live |
+|---|---|---|---|---|
+| G1 | `get_welcome_messages` | `ephemeral.getWelcomeMessages` | ✅ | ✅ success + error |
+| G1 | `delete_welcome_message` | `ephemeral.deleteWelcomeMessage` | ✅ | mutating (gated) |
+| G1 | `delete_all_welcome_messages` | `ephemeral.deleteAllWelcomeMessages` | ✅ | mutating (gated) |
+| G2 | `set_admin_rights` | `channels.editAdmin` (full flag mapper) | ✅ | mutating (gated) |
+| G5 | `get_channel_full` | `channels.getFullChannel` (decodes `has_welcome_messages`) | ✅ | ✅ |
+| G10 | `get_web_page` | `messages.getWebPage` | ✅ | ✅ |
+
+Remaining GAPs: `send_welcome_message` (G1 — ambiguous semantics), G3 resale-buy
+(spends stars), G4 draft-streaming, G6 ephemeral callback, G7 ephemeral edit,
+G8 forward-flag, G9 reply-markup.
+
+---
+
+
 Grounded in the live tree, not the task brief. Every row cites a real TL constructor
 (`tdesktop/Telegram/SourceFiles/mtproto/scheme/api.tl`) and, for the MCP column, the
 352-tool roster in `tdesktop/Telegram/SourceFiles/mcp/mcp_tool_backing.h` plus the
