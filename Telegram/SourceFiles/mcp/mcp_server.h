@@ -166,6 +166,7 @@ private:
 	QJsonObject toolReadMessages(const QJsonObject &args);
 	QJsonObject toolSendMessage(const QJsonObject &args);
 	QJsonObject toolSendDocument(const QJsonObject &args);
+	QJsonObject toolSendRichMessage(const QJsonObject &args);
 	QJsonObject toolSearchMessages(const QJsonObject &args);
 	QJsonObject toolGetUserInfo(const QJsonObject &args);
 

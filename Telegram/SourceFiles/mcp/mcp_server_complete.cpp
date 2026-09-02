@@ -1415,6 +1415,7 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["read_messages"] = [this](const QJsonObject &args) { return toolReadMessages(args); };
 	_toolHandlers["send_message"] = [this](const QJsonObject &args) { return toolSendMessage(args); };
 	_toolHandlers["send_document"] = [this](const QJsonObject &args) { return toolSendDocument(args); };
+	_toolHandlers["send_rich_message"] = [this](const QJsonObject &args) { return toolSendRichMessage(args); };
 	_toolHandlers["search_messages"] = [this](const QJsonObject &args) { return toolSearchMessages(args); };
 	_toolHandlers["get_user_info"] = [this](const QJsonObject &args) { return toolGetUserInfo(args); };
 

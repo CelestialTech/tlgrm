@@ -5,8 +5,227 @@
 // https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mcp_server_includes.h"
+#include "ui/text/text_entity.h"
+#include "iv/iv_rich_page.h"
+#include "iv/iv_rich_message_serializer.h"
 
 namespace MCP {
+
+// ===== SEND FORMATTING CORE (docs/DESIGN_MCP_SEND.md) =====
+// A deep helper that hides all entity parsing/validation and MTProto option
+// construction behind two calls, so every send tool stays thin.
+namespace {
+
+[[nodiscard]] std::optional<::EntityType> EntityTypeFromString(const QString &s) {
+	const auto k = s.trimmed().toLower();
+	if (k == "bold") return ::EntityType::Bold;
+	if (k == "italic") return ::EntityType::Italic;
+	if (k == "underline") return ::EntityType::Underline;
+	if (k == "strikethrough" || k == "strike") return ::EntityType::StrikeOut;
+	if (k == "spoiler") return ::EntityType::Spoiler;
+	if (k == "code") return ::EntityType::Code;
+	if (k == "pre") return ::EntityType::Pre;
+	if (k == "blockquote") return ::EntityType::Blockquote;
+	if (k == "text_link" || k == "text_url") return ::EntityType::CustomUrl;
+	if (k == "url") return ::EntityType::Url;
+	if (k == "mention") return ::EntityType::Mention;
+	if (k == "hashtag") return ::EntityType::Hashtag;
+	if (k == "custom_emoji") return ::EntityType::CustomEmoji;
+	return std::nullopt;
+}
+
+// Compact Telegram-style markdown -> entities: ```pre```, **bold**, __underline__,
+// ~~strike~~, ||spoiler||, `code`, *italic* / _italic_, [text](url). Best-effort
+// convenience layered over the precise `entities` path.
+[[nodiscard]] TextWithEntities ParseMarkdown(const QString &src) {
+	struct Rule { QString open; ::EntityType type; };
+	static const auto rules = std::vector<Rule>{
+		{ "```", ::EntityType::Pre },
+		{ "**", ::EntityType::Bold },
+		{ "__", ::EntityType::Underline },
+		{ "~~", ::EntityType::StrikeOut },
+		{ "||", ::EntityType::Spoiler },
+		{ "`", ::EntityType::Code },
+		{ "*", ::EntityType::Italic },
+		{ "_", ::EntityType::Italic },
+	};
+	auto out = QString();
+	auto entities = EntitiesInText();
+	const int n = src.size();
+	int i = 0;
+	while (i < n) {
+		if (src[i] == '[') {
+			const int close = src.indexOf(']', i + 1);
+			if (close > i && close + 1 < n && src[close + 1] == '(') {
+				const int paren = src.indexOf(')', close + 2);
+				if (paren > close) {
+					const auto text = src.mid(i + 1, close - i - 1);
+					const auto url = src.mid(close + 2, paren - close - 2);
+					entities.push_back(EntityInText(
+						::EntityType::CustomUrl, out.size(), text.size(), url));
+					out += text;
+					i = paren + 1;
+					continue;
+				}
+			}
+		}
+		auto matched = false;
+		for (const auto &r : rules) {
+			if (src.mid(i, r.open.size()) == r.open) {
+				const int close = src.indexOf(r.open, i + r.open.size());
+				if (close > i) {
+					const auto inner = src.mid(
+						i + r.open.size(), close - i - r.open.size());
+					entities.push_back(EntityInText(
+						r.type, out.size(), inner.size()));
+					out += inner;
+					i = close + r.open.size();
+					matched = true;
+					break;
+				}
+			}
+		}
+		if (!matched) {
+			out += src[i];
+			++i;
+		}
+	}
+	return TextWithEntities{ out, entities };
+}
+
+// Resolve text + formatting into a validated TextWithEntities. A precise
+// `entities` array wins (full MTProto surface); else `parse_mode` markdown;
+// auto-links/mentions/hashtags are always detected. Out-of-range entities are
+// dropped (errors defined out of existence).
+[[nodiscard]] TextWithEntities ResolveFormatting(
+		const QString &text,
+		const QString &parseMode,
+		const QJsonArray &entities) {
+	if (!entities.isEmpty()) {
+		auto result = TextWithEntities{ text, EntitiesInText() };
+		for (const auto &v : entities) {
+			const auto o = v.toObject();
+			const auto type = EntityTypeFromString(o.value("type").toString());
+			if (!type) {
+				continue;
+			}
+			auto data = QString();
+			if (*type == ::EntityType::CustomUrl) {
+				data = o.value("url").toString();
+			} else if (*type == ::EntityType::Pre) {
+				data = o.value("language").toString();
+			} else if (*type == ::EntityType::CustomEmoji) {
+				data = QString::number(
+					o.value("custom_emoji_id").toVariant().toLongLong());
+			}
+			auto ent = EntityInText(
+				*type,
+				o.value("offset").toInt(),
+				o.value("length").toInt(),
+				data);
+			if (ent.validForText(text.size())) {
+				result.entities.push_back(ent);
+			}
+		}
+		return result;
+	}
+	const auto mode = parseMode.toLower();
+	auto result = (mode == "markdown" || mode == "md" || mode == "markdownv2")
+		? ParseMarkdown(text)
+		: TextWithEntities{ text, EntitiesInText() };
+	TextUtilities::ParseEntities(
+		result,
+		TextParseHashtags | TextParseMentions);
+	return result;
+}
+
+// Build the SendAction (reply target + options) from the caller's args.
+[[nodiscard]] Api::SendAction BuildSendAction(
+		not_null<History*> history,
+		PeerId peer,
+		qint64 replyToId,
+		bool silent,
+		TimeId scheduleDate) {
+	auto options = Api::SendOptions();
+	options.silent = silent;
+	if (scheduleDate > 0) {
+		options.scheduled = scheduleDate;
+	}
+	auto action = Api::SendAction(history, options);
+	if (replyToId > 0) {
+		action.replyTo.messageId = FullMsgId(peer, MsgId(replyToId));
+	}
+	return action;
+}
+
+// Build a RichPage from the caller's block list. Each block is one of the text
+// kinds the send path supports today (heading / paragraph / quote / code /
+// divider); its text carries full formatting through ResolveFormatting (a
+// block's own `entities` win, else the page-level parse_mode). Media / list /
+// table kinds require an already-uploaded object and are refused with the real
+// reason rather than faked (governing rule: report what happened). Returns
+// nullptr and sets `error` on the first unusable block, so the tool never
+// serializes a half-built page.
+[[nodiscard]] std::shared_ptr<Iv::RichPage> BuildRichPage(
+		const QJsonArray &blocks,
+		const QString &pageParseMode,
+		QString *error) {
+	auto page = std::make_shared<Iv::RichPage>();
+	page->blocks.reserve(blocks.size());
+	for (auto index = 0; index < blocks.size(); ++index) {
+		const auto o = blocks[index].toObject();
+		const auto type = o.value("type").toString().trimmed().toLower();
+		const auto text = o.value("text").toString();
+		const auto entities = o.value("entities").toArray();
+		const auto parseMode = o.contains("parse_mode")
+			? o.value("parse_mode").toString()
+			: pageParseMode;
+
+		auto block = Iv::RichPage::Block();
+		const auto applyText = [&](bool markdown) {
+			block.text.text = markdown
+				? ResolveFormatting(text, parseMode, entities)
+				: ResolveFormatting(text, QString(), entities);
+		};
+
+		if (type == "paragraph" || type == "text" || type.isEmpty()) {
+			block.kind = Iv::RichPage::BlockKind::Paragraph;
+			applyText(true);
+		} else if (type == "heading" || type == "header") {
+			block.kind = Iv::RichPage::BlockKind::Heading;
+			block.headingLevel = qBound(1, o.value("level").toInt(2), 6);
+			applyText(true);
+		} else if (type == "quote" || type == "blockquote") {
+			block.kind = Iv::RichPage::BlockKind::Quote;
+			block.pullquote = o.value("pullquote").toBool(false);
+			applyText(true);
+		} else if (type == "code" || type == "pre") {
+			block.kind = Iv::RichPage::BlockKind::Code;
+			block.language = o.value("language").toString();
+			applyText(false); // code is literal — never markdown-parsed
+		} else if (type == "divider" || type == "hr") {
+			block.kind = Iv::RichPage::BlockKind::Divider;
+		} else {
+			*error = QString("block %1: unsupported type '%2' — the send path "
+				"supports heading, paragraph, quote, code, divider (media, "
+				"list and table blocks require an uploaded object and are not "
+				"sendable here)").arg(index).arg(type);
+			return nullptr;
+		}
+
+		if (block.kind != Iv::RichPage::BlockKind::Divider
+			&& block.text.text.text.isEmpty()) {
+			*error = QString("block %1 (%2): text is required")
+				.arg(index).arg(type);
+			return nullptr;
+		}
+		page->blocks.push_back(std::move(block));
+	}
+	return page;
+}
+
+} // namespace
+
 // ===== CORE TOOL IMPLEMENTATIONS =====
 
 PeerData *Server::resolvePeer(qint64 chatId) const {
@@ -496,55 +715,60 @@ QJsonObject Server::toolReadMessages(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolSendMessage(const QJsonObject &args) {
-	qint64 chatId = args["chat_id"].toVariant().toLongLong();
-	QString text = args["text"].toString();
-
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto text = args["text"].toString();
 	if (chatId == 0) {
 		return toolError("chat_id is required and must be non-zero");
 	}
 	if (text.isEmpty()) {
 		return toolError("text is required and must not be empty");
 	}
-
-	QJsonObject result;
-
-	// Check if session is available
 	if (!_session) {
-		result["success"] = false;
-		result["error"] = "Session not available";
-		result["chat_id"] = chatId;
-		return result;
+		return toolError("Session not available");
 	}
-
-	// Convert chat_id to PeerId
-	PeerId peerId(chatId);
-
-	// Get the history for this peer
-	auto history = _session->data().history(peerId);
-	if (!history) {
-		result["success"] = false;
-		result["error"] = "Chat not found";
-		result["chat_id"] = chatId;
-		return result;
+	const auto peer = PeerId(chatId);
+	if (!resolvePeer(chatId)) {
+		return toolError("Chat not found");
 	}
+	const auto history = _session->data().history(peer);
 
-	// Create SendAction (history is a Data::Thread)
-	Api::SendAction action(history);
+	// Read every advertised arg here (the handler is a thin extractor; the deep
+	// helpers do the parsing/serialization — docs/DESIGN_MCP_SEND.md).
+	const auto entities = args.value("entities").toArray();
+	const auto parseMode = args.value("parse_mode").toString();
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	const auto scheduleDate = TimeId(
+		args.value("schedule_date").toVariant().toLongLong());
+	const auto linkPreview = args.value("link_preview");
+	const auto replyMarkup = args.value("reply_markup");
 
-	// Create MessageToSend
-	Api::MessageToSend message(action);
-	message.textWithTags = TextWithTags{ text };
-
-	// Send the message via API
+	const auto resolved = ResolveFormatting(text, parseMode, entities);
+	auto action = BuildSendAction(history, peer, replyToId, silent, scheduleDate);
+	auto message = Api::MessageToSend(action);
+	message.textWithTags = TextWithTags{
+		resolved.text,
+		TextUtilities::ConvertEntitiesToTextTags(resolved.entities),
+	};
+	if (linkPreview.isBool() && !linkPreview.toBool()) {
+		message.webPage.removed = true;
+	}
 	_session->api().sendMessage(std::move(message));
 
-	// Return success
+	QJsonObject result;
 	result["success"] = true;
 	result["chat_id"] = chatId;
-	result["text"] = text;
+	result["text"] = resolved.text;
+	result["entities_applied"] = int(resolved.entities.size());
+	// Inline keyboards (reply_markup) are a bot-only capability; a user session
+	// cannot attach one. Report honestly rather than silently dropping it.
+	if (!replyMarkup.isNull() && !replyMarkup.isUndefined()) {
+		result["reply_markup_ignored"]
+			= "inline keyboards require a bot account; not sent from a user session";
+	}
 	result["status"] = "Message queued for sending";
-
-	qInfo() << "MCP: Queued message send to chat" << chatId;
+	qInfo() << "MCP: Queued formatted message to chat" << chatId
+		<< "with" << resolved.entities.size() << "entities";
 	return result;
 }
 
@@ -597,15 +821,27 @@ QJsonObject Server::toolSendDocument(const QJsonObject &args) {
 	if (list.files.empty()) {
 		return toolError("File prepared to an empty list: " + path);
 	}
+	// Read every advertised arg (thin handler; the deep helpers do the work).
+	const auto entities = args.value("entities").toArray();
+	const auto parseMode = args.value("parse_mode").toString();
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	const auto scheduleDate = TimeId(
+		args.value("schedule_date").toVariant().toLongLong());
 	if (!caption.isEmpty()) {
-		list.files.back().caption.text = caption;
+		// Full caption formatting (entities / parse_mode) via the deep send core.
+		const auto resolved = ResolveFormatting(caption, parseMode, entities);
+		list.files.back().caption = TextWithTags{
+			resolved.text,
+			TextUtilities::ConvertEntitiesToTextTags(resolved.entities),
+		};
 	}
 
 	_session->api().sendFiles(
 		std::move(list),
 		SendMediaType::File,
 		nullptr, // not an album
-		Api::SendAction(history));
+		BuildSendAction(history, PeerId(chatId), replyToId, silent, scheduleDate));
 
 	QJsonObject result;
 	result["success"] = true;
@@ -623,6 +859,70 @@ QJsonObject Server::toolSendDocument(const QJsonObject &args) {
 
 	qInfo() << "MCP: Queued document" << info.fileName()
 		<< "(" << info.size() << "bytes ) to chat" << chatId;
+	return result;
+}
+
+// Send a structured rich-article message (Instant-View-style blocks) to a chat
+// over the client's own rich-compose path: build a RichPage from the caller's
+// blocks (BuildRichPage), serialize it to an MTPInputRichMessage exactly as the
+// editor does on submit (SerializeInputRichMessage, FinalSubmit), then hand it
+// to ApiWrap::sendRichMessage — which creates the local item and performs the
+// messages.sendMessage(f_rich_message) call. The caller supplies plain block
+// JSON and never sees RichPage, block normalization, or MTProto serialization.
+// Async like every send path: success is "queued", not delivered.
+QJsonObject Server::toolSendRichMessage(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto blocks = args["blocks"].toArray();
+	if (chatId == 0) {
+		return toolError("chat_id is required and must be non-zero");
+	}
+	if (blocks.isEmpty()) {
+		return toolError("blocks is required and must be a non-empty array");
+	}
+	if (!_session) {
+		return toolError("Session not available");
+	}
+	const auto peer = PeerId(chatId);
+	if (!resolvePeer(chatId)) {
+		return toolError("Chat not found");
+	}
+	const auto history = _session->data().history(peer);
+
+	const auto parseMode = args.value("parse_mode").toString();
+	const auto replyToId = args.value("reply_to_message_id")
+		.toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	const auto scheduleDate = TimeId(
+		args.value("schedule_date").toVariant().toLongLong());
+
+	auto error = QString();
+	auto page = BuildRichPage(blocks, parseMode, &error);
+	if (!page) {
+		return toolError(error);
+	}
+	auto serialized = Iv::SerializeInputRichMessage(
+		_session,
+		*page,
+		Iv::SerializeInputRichMessageMode::FinalSubmit);
+	using Status = Iv::SerializeInputRichMessageStatus;
+	if (serialized.status == Status::EmptyContent) {
+		return toolError(
+			"the blocks serialized to empty content — nothing to send");
+	} else if (serialized.status != Status::Success || !serialized.value) {
+		return toolError(
+			"could not serialize the rich message (a block was rejected)");
+	}
+	auto action = BuildSendAction(
+		history, peer, replyToId, silent, scheduleDate);
+	_session->api().sendRichMessage(page, *serialized.value, std::move(action));
+
+	QJsonObject result;
+	result["success"] = true;
+	result["chat_id"] = chatId;
+	result["blocks_count"] = int(page->blocks.size());
+	result["status"] = "Rich message queued for sending";
+	qInfo() << "MCP: Queued rich message with" << page->blocks.size()
+		<< "blocks to chat" << chatId;
 	return result;
 }
 

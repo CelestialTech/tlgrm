@@ -58,7 +58,10 @@ void Server::registerTools() {
 		},
 		Tool{
 			"send_message",
-			"Send a message to a chat",
+			"Send a message with full formatting: markdown (parse_mode) or precise "
+				"entities (bold/italic/underline/strike/spoiler/code/pre/blockquote/"
+				"links/mentions/custom-emoji), plus reply, silent, scheduling and "
+				"link-preview control.",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
@@ -68,7 +71,35 @@ void Server::registerTools() {
 					}},
 					{"text", QJsonObject{
 						{"type", "string"},
-						{"description", "Message text"}
+						{"description", "Message text (plain, or the source parsed by parse_mode)"}
+					}},
+					{"parse_mode", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional 'markdown': **bold** __underline__ *italic* `code` ```pre``` ~~strike~~ ||spoiler|| [text](url). Ignored when 'entities' is given."}
+					}},
+					{"entities", QJsonObject{
+						{"type", "array"},
+						{"description", "Optional precise formatting (wins over parse_mode): [{type, offset, length, url?, language?, custom_emoji_id?}]; type in bold|italic|underline|strikethrough|spoiler|code|pre|blockquote|text_link|url|mention|hashtag|custom_emoji."}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}},
+					{"schedule_date", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: unix timestamp to send the message later"}
+					}},
+					{"link_preview", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: false suppresses the web-page link preview"}
+					}},
+					{"reply_markup", QJsonObject{
+						{"type", "object"},
+						{"description", "Accepted but NOT sent: inline keyboards require a bot account; reported as ignored on a user session."}
 					}}
 				}},
 				{"required", QJsonArray{"chat_id", "text"}},
@@ -92,10 +123,75 @@ void Server::registerTools() {
 					}},
 					{"caption", QJsonObject{
 						{"type", "string"},
-						{"description", "Optional caption for the document"}
+						{"description", "Optional caption (plain, or the source parsed by parse_mode)"}
+					}},
+					{"parse_mode", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional 'markdown' for the caption; ignored when 'entities' is given."}
+					}},
+					{"entities", QJsonObject{
+						{"type", "array"},
+						{"description", "Optional precise caption formatting (wins over parse_mode): [{type, offset, length, url?, language?, custom_emoji_id?}]."}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}},
+					{"schedule_date", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: unix timestamp to send the document later"}
 					}}
 				}},
 				{"required", QJsonArray{"chat_id", "file_path"}},
+			}
+		},
+		Tool{
+			"send_rich_message",
+			"Send a structured rich-article message (Instant-View-style "
+				"blocks) to a chat, built and serialized through the client's "
+				"own rich-compose path. Async: success means queued.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID"}
+					}},
+					{"blocks", QJsonObject{
+						{"type", "array"},
+						{"description", "Ordered article blocks. Each is an "
+							"object {type, ...}: type 'heading' (with level "
+							"1-6), 'paragraph', 'quote' (with pullquote bool), "
+							"'code' (with language), or 'divider'. All except "
+							"divider need 'text'; each may carry its own "
+							"'entities' or 'parse_mode' (overriding the "
+							"top-level parse_mode). Media, list and table "
+							"blocks are not sendable here."}
+					}},
+					{"parse_mode", QJsonObject{
+						{"type", "string"},
+						{"description", "Default formatting for block text "
+							"('markdown'); a block's own entities/parse_mode "
+							"override it. Code blocks are always literal."}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}},
+					{"schedule_date", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: unix timestamp to send later"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "blocks"}},
 			}
 		},
 		Tool{
