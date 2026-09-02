@@ -12,6 +12,7 @@
 
 mod host;
 mod mcp_relay;
+mod plugin;
 mod qa;
 
 use std::time::Duration;
