@@ -60,11 +60,81 @@ pub struct Plugin {
     pub perms: &'static str,
     pub desc: &'static str,
     pub live: bool,
+    // The device subtitle under the name (what the plugin *is*), and the
+    // capability families it is exercising right now (a subset of `perms`) —
+    // these light the patch-bay's "active" jacks in the device panel.
+    pub kind: &'static str,
+    pub active: &'static str,
 }
 
 pub const FAMILIES: [&str; 7] = [
     "session", "invoke", "model", "settings", "files", "ui", "events",
 ];
+
+// --- live retention data (polled from the client's MCP over the relay) -------
+// The Retention device panel renders these, so what it shows is the real
+// message_versions store — not a mock.
+#[derive(Clone, Default)]
+pub struct RetentionStats {
+    pub available: bool,
+    pub total_versions: i64,
+    pub messages_tracked: i64,
+    pub edits: i64,
+    pub deletions: i64,
+}
+#[derive(Clone)]
+pub struct TrackedMsg {
+    pub chat_id: i64,
+    pub message_id: i64,
+    pub versions: i64,
+    pub latest_kind: String,
+    pub latest_content: String,
+}
+#[derive(Clone)]
+pub struct MsgVersion {
+    pub version: i64,
+    pub kind: String,
+    pub content: String,
+    pub captured_at: i64,
+}
+#[derive(Clone, Default)]
+pub struct Retention {
+    pub stats: RetentionStats,
+    pub tracked: Vec<TrackedMsg>,
+    pub selected: Option<(i64, i64)>,
+    pub chain: Vec<MsgVersion>,
+}
+
+// --- generic device panels (Export / Archiver / Bots / Wallet / AI / MCP) -----
+// Every non-Retention device shows the SAME shape, filled by real tools over the
+// relay: a key/value readout, an optional list of clickable rows (chats, bots,
+// or the tool catalog), and the result line of the last action a button fired.
+// One mechanism, six panels — the poller (relay.rs) fills it, the render draws
+// it, and the buttons enqueue actions that run against the client's real MCP.
+#[derive(Clone)]
+pub struct PanelRow {
+    pub id: i64,        // chat id / bot id (0 when the row is keyed by string)
+    pub sid: String,    // string key — a tool name, a bot id
+    pub title: String,
+    pub sub: String,
+    pub on: bool,       // running/enabled state (bots), else false
+}
+#[derive(Clone, Default)]
+pub struct PanelData {
+    pub readout: Vec<(String, String)>, // label → value, from a real read tool
+    pub rows: Vec<PanelRow>,            // clickable list, from a real list tool
+    pub result: String,                 // outcome of the last action button
+    pub loaded: bool,                   // did the readout ever fetch successfully
+}
+// A queued tool call: a button click parks one here; the poller runs it and
+// writes the outcome back into that plugin's PanelData.result.
+#[derive(Clone)]
+pub struct PendingAction {
+    pub plugin: usize,
+    pub tool: String, // an MCP tool name, or "tools/list" for the raw method
+    pub args: serde_json::Value,
+    pub note: String, // human label, echoed while the call is in flight
+}
 
 #[derive(Clone)]
 pub struct LogEntry {
@@ -84,7 +154,22 @@ pub struct Inner {
     pub upstream: String,
     pub token: String,
     pub view: PanelView,
+    pub selected: usize,
     pub enabled: Vec<bool>,
+    pub retention: Retention,
+    pub retention_selected: Option<(i64, i64)>,
+    // Ephemeral capture switches (self_destruct, view_once, vanishing): the
+    // truth read back from the client, plus a pending desired state a click
+    // sets and the poller applies via configure_ephemeral_capture.
+    pub capture: Option<(bool, bool, bool)>,
+    pub capture_pending: Option<(bool, bool, bool)>,
+    // Generic device panels, indexed by plugin. `panels[i]` is what device i
+    // renders; `panel_sel[i]` is the row it has selected. `action` is a single
+    // in-flight tool call a button queued; `busy` gates a second click.
+    pub panels: Vec<PanelData>,
+    pub panel_sel: Vec<Option<usize>>,
+    pub action: Option<PendingAction>,
+    pub busy: bool,
     pub shot_request: Option<String>,
     pub shot_armed: bool,
     pub shot_result: Option<(u32, u32, bool)>,
@@ -112,31 +197,38 @@ pub fn plugin_templates() -> Vec<Plugin> {
         Plugin { name: "MCP", slot: "slot 01 · aggregated endpoint", runtime: Runtime::Rust,
             perms: "session · invoke · files · settings · events",
             desc: "Aggregated MCP endpoint — proxies to the client's bridge. Wired end-to-end.",
-            live: true },
+            live: true,
+            kind: "Aggregated tool socket · JSON-RPC", active: "invoke" },
         Plugin { name: "Export", slot: "slot 02 · → disk", runtime: Runtime::Python,
             perms: "session · invoke · files · events",
             desc: "Classic + covert gradual export to disk. Rides raw invoke.",
-            live: false },
-        Plugin { name: "Retention / Vault", slot: "slot 03 · SQLite + ephemeral", runtime: Runtime::Rust,
+            live: false,
+            kind: "Gradual engine · messages.getHistory", active: "invoke · files" },
+        Plugin { name: "Retention", slot: "slot 03 · SQLite + ephemeral", runtime: Runtime::Rust,
             perms: "session · files · events",
             desc: "Real-time retention and capture of view-once media.",
-            live: false },
-        Plugin { name: "Archiver", slot: "slot 04 · → Telegram group", runtime: Runtime::Python,
+            live: false,
+            kind: "Retention · view-once capture", active: "" },
+        Plugin { name: "Archiver", slot: "slot 04 · SQLite + mirror group", runtime: Runtime::Python,
             perms: "session · invoke · events",
-            desc: "Deleted-account archiving — forward into a supergroup.",
-            live: false },
+            desc: "Archive ANY chat's history — to a local SQLite archive or a mirror group. Deleted-account sweep and view-once capture are modes, not the whole job.",
+            live: false,
+            kind: "Chat archiver · any chat → archive", active: "invoke" },
         Plugin { name: "Bots", slot: "slot 05 · automations", runtime: Runtime::Python,
             perms: "session · invoke · ui · events",
             desc: "The bot framework and rule automations.",
-            live: false },
+            live: false,
+            kind: "Automations · rule engine", active: "" },
         Plugin { name: "Wallet", slot: "slot 06", runtime: Runtime::Python,
             perms: "session · invoke · ui",
             desc: "Stars and TON. Off by default — anything that spends stays dark.",
-            live: false },
+            live: false,
+            kind: "Stars · TON payments", active: "" },
         Plugin { name: "AI", slot: "slot 07", runtime: Runtime::Rust,
             perms: "model · files · ui",
             desc: "Local LLM, TTS and voice — the only module touching model.",
-            live: false },
+            live: false,
+            kind: "Local LLM · TTS · voice", active: "" },
     ]
 }
 
@@ -163,8 +255,18 @@ impl HostState {
                 upstream,
                 token,
                 view: PanelView::Plugins,
+                // Open on the Export device — the "how do I export a chat" surface.
+                selected: 1,
                 // Export, Retention, Archiver, Bots on; Wallet, AI off.
                 enabled: vec![true, true, true, true, true, false, false],
+                retention: Retention::default(),
+                retention_selected: None,
+                capture: None,
+                capture_pending: None,
+                panels: vec![PanelData::default(); plugin_templates().len()],
+                panel_sel: vec![None; plugin_templates().len()],
+                action: None,
+                busy: false,
                 shot_request: None,
                 shot_armed: false,
                 shot_result: None,
@@ -208,6 +310,175 @@ impl HostState {
 
     pub fn view(&self) -> PanelView {
         self.0.lock().map(|i| i.view).unwrap_or(PanelView::Plugins)
+    }
+
+    pub fn selected(&self) -> usize {
+        self.0.lock().map(|i| i.selected).unwrap_or(0)
+    }
+
+    // Focus a device in the rack — the stage loads that plugin's control surface.
+    pub fn select(&self, i: usize) {
+        let name = {
+            let mut inner = self.0.lock().unwrap();
+            inner.selected = i;
+            plugin_templates().get(i).map(|p| p.name).unwrap_or("")
+        };
+        self.log("ui", format!("device → {name}"));
+    }
+
+    // --- live retention data ---------------------------------------------
+    pub fn set_retention(&self, r: Retention) {
+        if let Ok(mut i) = self.0.lock() {
+            i.retention = r;
+        }
+    }
+    pub fn retention(&self) -> Retention {
+        self.0.lock().map(|i| i.retention.clone()).unwrap_or_default()
+    }
+    pub fn retention_selected(&self) -> Option<(i64, i64)> {
+        self.0.lock().ok().and_then(|i| i.retention_selected)
+    }
+    // Pick a tracked message to inspect; the poller fetches its version chain.
+    pub fn select_tracked(&self, chat_id: i64, message_id: i64) {
+        if let Ok(mut i) = self.0.lock() {
+            i.retention_selected = Some((chat_id, message_id));
+        }
+    }
+
+    // --- ephemeral capture switches --------------------------------------
+    // The displayed state is the pending desired value if a click is in flight,
+    // else the last truth read from the client.
+    pub fn capture(&self) -> (bool, bool, bool) {
+        self.0
+            .lock()
+            .ok()
+            .and_then(|i| i.capture_pending.or(i.capture))
+            .unwrap_or((true, true, true))
+    }
+    // Set by the poller from the client's real flags; never clobbers a pending click.
+    pub fn set_capture_truth(&self, c: (bool, bool, bool)) {
+        if let Ok(mut i) = self.0.lock() {
+            i.capture = Some(c);
+        }
+    }
+    // A click flips one switch and queues the new triple for the poller to apply.
+    pub fn toggle_capture(&self, which: usize) {
+        if let Ok(mut i) = self.0.lock() {
+            let mut n = i.capture_pending.or(i.capture).unwrap_or((true, true, true));
+            match which {
+                0 => n.0 = !n.0,
+                1 => n.1 = !n.1,
+                _ => n.2 = !n.2,
+            }
+            i.capture_pending = Some(n);
+        }
+    }
+    // The poller consumes a pending desired state to push to the client.
+    pub fn take_capture_pending(&self) -> Option<(bool, bool, bool)> {
+        self.0.lock().ok().and_then(|mut i| i.capture_pending.take())
+    }
+
+    // --- generic device panels -------------------------------------------
+    pub fn panel(&self, i: usize) -> PanelData {
+        self.0.lock().ok().and_then(|s| s.panels.get(i).cloned()).unwrap_or_default()
+    }
+    // The poller refreshes the readout and row list from real tools; it must not
+    // clobber the last action result or the row selection, which the click owns.
+    pub fn set_panel_readout(&self, i: usize, readout: Vec<(String, String)>, rows: Vec<PanelRow>, loaded: bool) {
+        if let Ok(mut s) = self.0.lock() {
+            if let Some(p) = s.panels.get_mut(i) {
+                p.readout = readout;
+                p.rows = rows;
+                p.loaded = loaded;
+            }
+        }
+    }
+    pub fn panel_row_sel(&self, i: usize) -> Option<usize> {
+        self.0.lock().ok().and_then(|s| s.panel_sel.get(i).copied().flatten())
+    }
+    pub fn select_panel_row(&self, i: usize, row: usize) {
+        if let Ok(mut s) = self.0.lock() {
+            if let Some(sel) = s.panel_sel.get_mut(i) {
+                *sel = Some(row);
+            }
+        }
+        self.log("ui", format!("panel {i} row → {row}"));
+    }
+    pub fn busy(&self) -> bool {
+        self.0.lock().map(|s| s.busy).unwrap_or(false)
+    }
+    // Queue one tool call; the poller runs it and writes the outcome back.
+    pub fn enqueue(&self, plugin: usize, tool: &str, args: serde_json::Value, note: String) {
+        if let Ok(mut s) = self.0.lock() {
+            if s.busy {
+                return; // one action in flight at a time
+            }
+            s.busy = true;
+            if let Some(p) = s.panels.get_mut(plugin) {
+                p.result = format!("… {note}");
+            }
+            s.action = Some(PendingAction { plugin, tool: tool.to_string(), args, note });
+        }
+    }
+    pub fn take_action(&self) -> Option<PendingAction> {
+        self.0.lock().ok().and_then(|mut s| s.action.take())
+    }
+    pub fn set_result(&self, plugin: usize, msg: String) {
+        if let Ok(mut s) = self.0.lock() {
+            s.busy = false;
+            if let Some(p) = s.panels.get_mut(plugin) {
+                p.result = msg;
+            }
+        }
+    }
+
+    // The one primary action for device `i`, built from its current selection.
+    // BOTH the on-screen button and the QA socket call this, so there is a
+    // single code path per plugin and no second implementation to drift.
+    pub fn primary_action(&self, i: usize) {
+        let d = self.panel(i);
+        let row = self.panel_row_sel(i).and_then(|r| d.rows.get(r).cloned());
+        match i {
+            // MCP: a canary invoke proving the relay round-trips a tools/call.
+            0 => self.enqueue(0, "list_chats", serde_json::json!({}), "invoke · list_chats".into()),
+            // Export: the HEADLESS gradual engine (GradualArchiver) — never the
+            // client's native export window. The button starts an export for the
+            // picked chat, or cancels the one in flight; progress shows in this
+            // panel, and Tlgrm is untouched.
+            1 => {
+                let running = d.readout.iter().any(|(k, v)| {
+                    k == "state" && matches!(v.as_str(),
+                        "exporting" | "running" | "archiving" | "scanning" | "paused" | "queued")
+                });
+                if running {
+                    self.enqueue(1, "cancel_gradual_export", serde_json::json!({}), "cancel export".into());
+                } else if let Some(r) = row {
+                    self.enqueue(1, "start_gradual_export", serde_json::json!({ "chat_id": r.id }),
+                        format!("export {}", r.title));
+                } else {
+                    self.set_result(1, "pick a chat first".into());
+                }
+            }
+            // Archiver: archive the picked chat's history into the SQLite store.
+            3 => match row {
+                Some(r) => self.enqueue(3, "archive_chat", serde_json::json!({ "chat_id": r.id, "limit": 1000 }),
+                    format!("archive {}", r.title)),
+                None => self.set_result(3, "pick a chat first".into()),
+            },
+            // Bots: start or stop the picked bot, by its current run state.
+            4 => match row {
+                Some(r) if r.on => self.enqueue(4, "stop_bot", serde_json::json!({ "bot_id": r.sid }),
+                    format!("stop {}", r.title)),
+                Some(r) => self.enqueue(4, "start_bot", serde_json::json!({ "bot_id": r.sid }),
+                    format!("start {}", r.title)),
+                None => self.set_result(4, "pick a bot first".into()),
+            },
+            // AI: prove the local voice pipeline by synthesizing a sample.
+            6 => self.enqueue(6, "text_to_speech",
+                serde_json::json!({ "text": "TeleBox voice check. The local text to speech pipeline is live." }),
+                "synthesize sample".into()),
+            _ => {}
+        }
     }
 
     pub fn enabled_vec(&self) -> Vec<bool> {
@@ -354,6 +625,11 @@ impl HostState {
             .take(8)
             .map(|e| format!("{} [{}] {}", e.t, e.src, e.msg))
             .collect();
+        // The on-stage device panel, grabbed as data for QA assertions.
+        let selp = i.selected;
+        let panel = i.panels.get(selp).cloned().unwrap_or_default();
+        let panel_readout: Vec<serde_json::Value> =
+            panel.readout.iter().map(|(k, v)| serde_json::json!([k, v])).collect();
         serde_json::json!({
             "host": if running { "running" } else { "stopped" },
             "running": running,
@@ -365,6 +641,15 @@ impl HostState {
             "view": i.view.name(),
             "plugins": plugins,
             "log_tail": log_tail,
+            "selected_plugin": selp,
+            "panel": {
+                "result": panel.result,
+                "rows": panel.rows.len(),
+                "row_sel": i.panel_sel.get(selp).copied().flatten(),
+                "readout": panel_readout,
+                "loaded": panel.loaded,
+                "busy": i.busy,
+            },
         })
     }
 }

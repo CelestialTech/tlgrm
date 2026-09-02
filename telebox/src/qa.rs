@@ -78,6 +78,30 @@ fn handle(state: HostState, s: UnixStream) {
                 state.toggle_plugin(i);
                 state.snapshot()
             }
+            "select" => {
+                let i = v.get("i").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+                state.select(i);
+                state.snapshot()
+            }
+            "toggle_capture" => {
+                // Exercise the exact path a capture-switch click takes.
+                let which = v.get("which").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+                state.toggle_capture(which);
+                state.snapshot()
+            }
+            "panel_row" => {
+                // Pick a row in device i's list (chat / bot / tool), as a click would.
+                let i = v.get("i").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+                let row = v.get("row").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+                state.select_panel_row(i, row);
+                state.snapshot()
+            }
+            "action" => {
+                // Fire device i's primary action — the exact path its button takes.
+                let i = v.get("i").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+                state.primary_action(i);
+                state.snapshot()
+            }
             "view" => {
                 if let Some(pv) = v
                     .get("name")
