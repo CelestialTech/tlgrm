@@ -246,7 +246,8 @@ fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
                     readout.push(("db size".into(), human_bytes(i64_of(&s, "database_size_bytes"))));
                 }
             }
-            let rows = chat_rows(sock, token, 40);
+            // Full chat set so the Archiver's search reaches every chat.
+            let rows = chat_rows(sock, token, 2000);
             state.set_panel_readout(3, readout, rows, true);
         }
         // Bots — the automation framework: list bots, start/stop the picked one.

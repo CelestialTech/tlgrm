@@ -191,6 +191,10 @@ pub struct Inner {
     pub export_run: Option<ExportRun>,
     // Set to ask the Rust export engine thread to stop; it clears it on start.
     pub export_cancel: bool,
+    // Archiver: the same find-a-chat ontology as Export (Item picked by search),
+    // driving archive_chat into the local SQLite store.
+    pub archiver_search: String,
+    pub archiver_target: Option<(i64, String)>,
     // MCP domain-tree UI: which nodes are expanded (domain name, or
     // "domain\u{1f}sub"), the in-place filter, and the selected tool.
     pub mcp_expanded: HashSet<String>,
@@ -303,6 +307,8 @@ impl HostState {
                 export_target: None,
                 export_run: None,
                 export_cancel: false,
+                archiver_search: String::new(),
+                archiver_target: None,
                 mcp_expanded: HashSet::new(),
                 mcp_search: String::new(),
                 mcp_selected: None,
@@ -518,6 +524,26 @@ impl HostState {
         self.0.lock().map(|i| (i.upstream.clone(), i.token.clone())).unwrap_or_default()
     }
 
+    // --- Archiver: search + chosen target (parallels Export) ---------------
+    pub fn archiver_search(&self) -> String {
+        self.0.lock().map(|i| i.archiver_search.clone()).unwrap_or_default()
+    }
+    pub fn archiver_search_push(&self, s: &str) {
+        if let Ok(mut i) = self.0.lock() { i.archiver_search.push_str(s); }
+    }
+    pub fn archiver_search_backspace(&self) {
+        if let Ok(mut i) = self.0.lock() { i.archiver_search.pop(); }
+    }
+    pub fn archiver_search_clear(&self) {
+        if let Ok(mut i) = self.0.lock() { i.archiver_search.clear(); }
+    }
+    pub fn archiver_target(&self) -> Option<(i64, String)> {
+        self.0.lock().ok().and_then(|i| i.archiver_target.clone())
+    }
+    pub fn set_archiver_target(&self, id: i64, title: String) {
+        if let Ok(mut i) = self.0.lock() { i.archiver_target = Some((id, title)); }
+    }
+
     // --- MCP domain tree ---------------------------------------------------
     pub fn mcp_expanded(&self, key: &str) -> bool {
         self.0.lock().map(|i| i.mcp_expanded.contains(key)).unwrap_or(false)
@@ -623,11 +649,13 @@ impl HostState {
                     self.set_result(1, "pick a chat to export first".into());
                 }
             }
-            // Archiver: archive the picked chat's history into the SQLite store.
-            3 => match row {
-                Some(r) => self.enqueue(3, "archive_chat", serde_json::json!({ "chat_id": r.id, "limit": 1000 }),
-                    format!("archive {}", r.title)),
-                None => self.set_result(3, "pick a chat first".into()),
+            // Archiver: archive the chosen chat's history into the SQLite store
+            // (by id, so search filtering never changes what gets archived).
+            3 => match self.archiver_target() {
+                Some((id, title)) => self.enqueue(3, "archive_chat",
+                    serde_json::json!({ "chat_id": id, "limit": 500 }),
+                    format!("archive {title}")),
+                None => self.set_result(3, "pick a chat to archive first".into()),
             },
             // Bots: start or stop the picked bot, by its current run state.
             4 => match row {
@@ -800,6 +828,10 @@ impl HostState {
         let export_matches = i.panels.get(1).map(|p| {
             p.rows.iter().filter(|r| export_ql.is_empty() || r.title.to_lowercase().contains(&export_ql)).count()
         }).unwrap_or(0);
+        let arc_ql = i.archiver_search.to_lowercase();
+        let arc_matches = i.panels.get(3).map(|p| {
+            p.rows.iter().filter(|r| arc_ql.is_empty() || r.title.to_lowercase().contains(&arc_ql)).count()
+        }).unwrap_or(0);
         serde_json::json!({
             "host": if running { "running" } else { "stopped" },
             "running": running,
@@ -835,6 +867,11 @@ impl HostState {
                 "run": i.export_run.as_ref().map(|r| serde_json::json!({
                     "chat": r.chat, "done": r.done, "total": r.total,
                     "bytes": r.bytes, "state": r.state, "path": r.path })),
+            },
+            "archiver": {
+                "search": i.archiver_search,
+                "matches": arc_matches,
+                "target": i.archiver_target.as_ref().map(|(id, t)| serde_json::json!({ "id": id, "title": t })),
             },
         })
     }

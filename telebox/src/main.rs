@@ -212,6 +212,8 @@ impl TeleBox {
             self.export_body(cx).into_any_element()
         } else if i == 2 {
             self.retention_body(cx).into_any_element()
+        } else if i == 3 {
+            self.archiver_body(cx).into_any_element()
         } else {
             self.relay_body(i, p, active, cx).into_any_element()
         };
@@ -612,6 +614,118 @@ impl TeleBox {
             .child(search_box)
             .children(detail)
             .child(tree)
+    }
+
+    // Archiver device — same find-a-chat ontology as Export, but the action is a
+    // headless archive_chat into the local SQLite store. Top: the STORE ("what I
+    // have"); then find a chat -> Archive. (ponytail: parallels export_body's idle
+    // half; fold into a shared chat-picker if a third picker appears.)
+    fn archiver_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let d = self.state.panel(3);
+        let busy = self.state.busy();
+
+        let field = |k: String, v: String| {
+            div().flex().flex_col().gap_1().flex_shrink_0()
+                .child(mono(INK3).text_xs().child(k))
+                .child(mono(INK).child(v))
+        };
+        let mut store = div().flex().flex_wrap().items_center().gap_6().p_4().rounded_lg()
+            .bg(rgb(WELL)).border_1().border_color(rgb(LINE))
+            .child(mono(INK3).text_xs().child("ARCHIVE STORE"))
+            .child(div().w(px(1.)).h(px(28.)).bg(rgb(LINE2)).flex_shrink_0());
+        if d.readout.is_empty() {
+            store = store.child(mono(INK3).text_sm().child("querying the archive…"));
+        }
+        for (k, v) in d.readout.iter() {
+            store = store.child(field(k.clone(), v.clone()));
+        }
+        store = store.child(div().flex_1())
+            .child(div().size(px(7.)).rounded_full().bg(rgb(if d.loaded { OK } else { INK3 })))
+            .child(mono(INK3).text_xs().child("what you've saved"));
+
+        let query = self.state.archiver_search();
+        let ql = query.to_lowercase();
+        let target = self.state.archiver_target();
+        let mut matched: Vec<&PanelRow> = d.rows.iter()
+            .filter(|r| ql.is_empty() || r.title.to_lowercase().contains(&ql)).collect();
+        let (total, shown) = (d.rows.len(), matched.len());
+        matched.truncate(60);
+        let typing = !query.is_empty();
+
+        let search_box = div().id("arc-search").track_focus(&self.search_focus)
+            .flex().items_center().gap_2().px_3().py_2().rounded_md().bg(rgb(WELL))
+            .border_1().border_color(rgb(if typing { MINT_DK } else { LINE }))
+            .child(mono(INK3).child("⌕"))
+            .child(if typing { mono(INK).child(format!("{query}▏")) }
+                   else { mono(INK3).child("type to find a chat…".to_string()) })
+            .on_click(cx.listener(|this, _, window, cx| { window.focus(&this.search_focus, cx); cx.notify(); }))
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _w, cx| {
+                let ks = &ev.keystroke;
+                if ks.modifiers.control || ks.modifiers.platform { return; }
+                match ks.key.as_str() {
+                    "backspace" => this.state.archiver_search_backspace(),
+                    "escape" => this.state.archiver_search_clear(),
+                    _ => { if let Some(ch) = ks.key_char.as_ref() { this.state.archiver_search_push(ch.as_str()); } }
+                }
+                cx.notify();
+            }));
+
+        let has_target = target.is_some();
+        let btn_label = match &target {
+            Some((_, t)) => format!("Archive {t} →"),
+            None => "Pick a chat to archive".to_string(),
+        };
+        let archive_btn = div().id("arc-go").cursor_pointer().flex_shrink_0().px_4().py_2().rounded_md()
+            .bg(rgb(if has_target && !busy { MINT_DK } else { WELL }))
+            .border_1().border_color(rgb(if has_target { MINT } else { LINE }))
+            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(if has_target { MINT } else { INK3 })).child(btn_label))
+            .on_click(cx.listener(|this, _, _, cx| { this.state.primary_action(3); cx.notify(); }));
+
+        let mut list = div().flex().flex_col().gap_1();
+        if matched.is_empty() {
+            list = list.child(mono(INK3).text_sm().child(if typing {
+                format!("no chat matches \"{query}\"")
+            } else {
+                "querying the client for your chats…".to_string()
+            }));
+        }
+        for r in matched {
+            let selected = target.as_ref().map(|(id, _)| *id == r.id).unwrap_or(false);
+            let (id, title, sub) = (r.id, r.title.clone(), r.sub.clone());
+            let pick = title.clone();
+            list = list.child(div().id(("arcrow", id as usize)).cursor_pointer()
+                .flex().items_center().gap_2().py_2().px_3().rounded_md()
+                .bg(rgb(if selected { PANEL2 } else { WELL }))
+                .border_1().border_color(rgb(if selected { MINT_DK } else { LINE2 }))
+                .child(dot(if selected { MINT } else { INK3 }, 7.))
+                .child(div().flex_1().min_w_0().text_sm().text_color(rgb(INK))
+                    .whitespace_nowrap().overflow_hidden().text_ellipsis().child(title))
+                .child(mono(INK3).text_xs().child(sub))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.state.set_archiver_target(id, pick.clone());
+                    cx.notify();
+                })));
+        }
+
+        let result_line = if d.result.is_empty() {
+            mono(INK3).text_xs().child(String::new())
+        } else {
+            let c = if d.result.starts_with('✕') { CRIT } else if d.result.starts_with('✓') { OK } else { INK2 };
+            mono(c).text_sm().child(d.result.clone())
+        };
+        let meta = if typing { format!("{shown} of {total} chats") } else { format!("{total} chats · type to filter") };
+
+        div().flex().flex_col().gap_3().w_full()
+            .child(store)
+            .child(div().flex().items_center().gap_3()
+                .child(div().flex_1().child(search_box))
+                .child(archive_btn))
+            .child(div().flex().items_center().gap_2()
+                .child(mono(INK3).text_xs().child(meta))
+                .child(div().flex_1())
+                .child(result_line))
+            .child(list)
     }
 
     // Export device — built strictly from the ontology (ONTOLOGY.md): Service in
