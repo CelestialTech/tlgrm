@@ -300,7 +300,27 @@ QJsonObject Server::toolConfigureBot(const QJsonObject &args) {
 		return result;
 	}
 
-	// Store config directly in DB (avoids BotManager mutex deadlock)
+	// Update the LIVE bot first, so get_bot_info (which reads bot->config())
+	// reflects the change immediately — a DB-only write left the running bot on
+	// its old config and the tool reported a success that changed nothing.
+	//
+	// setConfig is called DIRECTLY (not via BotManager::saveBotConfig): that
+	// method emits configChanged() while holding the manager mutex and can
+	// deadlock, whereas this tool handler holds no manager lock, so the signal
+	// is delivered safely. Incoming keys are merged over the current config, so
+	// a partial config updates only what it names.
+	if (_botManager) {
+		if (BotBase *bot = _botManager->getBot(botId)) {
+			QJsonObject merged = bot->config();
+			for (auto it = config.begin(); it != config.end(); ++it) {
+				merged.insert(it.key(), it.value());
+			}
+			bot->setConfig(merged);
+			config = merged; // persist and return the full merged view
+		}
+	}
+
+	// Persist to the DB too, so the config survives a restart.
 	QSqlQuery query(_db);
 	query.prepare("UPDATE bot_registry SET config = ? WHERE bot_id = ?");
 	query.addBindValue(QJsonDocument(config).toJson(QJsonDocument::Compact));
