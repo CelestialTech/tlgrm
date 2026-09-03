@@ -18,11 +18,11 @@ mod retention;
 
 use std::time::Duration;
 
-use gpui::{App, Bounds, Context, Div, FontWeight, Window, WindowBounds, WindowOptions, div,
-    prelude::*, px, rgb, size};
+use gpui::{App, Bounds, Context, Div, FocusHandle, FontWeight, KeyDownEvent, Window, WindowBounds,
+    WindowOptions, div, prelude::*, px, relative, rgb, size};
 use gpui_platform::application;
 
-use host::{plugin_active, plugin_templates, HostState, Plugin, FAMILIES};
+use host::{plugin_active, plugin_templates, HostState, PanelRow, Plugin, FAMILIES};
 
 // Studio-dark instrument palette.
 const VOID: u32 = 0x0A0C0F;
@@ -51,6 +51,8 @@ const QA_SOCK: &str = "/tmp/telebox_qa.sock";
 struct TeleBox {
     state: HostState,
     loop_started: bool,
+    // Focus for the Export chat-search field (a real typed input).
+    search_focus: FocusHandle,
 }
 
 impl TeleBox {
@@ -70,7 +72,7 @@ impl TeleBox {
         })
         .detach();
 
-        Self { state, loop_started: false }
+        Self { state, loop_started: false, search_focus: cx.focus_handle() }
     }
 }
 
@@ -145,42 +147,27 @@ impl TeleBox {
             }))
     }
 
-    // One device in the rack rail — selectable, with a power LED, capability
-    // dots and an activity meter. Not a list row: it loads a control surface.
+    // One device in the rack rail — a single clean line: a power LED, the name,
+    // and (MCP only) a live request-count badge, then the runtime. Not a list
+    // row: it loads the device's control surface. State reads from the LED and
+    // name brightness; the capability grants live in the panel's patch-bay.
     fn device_strip(&self, i: usize, p: &Plugin, active: bool, selected: bool, requests: u64, cx: &mut Context<Self>) -> impl IntoElement {
         let led = if active { MINT } else { 0x2A323D };
         let name_color = if active { INK } else { INK2 };
-        let caps = FAMILIES.iter().map(|f| {
-            let g = p.perms.contains(*f);
-            div().w(px(6.)).h(px(6.)).rounded_sm().bg(rgb(if g { VIOLET } else { 0x242B35 }))
+        // Only MCP carries a live counter; show it as a badge on the name line.
+        let badge = (i == 0 && active).then(|| {
+            div().flex_shrink_0().px(px(7.)).py(px(2.)).rounded_full().bg(rgb(MINT_DK))
+                .child(mono(MINT).text_xs().child(format!("{requests} req")))
         });
-        // Honest status — no fake meter. Only MCP has a live per-plugin signal
-        // (real request count); other active plugins read "armed", idle "idle".
-        let status = if i == 0 && active {
-            mono(MINT).text_xs().child(format!("{requests} req"))
-        } else if active {
-            mono(MINT).text_xs().child("armed")
-        } else {
-            mono(INK3).text_xs().child("idle")
-        };
         div().id(("dev", i)).cursor_pointer()
-            .flex().flex_col().gap_2().pl_3().pr_3().py_3().rounded_md()
+            .flex().items_center().gap_2().pl_3().pr_3().py(px(11.)).rounded_md()
             .bg(rgb(if selected { PANEL2 } else { PANEL }))
             .border_l_2().border_color(rgb(if selected { MINT } else { LINE2 }))
             .border_t_1().border_r_1().border_b_1()
-            .child(
-                div().flex().items_center().gap_2()
-                    .child(dot(led, 8.))
-                    .child(div().font_weight(FontWeight::SEMIBOLD).text_sm().text_color(rgb(name_color)).child(p.name))
-                    .child(div().flex_1())
-                    .child(mono(INK3).text_xs().child(p.runtime.label())),
-            )
-            .child(
-                div().flex().items_center().gap_2()
-                    .child(div().flex().gap_1().children(caps))
-                    .child(div().flex_1())
-                    .child(status),
-            )
+            .child(dot(led, 8.))
+            .child(div().font_weight(FontWeight::SEMIBOLD).text_sm().text_color(rgb(name_color)).child(p.name))
+            .child(div().flex_1())
+            .children(badge)
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.state.select(i);
                 cx.notify();
@@ -210,7 +197,9 @@ impl TeleBox {
             .child(div().flex_1())
             .child(self.toggle_el(i, active, cx));
 
-        let body = if i == 2 {
+        let body = if i == 1 {
+            self.export_body(cx).into_any_element()
+        } else if i == 2 {
             self.retention_body(cx).into_any_element()
         } else {
             self.relay_body(i, p, active, cx).into_any_element()
@@ -335,7 +324,7 @@ impl TeleBox {
     // that fires a real tool call via HostState::primary_action — the same path
     // the QA socket's `action` command drives. Wallet stays read-only on purpose
     // (spending is dark); AI has an action but no rows.
-    fn relay_body(&self, i: usize, p: &Plugin, active: bool, cx: &mut Context<Self>) -> impl IntoElement {
+    fn relay_body(&self, i: usize, p: &Plugin, _active: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let d = self.state.panel(i);
         let sel_row = self.state.panel_row_sel(i);
         let busy = self.state.busy();
@@ -375,10 +364,9 @@ impl TeleBox {
                 .child(mono(INK3).text_xs().child(k))
                 .child(mono(INK).child(v))
         };
+        // Body shows domain data only — the plugin's on/off lives in the header.
         let mut readout = div().flex().flex_wrap().items_center().gap_5().p_5()
-            .rounded_lg().bg(rgb(WELL)).border_1().border_color(rgb(LINE))
-            .child(field("STATE".into(), if active { "armed".into() } else { "idle".into() }))
-            .child(div().w(px(1.)).h(px(32.)).bg(rgb(LINE2)).flex_shrink_0());
+            .rounded_lg().bg(rgb(WELL)).border_1().border_color(rgb(LINE));
         if d.readout.is_empty() {
             readout = readout.child(mono(INK3).text_sm()
                 .child(if self.state.is_running() { "querying client…" } else { "start the host to query" }));
@@ -456,6 +444,149 @@ impl TeleBox {
         }
         col.child(div().pl_3().py_2().border_l_2().border_color(rgb(VIOLET_DK))
             .child(div().text_sm().text_color(rgb(INK2)).child(p.desc)))
+    }
+
+    // Export device — built strictly from the ontology (ONTOLOGY.md): Service in
+    // the header, an Item (a chat, found by SEARCH among all 727), and a Job (the
+    // run). Two states that never mix: IDLE (find → pick → Export) and RUNNING
+    // (target · progress · Cancel — the job replaces the picker).
+    fn export_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let d = self.state.panel(1);
+        let busy = self.state.busy();
+        let result_line = |r: String| -> Div {
+            if r.is_empty() {
+                mono(INK3).text_xs().child("")
+            } else {
+                let c = if r.starts_with('✕') { CRIT } else if r.starts_with('✓') { OK } else { INK2 };
+                mono(c).text_sm().child(r)
+            }
+        };
+
+        // RUNNING — the job replaces the picker.
+        if let Some(run) = self.state.export_run() {
+            let frac = if run.total > 0 {
+                (run.done as f32 / run.total as f32).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let bar = div().w_full().h(px(8.)).rounded_full().bg(rgb(WELL))
+                .border_1().border_color(rgb(LINE2))
+                .child(div().h_full().rounded_full().bg(rgb(MINT)).w(relative(frac)));
+            return div().flex().flex_col().gap_4().w_full()
+                .child(div().flex().items_center().gap_3()
+                    .child(dot(MINT, 8.))
+                    .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).text_color(rgb(INK))
+                        .child(format!("Exporting {}", run.chat)))
+                    .child(div().flex_1())
+                    .child(mono(INK2).child(format!("{} / {} messages", run.done, run.total))))
+                .child(bar)
+                .child(div().flex().items_center().gap_3()
+                    .child(mono(INK3).text_xs().child(format!(
+                        "{} messages exported to disk · {}",
+                        run.done, run.state)))
+                    .child(div().flex_1())
+                    .child(div().id("exp-cancel").cursor_pointer().px_4().py_2().rounded_md()
+                        .bg(rgb(0x2A1512)).border_1().border_color(rgb(CRIT))
+                        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(rgb(CRIT))
+                            .child(if busy { "working…" } else { "Cancel export" }))
+                        .on_click(cx.listener(|this, _, _, cx| { this.state.primary_action(1); cx.notify(); }))))
+                .child(result_line(d.result.clone()))
+                .child(div().pl_3().py_2().border_l_2().border_color(rgb(VIOLET_DK))
+                    .child(mono(INK3).text_xs().child("Headless — runs inside TeleBox, no Tlgrm window.")))
+                .into_any_element();
+        }
+
+        // IDLE — find an Item (a chat), then act.
+        let query = self.state.export_search();
+        let ql = query.to_lowercase();
+        let target = self.state.export_target();
+        let mut matched: Vec<&PanelRow> = d.rows.iter()
+            .filter(|r| ql.is_empty() || r.title.to_lowercase().contains(&ql))
+            .collect();
+        let (total, shown) = (d.rows.len(), matched.len());
+        matched.truncate(60);
+        let typing = !query.is_empty();
+
+        let search_box = div().id("exp-search").track_focus(&self.search_focus)
+            .flex().items_center().gap_2().px_3().py_2().rounded_md().bg(rgb(WELL))
+            .border_1().border_color(rgb(if typing { MINT_DK } else { LINE }))
+            .child(mono(INK3).child("⌕"))
+            .child(if typing {
+                mono(INK).child(format!("{query}▏"))
+            } else {
+                mono(INK3).child("type to find a chat…".to_string())
+            })
+            .on_click(cx.listener(|this, _, window, cx| { window.focus(&this.search_focus, cx); cx.notify(); }))
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _window, cx| {
+                let ks = &ev.keystroke;
+                if ks.modifiers.control || ks.modifiers.platform {
+                    return;
+                }
+                match ks.key.as_str() {
+                    "backspace" => this.state.export_search_backspace(),
+                    "escape" => this.state.export_search_clear(),
+                    _ => {
+                        if let Some(ch) = ks.key_char.as_ref() {
+                            this.state.export_search_push(ch.as_str());
+                        }
+                    }
+                }
+                cx.notify();
+            }));
+
+        let has_target = target.is_some();
+        let btn_label = match &target {
+            Some((_, t)) => format!("Export {t} →"),
+            None => "Pick a chat to export".to_string(),
+        };
+        let export_btn = div().id("exp-go").cursor_pointer().flex_shrink_0().px_4().py_2().rounded_md()
+            .bg(rgb(if has_target && !busy { MINT_DK } else { WELL }))
+            .border_1().border_color(rgb(if has_target { MINT } else { LINE }))
+            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(if has_target { MINT } else { INK3 })).child(btn_label))
+            .on_click(cx.listener(|this, _, _, cx| { this.state.primary_action(1); cx.notify(); }));
+
+        let mut list = div().flex().flex_col().gap_1();
+        if matched.is_empty() {
+            list = list.child(mono(INK3).text_sm().child(if typing {
+                format!("no chat matches \"{query}\"")
+            } else {
+                "querying the client for your chats…".to_string()
+            }));
+        }
+        for r in matched {
+            let selected = target.as_ref().map(|(id, _)| *id == r.id).unwrap_or(false);
+            let (id, title, sub) = (r.id, r.title.clone(), r.sub.clone());
+            let pick = title.clone();
+            list = list.child(div().id(("exprow", id as usize)).cursor_pointer()
+                .flex().items_center().gap_2().py_2().px_3().rounded_md()
+                .bg(rgb(if selected { PANEL2 } else { WELL }))
+                .border_1().border_color(rgb(if selected { MINT_DK } else { LINE2 }))
+                .child(dot(if selected { MINT } else { INK3 }, 7.))
+                .child(div().flex_1().min_w_0().text_sm().text_color(rgb(INK))
+                    .whitespace_nowrap().overflow_hidden().text_ellipsis().child(title))
+                .child(mono(INK3).text_xs().child(sub))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.state.set_export_target(id, pick.clone());
+                    cx.notify();
+                })));
+        }
+
+        let meta = if typing {
+            format!("{shown} of {total} chats")
+        } else {
+            format!("{total} chats · type to filter")
+        };
+        div().flex().flex_col().gap_3().w_full()
+            .child(div().flex().items_center().gap_3()
+                .child(div().flex_1().child(search_box))
+                .child(export_btn))
+            .child(div().flex().items_center().gap_2()
+                .child(mono(INK3).text_xs().child(meta))
+                .child(div().flex_1())
+                .child(result_line(d.result.clone())))
+            .child(list)
+            .into_any_element()
     }
 }
 
@@ -551,9 +682,9 @@ impl Render for TeleBox {
         // --- rack rail ---
         let mut rail = div().flex().flex_col().gap_2().w(px(260.)).flex_shrink_0()
             .p_3().bg(rgb(PANEL)).border_r_1().border_color(rgb(LINE))
-            .child(div().flex().items_center().gap_2().px_1().pb_1()
-                .child(mono(INK3).text_xs().child("RACK")).child(div().flex_1())
-                .child(mono(INK3).text_xs().child(format!("{} loaded", plugins.len()))));
+            .child(div().flex().items_center().px_1().pb_1()
+                .child(div().flex_1())
+                .child(mono(INK3).text_xs().child(format!("{} devices", plugins.len()))));
         for (i, p) in plugins.iter().enumerate() {
             let active = plugin_active(i, running, &enabled);
             rail = rail.child(self.device_strip(i, p, active, i == selected, requests, cx));

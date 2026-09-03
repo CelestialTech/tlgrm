@@ -1,76 +1,37 @@
-# GATES — TeleBox user stories (honest status)
+# GATES — Export plugin, ideal usable redesign (unlazy)
 
-Owner: I own UI + user stories. Rule (unlazy): a story is MET only with real
-evidence; wired-but-unproven is UNMET.
+User story: "As a power user I want to export the full history of a SPECIFIC chat
+to disk — find it fast among hundreds, start it, watch it, cancel it — without the
+client's own export window." Ontology: Service (plugin on/off, header only) ·
+Chat (item, 727 of them → needs search) · Job/Run (exists ONLY while exporting) ·
+no Store yet. The panel has two states: IDLE (pick) and RUNNING (job).
 
-Evidence legend:
-- [qa] — driven through the QA socket, which calls the *identical* HostState
-  method (`primary_action` / `toggle_*` / `select`) the on-screen control calls,
-  and the call reached the client's REAL MCP backend with a REAL result.
-- [render] — the app's own `render_to_image` (no system capture) shows the
-  panel drawing real data + the operable controls.
-- [click] — a real mouse event verified the GPUI dispatch (done earlier this
-  session while the window was foreground).
+Evidence: [qa] = QA socket asserts the exact state the UI renders (same HostState
+path); [render] = the app's own render_to_image shows it; [build] = compiles.
 
-## MET — proven
+## Gates
 
-Host / rack:
-- G-US1  See host status (running/endpoint/upstream/clients/requests) — MET [render]
-- G-US2  Start relay — MET [qa]
-- G-US3  Stop relay — MET [click]
-- G-US5  See 7 plugins + state/runtime/grants — MET [render]
-- G-US6  Select a plugin → its panel loads — MET [click][render]
+- [ ] G1  No phantom job. When no export is running, the panel shows NO chat and NO
+         progress — absence reads as absence, not "idle 0/6".
+         CHECK: after cancel, QA snapshot of the Export panel has export_mode="idle"
+         and no "progress"/"exporting" readout keys.
+- [ ] G2  Findable. Typing part of a chat name filters the 727 chats to matches
+         (search over the full set, not a 40-row window).
+         CHECK: QA sets export_search="ольга" → filtered row count < 727 and every
+         shown row's title contains the query (case-insensitive).
+- [ ] G3  Action always reachable. The primary Export action sits at the TOP of the
+         idle region (not below a long scroll). [render] manual.
+- [ ] G4  Mode switch is coherent. Starting an export flips the panel to RUNNING
+         (target chat + progress + Cancel); cancelling flips it back to IDLE (picker).
+         CHECK: QA start → snapshot export_mode="running" with a target + progress;
+         QA cancel → snapshot export_mode="idle".
+- [ ] G5  No ontological collision. The plugin's on/off is ONLY in the header; the
+         body has no "STATE: operational" service field colliding with job state.
+         CHECK: QA snapshot Export readout has no key equal to "STATE".
+- [ ] G6  Builds and deploys clean.
+         CHECK: cargo build --release exits 0.
 
-Retention (device 2):
-- G-US8  Retention stats (versions/tracked/edits/deletions) — MET [render] live
-- G-US9  Browse tracked messages — MET [render] live
-- G-US10 View a message's version chain — MET [render] live
-- G-US11 Toggle self-destruct capture — MET [click] real client flag flipped
-- G-US12 Toggle view-once capture — MET [click] real client flag flipped
-- G-US13 Toggle vanishing capture — MET [click] real client flag flipped
-- G-CORE Git-style retention (send→edit→edit→delete chain) — MET [qa] end-to-end
-
-Plugin devices now OPERABLE over the relay (was: read-only):
-- G-US14 Export a chat — MET [qa][render]. HEADLESS: the button drives
-         `start_gradual_export` / `cancel_gradual_export` (GradualArchiver), NOT
-         the client's native export window. Verified start→running→cancel with
-         the progress shown IN TELEBOX ("state: running · Ольга Тимошевская ·
-         0/6"), no Tlgrm popup, cancel works from the panel.
-         [corrected] The first cut wrongly called `export_chat`, which opens the
-         Tlgrm Export::Controller window — off-plan. Rewired to the headless
-         engine so the export use case lives in TeleBox's own UI.
-- G-US15 Archive a chat — MET [qa][render]. `archive_chat` archived REAL
-         messages from a picked chat ("✓ archived 6 message(s) from chat …");
-         live stats (24 msgs / 11 chats / 396 KB) shown.
-- G-US16 Start/stop a bot — MET [qa]. `stop_bot` stopped the real bot
-         ("✓ Bot stopped: context_assistant"); live list of registered bots.
-- G-US17 Wallet balance — MET [qa][render]. `get_wallet_balance` shows the live
-         Stars balance from payments.getStarsStatus. Spending stays dark by
-         design (read-only device).
-- G-US18 AI voice/TTS — MET [qa]. `text_to_speech` invokes the real local TTS
-         pipeline and surfaces its true result (here: piper binary not
-         installed, with the exact install command) — an honest backend state,
-         not a mock.
-- G-US19 Browse + invoke MCP tools — MET [qa][render]. The panel lists all 362
-         real advertised tools with descriptions (tools/list); the invoke canary
-         round-tripped a real tools/call ("✓ list_chats → 727 chats").
-
-## PARTIAL — control wired to a proven method; real-mouse click blocked
-
-- G-US4  Restart relay — method MET [qa]; button is `on_click → state.restart()`.
-- G-US7  Power/bypass toggle — method MET [qa]; button is `on_click → toggle_plugin`.
-- G-US10c Click a tracked row to switch the chain — method MET [qa]; row is
-         `on_click → select_tracked` (same pattern as US11–13 which ARE [click]).
-
-  Why not [click]: TeleBox is currently a **Stage Manager thumbnail**, so the
-  desktop-control tools' background captures/clicks hit the thumbnail, not the
-  live window, and promoting it disrupts the user's Stage Manager layout. This
-  is an environment constraint (surfaced per the macos-desktop-control skill),
-  not a UI defect — the GPUI click layer is proven by US3/US6/US11–13 [click]
-  earlier this session, and each control's action is proven by [qa].
-
-## Tally
-MET: 19 · PARTIAL (method-proven, click blocked by Stage Manager): 3 · ABANDON: 0
-
-Every plugin device now performs its real job from the UI, verified against the
-client's live backends. No decorative or read-only-only controls remain.
+Method note: this gate file establishes the pattern for EVERY plugin — model the
+ontology (service/item/job/store) and the user story first, gate the observable
+usability outcomes, then build. Applies next to Archiver, Bots, Wallet, AI, and the
+MCP tree (research done: virtualized tree + sticky headers + fuzzy search + counts).

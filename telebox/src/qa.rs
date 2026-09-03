@@ -102,6 +102,19 @@ fn handle(state: HostState, s: UnixStream) {
                 state.primary_action(i);
                 state.snapshot()
             }
+            "search" => {
+                // Set the Export chat-search string (the same state a keystroke sets).
+                let t = v.get("text").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                state.set_export_search(t);
+                state.snapshot()
+            }
+            "pick_export" => {
+                // Choose the export target chat by id (the same as a row click).
+                let id = v.get("id").and_then(|x| x.as_i64()).unwrap_or(0);
+                let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                state.set_export_target(id, title);
+                state.snapshot()
+            }
             "view" => {
                 if let Some(pv) = v
                     .get("name")

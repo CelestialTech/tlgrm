@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::host::{HostState, MsgVersion, PanelRow, RetentionStats, TrackedMsg};
+use crate::host::{ExportRun, HostState, MsgVersion, PanelRow, RetentionStats, TrackedMsg};
 
 // One initialize + one tools/call over a fresh connection. The tool returns its
 // payload as a JSON string in result.content[0].text, so unwrap and re-parse.
@@ -159,12 +159,14 @@ fn human_bytes(n: i64) -> String {
 }
 
 // The client's live chat list → clickable rows (used by Export and Archiver).
-fn chat_rows(sock: &str, token: &str) -> Vec<PanelRow> {
+// `limit` caps how many are returned; Export pulls the full set so its search
+// can reach every chat, not just a 40-row window.
+fn chat_rows(sock: &str, token: &str, limit: usize) -> Vec<PanelRow> {
     if let Some(s) = call(sock, token, "list_chats", json!({})) {
         if let Some(arr) = s.get("chats").and_then(Value::as_array) {
             return arr
                 .iter()
-                .take(40)
+                .take(limit)
                 .map(|c| PanelRow {
                     id: i64_of(c, "id"),
                     sid: String::new(),
@@ -197,30 +199,26 @@ fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
                 state.set_panel_readout(0, readout, rows, true);
             }
         }
-        // Export — the HEADLESS gradual engine to disk: live progress + a chat
-        // to export. get_gradual_export_status reads GradualArchiver, NOT the
-        // client's native Export::Controller, so nothing pops up in Tlgrm.
+        // Export — the HEADLESS gradual engine (GradualArchiver, never the
+        // client's Export::Controller). Ontology: set export_run to Some ONLY
+        // while a run truly exists; otherwise None (no phantom "idle 0/6").
         1 => {
-            let mut readout = Vec::new();
             if let Some(s) = call(sock, token, "get_gradual_export_status", json!({})) {
                 let st = str_of(&s, "state");
-                readout.push(("state".into(), if st.is_empty() { "idle".into() } else { st }));
-                let title = str_of(&s, "chat_title");
-                if !title.is_empty() {
-                    readout.push(("chat".into(), title));
-                }
-                let (arch, total) = (i64_of(&s, "archived_messages"), i64_of(&s, "total_messages"));
-                if arch > 0 || total > 0 {
-                    readout.push(("progress".into(), format!("{arch} / {total}")));
-                }
-                let batches = i64_of(&s, "batches_completed");
-                if batches > 0 {
-                    readout.push(("batches".into(), batches.to_string()));
+                if matches!(st.as_str(), "running" | "paused" | "scanning" | "archiving" | "queued") {
+                    state.set_export_run(Some(ExportRun {
+                        chat: str_of(&s, "chat_title"),
+                        done: i64_of(&s, "archived_messages"),
+                        total: i64_of(&s, "total_messages"),
+                        state: st,
+                    }));
+                } else {
+                    state.set_export_run(None);
                 }
             }
-            let rows = chat_rows(sock, token);
-            readout.push(("chats loaded".into(), rows.len().to_string()));
-            state.set_panel_readout(1, readout, rows, true);
+            // The FULL chat set, so the panel's search can reach every chat.
+            let rows = chat_rows(sock, token, 2000);
+            state.set_panel_readout(1, Vec::new(), rows, true);
         }
         // Archiver — archive ANY chat to the SQLite store: real stats + a chat.
         3 => {
@@ -229,13 +227,14 @@ fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
                 if s.get("error").is_some() {
                     readout.push(("archiver".into(), str_of(&s, "error")));
                 } else {
+                    // The archive STORE — what you've saved. (Ephemeral capture is
+                    // a Retention concern, deliberately not shown here.)
                     readout.push(("messages archived".into(), i64_of(&s, "total_messages").to_string()));
                     readout.push(("chats".into(), i64_of(&s, "total_chats").to_string()));
-                    readout.push(("ephemeral captured".into(), i64_of(&s, "ephemeral_captured").to_string()));
                     readout.push(("db size".into(), human_bytes(i64_of(&s, "database_size_bytes"))));
                 }
             }
-            let rows = chat_rows(sock, token);
+            let rows = chat_rows(sock, token, 40);
             state.set_panel_readout(3, readout, rows, true);
         }
         // Bots — the automation framework: list bots, start/stop the picked one.

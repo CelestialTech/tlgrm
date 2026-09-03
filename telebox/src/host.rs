@@ -126,6 +126,17 @@ pub struct PanelData {
     pub result: String,                 // outcome of the last action button
     pub loaded: bool,                   // did the readout ever fetch successfully
 }
+// An export RUN — exists ONLY while an export is actually in progress. When
+// there is no run, this is None (never a phantom "idle 0/6"). Ontology: the
+// Export plugin is either IDLE (pick a chat) or RUNNING (this job), never both.
+#[derive(Clone)]
+pub struct ExportRun {
+    pub chat: String,
+    pub done: i64,
+    pub total: i64,
+    pub state: String,
+}
+
 // A queued tool call: a button click parks one here; the poller runs it and
 // writes the outcome back into that plugin's PanelData.result.
 #[derive(Clone)]
@@ -170,6 +181,11 @@ pub struct Inner {
     pub panel_sel: Vec<Option<usize>>,
     pub action: Option<PendingAction>,
     pub busy: bool,
+    // Export plugin ontology: a live search string, the chat the user has chosen
+    // to export (by id, survives filtering), and the run in progress (if any).
+    pub export_search: String,
+    pub export_target: Option<(i64, String)>,
+    pub export_run: Option<ExportRun>,
     pub shot_request: Option<String>,
     pub shot_armed: bool,
     pub shot_result: Option<(u32, u32, bool)>,
@@ -213,7 +229,7 @@ pub fn plugin_templates() -> Vec<Plugin> {
             perms: "session · invoke · events",
             desc: "Archive ANY chat's history — to a local SQLite archive or a mirror group. Deleted-account sweep and view-once capture are modes, not the whole job.",
             live: false,
-            kind: "Chat archiver · any chat → archive", active: "invoke" },
+            kind: "Saves any chat's messages & media to a local database you can keep and search", active: "invoke" },
         Plugin { name: "Bots", slot: "slot 05 · automations", runtime: Runtime::Python,
             perms: "session · invoke · ui · events",
             desc: "The bot framework and rule automations.",
@@ -267,6 +283,9 @@ impl HostState {
                 panel_sel: vec![None; plugin_templates().len()],
                 action: None,
                 busy: false,
+                export_search: String::new(),
+                export_target: None,
+                export_run: None,
                 shot_request: None,
                 shot_armed: false,
                 shot_result: None,
@@ -432,6 +451,35 @@ impl HostState {
         }
     }
 
+    // --- Export plugin: search, chosen target, live run --------------------
+    pub fn export_search(&self) -> String {
+        self.0.lock().map(|i| i.export_search.clone()).unwrap_or_default()
+    }
+    pub fn set_export_search(&self, s: String) {
+        if let Ok(mut i) = self.0.lock() { i.export_search = s; }
+    }
+    pub fn export_search_push(&self, s: &str) {
+        if let Ok(mut i) = self.0.lock() { i.export_search.push_str(s); }
+    }
+    pub fn export_search_backspace(&self) {
+        if let Ok(mut i) = self.0.lock() { i.export_search.pop(); }
+    }
+    pub fn export_search_clear(&self) {
+        if let Ok(mut i) = self.0.lock() { i.export_search.clear(); }
+    }
+    pub fn export_target(&self) -> Option<(i64, String)> {
+        self.0.lock().ok().and_then(|i| i.export_target.clone())
+    }
+    pub fn set_export_target(&self, id: i64, title: String) {
+        if let Ok(mut i) = self.0.lock() { i.export_target = Some((id, title)); }
+    }
+    pub fn export_run(&self) -> Option<ExportRun> {
+        self.0.lock().ok().and_then(|i| i.export_run.clone())
+    }
+    pub fn set_export_run(&self, r: Option<ExportRun>) {
+        if let Ok(mut i) = self.0.lock() { i.export_run = r; }
+    }
+
     // The one primary action for device `i`, built from its current selection.
     // BOTH the on-screen button and the QA socket call this, so there is a
     // single code path per plugin and no second implementation to drift.
@@ -442,21 +490,17 @@ impl HostState {
             // MCP: a canary invoke proving the relay round-trips a tools/call.
             0 => self.enqueue(0, "list_chats", serde_json::json!({}), "invoke · list_chats".into()),
             // Export: the HEADLESS gradual engine (GradualArchiver) — never the
-            // client's native export window. The button starts an export for the
-            // picked chat, or cancels the one in flight; progress shows in this
-            // panel, and Tlgrm is untouched.
+            // client's native export window. If a run is live, the action cancels
+            // it; otherwise it starts an export for the chosen chat (by id, so it
+            // is unaffected by search filtering).
             1 => {
-                let running = d.readout.iter().any(|(k, v)| {
-                    k == "state" && matches!(v.as_str(),
-                        "exporting" | "running" | "archiving" | "scanning" | "paused" | "queued")
-                });
-                if running {
+                if self.export_run().is_some() {
                     self.enqueue(1, "cancel_gradual_export", serde_json::json!({}), "cancel export".into());
-                } else if let Some(r) = row {
-                    self.enqueue(1, "start_gradual_export", serde_json::json!({ "chat_id": r.id }),
-                        format!("export {}", r.title));
+                } else if let Some((id, title)) = self.export_target() {
+                    self.enqueue(1, "start_gradual_export", serde_json::json!({ "chat_id": id }),
+                        format!("export {title}"));
                 } else {
-                    self.set_result(1, "pick a chat first".into());
+                    self.set_result(1, "pick a chat to export first".into());
                 }
             }
             // Archiver: archive the picked chat's history into the SQLite store.
@@ -630,6 +674,12 @@ impl HostState {
         let panel = i.panels.get(selp).cloned().unwrap_or_default();
         let panel_readout: Vec<serde_json::Value> =
             panel.readout.iter().map(|(k, v)| serde_json::json!([k, v])).collect();
+        // Export search reach — computed here so the QA snapshot can assert the filter.
+        let export_ql = i.export_search.to_lowercase();
+        let export_total = i.panels.get(1).map(|p| p.rows.len()).unwrap_or(0);
+        let export_matches = i.panels.get(1).map(|p| {
+            p.rows.iter().filter(|r| export_ql.is_empty() || r.title.to_lowercase().contains(&export_ql)).count()
+        }).unwrap_or(0);
         serde_json::json!({
             "host": if running { "running" } else { "stopped" },
             "running": running,
@@ -649,6 +699,15 @@ impl HostState {
                 "readout": panel_readout,
                 "loaded": panel.loaded,
                 "busy": i.busy,
+            },
+            "export": {
+                "mode": if i.export_run.is_some() { "running" } else { "idle" },
+                "search": i.export_search,
+                "chats_total": export_total,
+                "matches": export_matches,
+                "target": i.export_target.as_ref().map(|(id, t)| serde_json::json!({ "id": id, "title": t })),
+                "run": i.export_run.as_ref().map(|r| serde_json::json!({
+                    "chat": r.chat, "done": r.done, "total": r.total, "state": r.state })),
             },
         })
     }
