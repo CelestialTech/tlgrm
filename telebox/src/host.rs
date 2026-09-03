@@ -195,6 +195,10 @@ pub struct Inner {
     // driving archive_chat into the local SQLite store.
     pub archiver_search: String,
     pub archiver_target: Option<(i64, String)>,
+    // Bots: the selected bot (id) and its detail lines (info + activity stats),
+    // filled by the poller from get_bot_info.
+    pub bots_selected: Option<String>,
+    pub bots_detail: Vec<(String, String)>,
     // MCP domain-tree UI: which nodes are expanded (domain name, or
     // "domain\u{1f}sub"), the in-place filter, and the selected tool.
     pub mcp_expanded: HashSet<String>,
@@ -309,6 +313,8 @@ impl HostState {
                 export_cancel: false,
                 archiver_search: String::new(),
                 archiver_target: None,
+                bots_selected: None,
+                bots_detail: Vec::new(),
                 mcp_expanded: HashSet::new(),
                 mcp_search: String::new(),
                 mcp_selected: None,
@@ -544,6 +550,23 @@ impl HostState {
         if let Ok(mut i) = self.0.lock() { i.archiver_target = Some((id, title)); }
     }
 
+    // --- Bots: selection + detail ------------------------------------------
+    pub fn bots_selected(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|i| i.bots_selected.clone())
+    }
+    pub fn set_bots_selected(&self, id: String) {
+        if let Ok(mut i) = self.0.lock() {
+            i.bots_selected = Some(id);
+            i.bots_detail.clear(); // the old detail was a different bot
+        }
+    }
+    pub fn bots_detail(&self) -> Vec<(String, String)> {
+        self.0.lock().map(|i| i.bots_detail.clone()).unwrap_or_default()
+    }
+    pub fn set_bots_detail(&self, lines: Vec<(String, String)>) {
+        if let Ok(mut i) = self.0.lock() { i.bots_detail = lines; }
+    }
+
     // --- MCP domain tree ---------------------------------------------------
     pub fn mcp_expanded(&self, key: &str) -> bool {
         self.0.lock().map(|i| i.mcp_expanded.contains(key)).unwrap_or(false)
@@ -630,7 +653,6 @@ impl HostState {
     // single code path per plugin and no second implementation to drift.
     pub fn primary_action(&self, i: usize) {
         let d = self.panel(i);
-        let row = self.panel_row_sel(i).and_then(|r| d.rows.get(r).cloned());
         match i {
             // MCP: a canary invoke proving the relay round-trips a tools/call.
             0 => self.enqueue(0, "list_chats", serde_json::json!({}), "invoke · list_chats".into()),
@@ -657,14 +679,18 @@ impl HostState {
                     format!("archive {title}")),
                 None => self.set_result(3, "pick a chat to archive first".into()),
             },
-            // Bots: start or stop the picked bot, by its current run state.
-            4 => match row {
-                Some(r) if r.on => self.enqueue(4, "stop_bot", serde_json::json!({ "bot_id": r.sid }),
-                    format!("stop {}", r.title)),
-                Some(r) => self.enqueue(4, "start_bot", serde_json::json!({ "bot_id": r.sid }),
-                    format!("start {}", r.title)),
-                None => self.set_result(4, "pick a bot first".into()),
-            },
+            // Bots: start or stop the SELECTED bot, by its current run state.
+            4 => {
+                match self.bots_selected().and_then(|s| d.rows.iter().find(|r| r.sid == s).cloned()) {
+                    Some(r) if r.on => self.enqueue(4, "stop_bot", serde_json::json!({ "bot_id": r.sid }),
+                        format!("stop {}", r.title)),
+                    Some(r) => self.enqueue(4, "start_bot", serde_json::json!({ "bot_id": r.sid }),
+                        format!("start {}", r.title)),
+                    None => self.set_result(4, "select a bot first".into()),
+                }
+                // Clear the detail so the poller refetches it with the new state.
+                self.set_bots_detail(Vec::new());
+            }
             // AI: prove the local voice pipeline by synthesizing a sample.
             6 => self.enqueue(6, "text_to_speech",
                 serde_json::json!({ "text": "TeleBox voice check. The local text to speech pipeline is live." }),
@@ -872,6 +898,10 @@ impl HostState {
                 "search": i.archiver_search,
                 "matches": arc_matches,
                 "target": i.archiver_target.as_ref().map(|(id, t)| serde_json::json!({ "id": id, "title": t })),
+            },
+            "bots": {
+                "selected": i.bots_selected,
+                "detail": i.bots_detail.iter().map(|(k, v)| serde_json::json!([k, v])).collect::<Vec<_>>(),
             },
         })
     }

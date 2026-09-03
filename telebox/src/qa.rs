@@ -129,6 +129,11 @@ fn handle(state: HostState, s: UnixStream) {
                 state.set_archiver_target(id, title);
                 state.snapshot()
             }
+            "select_bot" => {
+                let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                state.set_bots_selected(id);
+                state.snapshot()
+            }
             "mcp_toggle" => {
                 let key = v.get("key").and_then(|x| x.as_str()).unwrap_or("").to_string();
                 state.mcp_toggle(key);

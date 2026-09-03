@@ -214,6 +214,8 @@ impl TeleBox {
             self.retention_body(cx).into_any_element()
         } else if i == 3 {
             self.archiver_body(cx).into_any_element()
+        } else if i == 4 {
+            self.bots_body(cx).into_any_element()
         } else {
             self.relay_body(i, p, active, cx).into_any_element()
         };
@@ -614,6 +616,92 @@ impl TeleBox {
             .child(search_box)
             .children(detail)
             .child(tree)
+    }
+
+    // Bots device — the automation framework: Item (a bot, running/stopped),
+    // Action (start/stop), Store (per-bot activity stats). Few bots, so no search
+    // — a list you inspect, with a detail card for the selected bot.
+    fn bots_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let d = self.state.panel(4);
+        let busy = self.state.busy();
+        let selected = self.state.bots_selected();
+        let detail = self.state.bots_detail();
+
+        let field = |k: String, v: String| {
+            div().flex().flex_col().gap_1().flex_shrink_0()
+                .child(mono(INK3).text_xs().child(k))
+                .child(mono(INK).child(v))
+        };
+        let mut overview = div().flex().flex_wrap().items_center().gap_6().p_4().rounded_lg()
+            .bg(rgb(WELL)).border_1().border_color(rgb(LINE))
+            .child(mono(INK3).text_xs().child("BOTS"))
+            .child(div().w(px(1.)).h(px(28.)).bg(rgb(LINE2)).flex_shrink_0());
+        if d.readout.is_empty() {
+            overview = overview.child(mono(INK3).text_sm().child("querying the bot framework…"));
+        }
+        for (k, v) in d.readout.iter() {
+            overview = overview.child(field(k.clone(), v.clone()));
+        }
+        overview = overview.child(div().flex_1()).child(mono(INK3).text_xs().child("automations · rule engine"));
+
+        let mut list = div().flex().flex_col().gap_2();
+        if d.rows.is_empty() {
+            list = list.child(mono(INK3).text_sm().child("no bots registered"));
+        }
+        for (bi, r) in d.rows.iter().enumerate() {
+            let is_sel = selected.as_deref() == Some(r.sid.as_str());
+            let sid = r.sid.clone();
+            list = list.child(div().id(("botrow", bi)).cursor_pointer()
+                .flex().items_center().gap_3().py_2().px_3().rounded_md()
+                .bg(rgb(if is_sel { PANEL2 } else { WELL }))
+                .border_1().border_color(rgb(if is_sel { MINT_DK } else { LINE2 }))
+                .child(dot(if r.on { OK } else { INK3 }, 8.))
+                .child(div().flex().flex_col().gap_1().flex_1().min_w_0()
+                    .child(div().text_sm().text_color(rgb(INK)).child(r.title.clone()))
+                    .child(mono(INK3).text_xs().whitespace_nowrap().overflow_hidden().text_ellipsis().child(r.sub.clone())))
+                .child(mono(if r.on { OK } else { INK3 }).text_xs().child(if r.on { "running" } else { "stopped" }))
+                .on_click(cx.listener(move |this, _, _, cx| { this.state.set_bots_selected(sid.clone()); cx.notify(); })));
+        }
+
+        let detail_card = selected.as_ref().map(|sid| {
+            let running = d.rows.iter().find(|r| &r.sid == sid).map(|r| r.on).unwrap_or(false);
+            let name = d.rows.iter().find(|r| &r.sid == sid).map(|r| r.title.clone()).unwrap_or_else(|| sid.clone());
+            let (bg, fg, bd) = if running { (0x2A1512u32, CRIT, CRIT) } else { (MINT_DK, MINT, MINT) };
+            let btn = div().id("bot-toggle").cursor_pointer().flex_shrink_0().px_4().py_2().rounded_md()
+                .bg(rgb(bg)).border_1().border_color(rgb(bd))
+                .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(rgb(fg))
+                    .child(if busy { "working…".to_string() } else if running { "Stop bot".to_string() } else { "Start bot".to_string() }))
+                .on_click(cx.listener(|this, _, _, cx| { this.state.primary_action(4); cx.notify(); }));
+            let mut lines = div().flex().flex_wrap().items_center().gap_5();
+            if detail.is_empty() {
+                lines = lines.child(mono(INK3).text_xs().child("loading activity…".to_string()));
+            }
+            for (k, v) in detail.iter() {
+                lines = lines.child(field(k.clone(), v.clone()));
+            }
+            div().flex().flex_col().gap_3().p_4().rounded_lg().bg(rgb(WELL)).border_1().border_color(rgb(MINT_DK))
+                .child(div().flex().items_center().gap_2()
+                    .child(dot(if running { OK } else { INK3 }, 8.))
+                    .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).text_color(rgb(INK)).child(name))
+                    .child(div().flex_1())
+                    .child(btn))
+                .child(lines)
+        });
+
+        let result_line = if d.result.is_empty() {
+            mono(INK3).text_xs().child(String::new())
+        } else {
+            let c = if d.result.starts_with('✕') { CRIT } else if d.result.starts_with('✓') { OK } else { INK2 };
+            mono(c).text_sm().child(d.result.clone())
+        };
+
+        div().flex().flex_col().gap_3().w_full()
+            .child(overview)
+            .child(div().flex().flex_col().gap_2()
+                .child(mono(INK3).text_xs().child("REGISTERED BOTS · click to inspect"))
+                .child(list))
+            .children(detail_card)
+            .child(result_line)
     }
 
     // Archiver device — same find-a-chat ontology as Export, but the action is a

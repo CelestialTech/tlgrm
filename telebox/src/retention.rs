@@ -274,6 +274,38 @@ fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
                 ];
                 state.set_panel_readout(4, readout, rows, true);
             }
+            // The selected bot's detail — fetched ONCE per selection (cleared on
+            // (re)select and after a start/stop), so it doesn't compete with the
+            // toggle action on the flaky single-call bridge.
+            if let Some(botid) = state.bots_selected() {
+                if state.bots_detail().is_empty() {
+                    if let Some(info) = call(sock, token, "get_bot_info", json!({ "bot_id": botid })) {
+                        let mut lines = Vec::new();
+                        if info.get("error").is_some() {
+                            lines.push(("bot".into(), str_of(&info, "error")));
+                        } else {
+                            let ver = str_of(&info, "version");
+                            if !ver.is_empty() {
+                                lines.push(("version".into(), ver));
+                            }
+                            let auth = str_of(&info, "author");
+                            if !auth.is_empty() {
+                                lines.push(("author".into(), auth));
+                            }
+                            lines.push(("state".into(),
+                                if info.get("is_running").and_then(Value::as_bool) == Some(true) { "running".into() } else { "stopped".into() }));
+                            if let Some(st) = info.get("statistics") {
+                                lines.push(("messages".into(), i64_of(st, "messages_processed").to_string()));
+                                lines.push(("commands".into(), i64_of(st, "commands_executed").to_string()));
+                                lines.push(("errors".into(), i64_of(st, "errors_occurred").to_string()));
+                                let avg = st.get("avg_execution_ms").and_then(Value::as_f64).unwrap_or(0.0);
+                                lines.push(("avg ms".into(), format!("{avg:.1}")));
+                            }
+                        }
+                        state.set_bots_detail(lines);
+                    }
+                }
+            }
         }
         // Wallet — Stars / TON: the real live balance. Spending stays dark.
         5 => {
