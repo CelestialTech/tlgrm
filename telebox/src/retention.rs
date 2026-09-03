@@ -340,25 +340,29 @@ fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
                 .unwrap_or_default();
             state.set_panel_readout(5, readout, rows, true);
         }
-        // AI — local LLM / TTS / voice: probe the real TTS service state.
+        // AI — local LLM / TTS / voice: probe the TTS service state ONCE (the
+        // empty-text probe), then stop, so it doesn't starve the Speak action on
+        // the single-call bridge.
         6 => {
-            let status = match call(sock, token, "text_to_speech", json!({ "text": "" })) {
-                Some(s) => {
-                    let e = str_of(&s, "error");
-                    if e.contains("not initialized") {
-                        "offline".into()
-                    } else {
-                        // "Missing text" (our empty probe) means the service is up.
-                        "ready".into()
+            if state.panel(6).readout.is_empty() {
+                let status = match call(sock, token, "text_to_speech", json!({ "text": "" })) {
+                    Some(s) => {
+                        let e = str_of(&s, "error");
+                        if e.contains("not initialized") {
+                            "offline".into()
+                        } else {
+                            // "Missing text" (our empty probe) means the service is up.
+                            "ready".into()
+                        }
                     }
-                }
-                None => "no response".into(),
-            };
-            let readout = vec![
-                ("engine".into(), "local TTS · Piper / espeak / coqui".into()),
-                ("service".into(), status),
-            ];
-            state.set_panel_readout(6, readout, Vec::new(), true);
+                    None => "no response".into(),
+                };
+                let readout = vec![
+                    ("engine".into(), "local TTS · Piper / espeak / coqui".into()),
+                    ("service".into(), status),
+                ];
+                state.set_panel_readout(6, readout, Vec::new(), true);
+            }
         }
         _ => {}
     }

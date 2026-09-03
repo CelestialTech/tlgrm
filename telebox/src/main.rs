@@ -192,12 +192,9 @@ impl TeleBox {
 
     // The stage: the selected device's control surface.
     fn device_panel(&self, i: usize, p: &Plugin, active: bool, cx: &mut Context<Self>) -> Div {
-        // Header: mark, name, kind, preset, power.
-        let mark = div().size(px(42.)).rounded_md().flex().items_center().justify_center()
-            .bg(rgb(RAISED)).border_1().border_color(rgb(LINE))
-            .child(div().font_weight(FontWeight::BOLD).text_color(rgb(MINT)).child(&p.name[..1]));
+        // Header: name, kind, power. (No decorative letter mark — it served
+        // no function.)
         let header = div().flex().items_center().gap_3().pb_4().mb_4().border_b_1().border_color(rgb(LINE2))
-            .child(mark)
             .child(
                 div().flex().flex_col().gap_1()
                     .child(div().text_xl().font_weight(FontWeight::BOLD).text_color(rgb(INK)).child(p.name))
@@ -663,7 +660,8 @@ impl TeleBox {
 
         div().flex().flex_col().gap_3().w_full()
             .child(status_card)
-            .child(div().flex().items_center().gap_3().child(speak_btn).child(result_line))
+            .child(div().flex().child(speak_btn))
+            .child(result_line)
             .child(div().pl_3().py_2().border_l_2().border_color(rgb(VIOLET_DK))
                 .child(mono(INK3).text_xs().child(
                     "Transcription runs on a voice message (transcribe_voice_message) — a voice-message picker is the next step.")))
