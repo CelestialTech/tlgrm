@@ -8,6 +8,7 @@
 #include "ui/text/text_entity.h"
 #include "iv/iv_rich_page.h"
 #include "iv/iv_rich_message_serializer.h"
+#include "history/history.h" // NewMessageType::Existing (full enum, not just the fwd decl)
 
 namespace MCP {
 
@@ -638,16 +639,29 @@ QJsonObject Server::toolGetChatHistory(const QJsonObject &args) {
 			int total = 0;
 			const QVector<MTPMessage> *list = nullptr;
 			result.match([&](const MTPDmessages_messages &d) {
+				_session->data().processUsers(d.vusers());
+				_session->data().processChats(d.vchats());
 				total = int(d.vmessages().v.size()); // small chat: fully returned
 				list = &d.vmessages().v;
 			}, [&](const MTPDmessages_messagesSlice &d) {
+				_session->data().processUsers(d.vusers());
+				_session->data().processChats(d.vchats());
 				total = d.vcount().v;                // the chat's REAL total
 				list = &d.vmessages().v;
 			}, [&](const MTPDmessages_channelMessages &d) {
+				_session->data().processUsers(d.vusers());
+				_session->data().processChats(d.vchats());
 				total = d.vcount().v;                // the chat's REAL total
 				list = &d.vmessages().v;
 			}, [&](const MTPDmessages_messagesNotModified &) {
 			});
+			// Load the fetched messages into the data layer, so the same ids can
+			// then be resolved by download_media and the read tools (a raw MTP
+			// page otherwise leaves the client's data session empty).
+			if (list) {
+				_session->data().processMessages(
+					*list, NewMessageType::Existing);
+			}
 
 			QJsonArray msgs;
 			qint64 oldest = 0;
@@ -726,6 +740,153 @@ QJsonObject Server::toolGetChatHistory(const QJsonObject &args) {
 			fail(error.type());
 		}).send();
 	});
+}
+
+// Download the media file attached to one message to disk, so an exporter can
+// keep the actual bytes, not just a size. Reuses the client's own downloader
+// (document->save / photo->load with a per-message FileOrigin), the same path
+// the UI and the archiver use — nothing is re-implemented. Blocks on a nested
+// event loop until the file is written or the timeout fires; a message with no
+// media, or an unloaded message/peer, is an honest error, not an empty success.
+QJsonObject Server::toolDownloadMedia(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto messageId = args["message_id"].toVariant().toLongLong();
+	if (!chatId || !messageId) {
+		return toolError("chat_id and message_id are required");
+	}
+	auto peer = resolvePeer(chatId);
+	if (!peer) {
+		return toolError(QString("Chat %1 is not loaded; open it once in the "
+			"client, or use list_chats to get a valid chat_id").arg(chatId));
+	}
+	const auto item = _session->data().message(peer->id, MsgId(messageId));
+	if (!item) {
+		return toolError(QString("Message %1 in chat %2 is not loaded; fetch it "
+			"with get_chat_history first").arg(messageId).arg(chatId));
+	}
+	const auto media = item->media();
+	if (!media) {
+		return toolError("Message has no downloadable media");
+	}
+
+	// Destination: out_path (a full file path) wins; else out_dir plus the file's
+	// own Telegram name; else a temp file — so even a bare call lands somewhere.
+	const auto outPath = args.value("out_path").toString();
+	const auto outDir = args.value("out_dir").toString();
+	const auto chooseTarget = [&](const QString &suggested) -> QString {
+		if (!outPath.isEmpty()) {
+			QFileInfo(outPath).dir().mkpath(".");
+			return outPath;
+		}
+		const auto dir = outDir.isEmpty() ? QDir::tempPath() : outDir;
+		QDir().mkpath(dir);
+		return QDir(dir).filePath(suggested);
+	};
+
+	const auto origin = Data::FileOrigin(
+		Data::FileOriginMessage(peer->id, MsgId(messageId)));
+
+	if (const auto doc = media->document()) {
+		auto name = doc->filename();
+		if (name.isEmpty()) {
+			name = QString("document_%1").arg(messageId);
+		}
+		const auto target = chooseTarget(name);
+		const auto mime = doc->mimeString();
+
+		// Already on disk? Copy from the client's cache — no network round-trip.
+		const auto existing = doc->filepath(true);
+		if (!existing.isEmpty() && QFile::exists(existing)) {
+			if (existing != target) {
+				QFile::remove(target);
+				QFile::copy(existing, target);
+			}
+			return QJsonObject{
+				{ "success", true },
+				{ "path", target },
+				{ "bytes", qint64(QFileInfo(target).size()) },
+				{ "mime", mime },
+				{ "source", "cache" },
+			};
+		}
+
+		rpl::lifetime lifetime;
+		return awaitMtp([&](auto done, auto fail) {
+			const auto finish = [=]() {
+				const auto local = doc->filepath(true);
+				const auto path = (!local.isEmpty() && QFile::exists(local))
+					? local : target;
+				if (QFile::exists(path) && QFileInfo(path).size() > 0) {
+					done(QJsonObject{
+						{ "success", true },
+						{ "path", path },
+						{ "bytes", qint64(QFileInfo(path).size()) },
+						{ "mime", mime },
+						{ "source", "cloud" },
+					});
+				} else {
+					fail("download finished but no file was written");
+				}
+			};
+			// Doc-specific progress stream; fire once loading has stopped.
+			_session->data().documentLoadProgress(
+			) | rpl::filter([doc](not_null<DocumentData*> d) {
+				return d == doc && !doc->loading();
+			}) | rpl::take(1) | rpl::on_next([finish](not_null<DocumentData*>) {
+				finish();
+			}, lifetime);
+
+			doc->save(origin, target, LoadFromCloudOrLocal, false);
+			if (!doc->loading()) {
+				finish(); // completed synchronously (already cached elsewhere)
+			}
+		}, 180000);
+	}
+
+	if (const auto photo = media->photo()) {
+		const auto target = chooseTarget(QString("photo_%1.jpg").arg(messageId));
+		// Create the media view BEFORE load(): a cached photo's done callback
+		// fires synchronously and set()s into the active view; without one the
+		// bytes are discarded (learned in the archiver).
+		auto view = photo->createMediaView();
+
+		rpl::lifetime lifetime;
+		return awaitMtp([&](auto done, auto fail) {
+			const auto finish = [=, &view]() {
+				if (view->saveToFile(target)
+					&& QFile::exists(target)
+					&& QFileInfo(target).size() > 0) {
+					done(QJsonObject{
+						{ "success", true },
+						{ "path", target },
+						{ "bytes", qint64(QFileInfo(target).size()) },
+						{ "mime", QString("image/jpeg") },
+						{ "source", "cloud" },
+					});
+				} else {
+					fail("photo loaded but could not be written");
+				}
+			};
+			// Photos have no per-photo stream; wait on the global downloader
+			// and gate on this view being loaded.
+			_session->downloaderTaskFinished(
+			) | rpl::filter([view] {
+				return view->loaded();
+			}) | rpl::take(1) | rpl::on_next([finish](auto&&) {
+				finish();
+			}, lifetime);
+
+			photo->load(Data::PhotoSize::Large, origin, LoadFromCloudOrLocal, false);
+			if (view->loaded()) {
+				finish(); // already cached
+			}
+		}, 180000);
+	}
+
+	return toolError("Message media is neither a document nor a photo");
 }
 
 QJsonObject Server::toolReadMessages(const QJsonObject &args) {

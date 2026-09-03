@@ -165,6 +165,7 @@ private:
 	QJsonObject toolCheckChannelUsername(const QJsonObject &args);
 	QJsonObject toolReadMessages(const QJsonObject &args);
 	QJsonObject toolGetChatHistory(const QJsonObject &args);
+	QJsonObject toolDownloadMedia(const QJsonObject &args);
 	QJsonObject toolSendMessage(const QJsonObject &args);
 	QJsonObject toolSendDocument(const QJsonObject &args);
 	QJsonObject toolSendRichMessage(const QJsonObject &args);

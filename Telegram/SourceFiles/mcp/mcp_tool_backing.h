@@ -126,6 +126,7 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"detect_topics",                 Backing::LocalOnly },
 	{"disable_away",                  Backing::LocalOnly },
 	{"disable_greeting",              Backing::LocalOnly },
+	{"download_media",                Backing::LiveSession },
 	{"edit_message",                  Backing::LiveSession },
 	{"edit_quick_reply",              Backing::LocalOnly },
 	{"execute_chat_rules",            Backing::LocalOnly },

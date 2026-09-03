@@ -84,6 +84,36 @@ void Server::registerTools() {
 			}
 		},
 		Tool{
+			"download_media",
+			"Download the media file (document/photo) attached to one message to "
+				"disk via the client's own downloader, and return its saved path, "
+				"byte size and mime. Complements get_chat_history (which reports "
+				"sizes only). Pass out_path for an exact file, or out_dir to keep "
+				"the file's Telegram name; a message with no media is an error.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (from list_chats)"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Message ID whose media to download"}
+					}},
+					{"out_dir", QJsonObject{
+						{"type", "string"},
+						{"description", "Directory to save into (file keeps its name)"}
+					}},
+					{"out_path", QJsonObject{
+						{"type", "string"},
+						{"description", "Exact file path to write (overrides out_dir)"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id"}},
+			}
+		},
+		Tool{
 			"send_message",
 			"Send a message with full formatting: markdown (parse_mode) or precise "
 				"entities (bold/italic/underline/strike/spoiler/code/pre/blockquote/"
