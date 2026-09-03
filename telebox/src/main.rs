@@ -508,17 +508,62 @@ impl TeleBox {
             } else {
                 format!("{total} tools · {} domains", doms.len())
             }))
-            .on_click(cx.listener(|this, _, window, cx| { window.focus(&this.mcp_focus, cx); cx.notify(); }))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.state.mcp_set_active_arg(None); // clicking search takes typing back
+                window.focus(&this.mcp_focus, cx);
+                cx.notify();
+            }))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _w, cx| {
                 let ks = &ev.keystroke;
                 if ks.modifiers.control || ks.modifiers.platform { return; }
-                match ks.key.as_str() {
-                    "backspace" => this.state.mcp_search_backspace(),
-                    "escape" => this.state.mcp_search_clear(),
-                    _ => { if let Some(ch) = ks.key_char.as_ref() { this.state.mcp_search_push(ch.as_str()); } }
+                // One focus handle serves both the filter and the arg form: when a
+                // param field is active, keystrokes fill that arg instead.
+                if this.state.mcp_active_arg().is_some() {
+                    match ks.key.as_str() {
+                        "backspace" => this.state.mcp_arg_backspace(),
+                        "escape" => this.state.mcp_set_active_arg(None),
+                        _ => { if let Some(ch) = ks.key_char.as_ref() { this.state.mcp_arg_push(ch.as_str()); } }
+                    }
+                } else {
+                    match ks.key.as_str() {
+                        "backspace" => this.state.mcp_search_backspace(),
+                        "escape" => this.state.mcp_search_clear(),
+                        _ => { if let Some(ch) = ks.key_char.as_ref() { this.state.mcp_search_push(ch.as_str()); } }
+                    }
                 }
                 cx.notify();
             }));
+
+        // Live endpoint traffic (G2): every relay call TeleBox makes flows through
+        // retention::call*, recorded newest-first. This is the real usage of the
+        // aggregated socket, not a mock — a rate plus the last handful of calls.
+        let recent = retention::recent_calls();
+        let rate = retention::call_rate(60_000);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+        let mut traffic = div().flex().flex_col().gap_2().px_3().py_2().rounded_md().bg(rgb(WELL))
+            .border_1().border_color(rgb(LINE))
+            .child(div().flex().items_center().gap_2()
+                .child(mono(INK3).text_xs().child("LIVE TRAFFIC"))
+                .child(div().flex_1())
+                .child(mono(if rate > 0 { MINT } else { INK3 }).text_xs().child(format!("{rate}/min"))));
+        if recent.is_empty() {
+            traffic = traffic.child(mono(INK3).text_xs().child("no calls yet".to_string()));
+        } else {
+            let mut rows = div().flex().flex_col().gap(px(2.));
+            for (tool, ts, ok) in recent.iter().take(6) {
+                let ago = ((now_ms - *ts).max(0)) / 1000;
+                let agostr = if ago < 1 { "just now".to_string() }
+                    else if ago < 60 { format!("{ago}s ago") }
+                    else { format!("{}m ago", ago / 60) };
+                rows = rows.child(div().flex().items_center().gap_2()
+                    .child(dot(if *ok { OK } else { CRIT }, 5.))
+                    .child(mono(INK2).text_xs().child(tool.clone()))
+                    .child(div().flex_1())
+                    .child(mono(INK3).text_xs().child(agostr)));
+            }
+            traffic = traffic.child(rows);
+        }
 
         let mut tree = div().flex().flex_col().gap(px(1.));
         for (di, d) in doms.iter().enumerate() {
@@ -597,8 +642,44 @@ impl TeleBox {
                 mono(INK3).text_xs().child(String::new())
             } else {
                 let c = if result.starts_with('✕') { CRIT } else if result.starts_with('✓') { OK } else { INK2 };
+                // wrap freely so a long JSON result never clips off the panel
                 mono(c).text_xs().child(result)
             };
+            // Arg form (G1): one editable field per param for a read tool, so a tool
+            // that needs an id (get_chat_history's chat_id) can be filled + invoked.
+            let active = self.state.mcp_active_arg();
+            let mut arg_form = div().flex().flex_col().gap(px(4.));
+            let mut has_args = false;
+            if read {
+                for (idx, p) in params.split(" · ").enumerate() {
+                    let p = p.trim();
+                    if p.is_empty() { continue; }
+                    has_args = true;
+                    let required = p.ends_with('*');
+                    let name = p.trim_end_matches('*').to_string();
+                    let val = self.state.mcp_arg_value(&name);
+                    let is_active = active.as_deref() == Some(name.as_str());
+                    let name_click = name.clone();
+                    let shown = if is_active { format!("{val}▏") } else { val.clone() };
+                    let inner = if shown.is_empty() {
+                        mono(INK3).text_xs().child(if required { "required".to_string() } else { "optional".to_string() })
+                    } else {
+                        mono(INK).text_xs().child(shown)
+                    };
+                    arg_form = arg_form.child(div().flex().items_center().gap_2()
+                        .child(mono(if required { INK2 } else { INK3 }).text_xs().w(px(96.))
+                            .child(if required { format!("{name} *") } else { name.clone() }))
+                        .child(div().id(("mcparg", idx)).cursor_pointer().flex_1().px_2().py_1().rounded_md()
+                            .bg(rgb(PANEL2)).border_1().border_color(rgb(if is_active { MINT } else { LINE }))
+                            .child(inner)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.state.mcp_set_active_arg(Some(name_click.clone()));
+                                window.focus(&this.mcp_focus, cx);
+                                cx.notify();
+                            }))));
+                }
+            }
+            let arg_form = if has_args { Some(arg_form) } else { None };
             div().flex().flex_col().gap_2().p_4().rounded_lg().bg(rgb(WELL))
                 .border_1().border_color(rgb(MINT_DK))
                 .child(div().flex().items_center().gap_2()
@@ -609,11 +690,13 @@ impl TeleBox {
                     .child(if desc.is_empty() { "(no description advertised)".to_string() } else { desc }))
                 .child(mono(INK3).text_xs()
                     .child(if params.is_empty() { "parameters: none".to_string() } else { format!("parameters: {params}   (* = required)") }))
+                .children(arg_form)
                 .child(result_line)
         });
 
         div().flex().flex_col().gap_3().w_full()
             .child(readout)
+            .child(traffic)
             .child(search_box)
             .children(detail)
             .child(tree)
@@ -658,13 +741,111 @@ impl TeleBox {
             mono(c).text_sm().child(d.result.clone())
         };
 
+        // Transcription (G4): pick a chat, then a voice/audio message in it, then
+        // transcribe. Two states — chat picker vs a picked chat's voice list —
+        // so the panel only ever shows the fields that exist right now.
+        let ai_chat = self.state.ai_chat();
+        let t_busy = self.state.ai_transcribe_busy();
+        let transcript = self.state.ai_transcript();
+        let transcript_line = if transcript.is_empty() {
+            None
+        } else {
+            let c = if transcript.starts_with('✕') { CRIT } else if transcript.starts_with('✓') { OK } else { INK2 };
+            Some(mono(c).text_sm().child(transcript))
+        };
+
+        let transcribe_section = match ai_chat {
+            None => {
+                let q = self.state.ai_search();
+                let ql = q.to_lowercase();
+                let searching = !ql.is_empty();
+                let search = div().id("ai-search").track_focus(&self.search_focus)
+                    .flex().items_center().gap_2().px_3().py_2().rounded_md().bg(rgb(WELL))
+                    .border_1().border_color(rgb(if searching { MINT_DK } else { LINE }))
+                    .child(mono(INK3).child("⌕"))
+                    .child(if searching { mono(INK).child(format!("{q}▏")) }
+                           else { mono(INK3).child("find a chat to transcribe from…".to_string()) })
+                    .child(div().flex_1())
+                    .child(mono(INK3).text_xs().child(format!("{} chats", d.rows.len())))
+                    .on_click(cx.listener(|this, _, window, cx| { window.focus(&this.search_focus, cx); cx.notify(); }))
+                    .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _w, cx| {
+                        let ks = &ev.keystroke;
+                        if ks.modifiers.control || ks.modifiers.platform { return; }
+                        match ks.key.as_str() {
+                            "backspace" => this.state.ai_search_backspace(),
+                            "escape" => this.state.ai_search_clear(),
+                            _ => { if let Some(ch) = ks.key_char.as_ref() { this.state.ai_search_push(ch.as_str()); } }
+                        }
+                        cx.notify();
+                    }));
+                let mut list = div().flex().flex_col().gap(px(2.));
+                for r in d.rows.iter().filter(|r| ql.is_empty() || r.title.to_lowercase().contains(&ql)).take(40) {
+                    let id = r.id;
+                    let title = r.title.clone();
+                    let title2 = title.clone();
+                    list = list.child(div().id(("aichat", id as usize)).cursor_pointer()
+                        .flex().items_center().gap_2().px_3().py(px(6.)).rounded_md()
+                        .bg(rgb(WELL)).border_1().border_color(rgb(LINE2))
+                        .child(div().flex_1().min_w_0().text_sm().text_color(rgb(INK))
+                            .whitespace_nowrap().overflow_hidden().text_ellipsis().child(title))
+                        .on_click(cx.listener(move |this, _, _, cx| { this.state.set_ai_chat(Some((id, title2.clone()))); cx.notify(); })));
+                }
+                div().flex().flex_col().gap_2()
+                    .child(mono(INK3).text_xs().child("TRANSCRIBE A VOICE MESSAGE"))
+                    .child(search)
+                    .child(list)
+            }
+            Some((cid, ctitle)) => {
+                let voices = self.state.ai_voice();
+                let sel = self.state.ai_voice_sel();
+                let loaded = self.state.ai_voice_loaded_for() == Some(cid);
+                let header = div().flex().items_center().gap_2()
+                    .child(mono(INK3).text_xs().child("TRANSCRIBE FROM"))
+                    .child(mono(MINT).text_sm().child(ctitle.clone()))
+                    .child(div().flex_1())
+                    .child(div().id("ai-chat-clear").cursor_pointer().px_2().py_1().rounded_md()
+                        .border_1().border_color(rgb(LINE))
+                        .child(mono(INK3).text_xs().child("change ✕"))
+                        .on_click(cx.listener(|this, _, _, cx| { this.state.set_ai_chat(None); cx.notify(); })));
+                let mut list = div().flex().flex_col().gap(px(2.));
+                if !loaded {
+                    list = list.child(mono(INK3).text_sm().child("scanning recent history…".to_string()));
+                } else if voices.is_empty() {
+                    list = list.child(mono(INK3).text_sm().child("no voice/audio messages in the recent history".to_string()));
+                }
+                for vmsg in voices.iter() {
+                    let mid = vmsg.id;
+                    let is_sel = sel == Some(mid);
+                    let label = format!("audio · {} KB · msg {}", (vmsg.bytes / 1024).max(0), mid);
+                    list = list.child(div().id(("aivoice", mid as usize)).cursor_pointer()
+                        .flex().items_center().gap_2().px_3().py(px(6.)).rounded_md()
+                        .bg(rgb(if is_sel { PANEL2 } else { WELL })).border_1().border_color(rgb(if is_sel { MINT } else { LINE2 }))
+                        .child(dot(if is_sel { MINT } else { INK3 }, 5.))
+                        .child(mono(if is_sel { MINT } else { INK2 }).text_sm().child(label))
+                        .on_click(cx.listener(move |this, _, _, cx| { this.state.set_ai_voice_sel(Some(mid)); cx.notify(); })));
+                }
+                let can = sel.is_some() && !t_busy;
+                let tbtn = div().id("ai-transcribe").cursor_pointer().flex_shrink_0().px_4().py_2().rounded_md()
+                    .bg(rgb(if can { MINT_DK } else { WELL })).border_1().border_color(rgb(if can { MINT } else { LINE }))
+                    .child(mono(if can { MINT } else { INK3 }).text_sm()
+                        .child(if t_busy { "transcribing…".to_string() } else { "Transcribe →".to_string() }))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(mid) = this.state.ai_voice_sel() { this.state.request_transcribe(cid, mid); cx.notify(); }
+                    }));
+                div().flex().flex_col().gap_2()
+                    .child(header)
+                    .child(list)
+                    .child(div().flex().child(tbtn))
+            }
+        };
+
         div().flex().flex_col().gap_3().w_full()
             .child(status_card)
             .child(div().flex().child(speak_btn))
             .child(result_line)
-            .child(div().pl_3().py_2().border_l_2().border_color(rgb(VIOLET_DK))
-                .child(mono(INK3).text_xs().child(
-                    "Transcription runs on a voice message (transcribe_voice_message) — a voice-message picker is the next step.")))
+            .child(div().h(px(1.)).bg(rgb(LINE2)))
+            .child(transcribe_section)
+            .children(transcript_line)
     }
 
     // Wallet device — read-only Store: the live Stars balance + local transaction

@@ -44,14 +44,17 @@ fn mb(bytes: i64) -> String {
     format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
 }
 
-// A full export to the default Downloads location (the on-screen button).
+// A full export to the default Downloads location (the on-screen button). A real
+// export fetches the actual media files, so `download_media` is on.
 pub fn spawn(state: HostState, sock: String, token_path: String, chat_id: i64, title: String, max_messages: Option<i64>) {
     let dir = default_out_dir(&title);
-    spawn_to(state, sock, token_path, chat_id, title, max_messages, dir);
+    spawn_to(state, sock, token_path, chat_id, title, max_messages, true, dir);
 }
 
 // The engine proper, with an explicit output dir (QA tests use a scratch dir and
-// a small `max_messages` cap so a run is never heavy).
+// a small `max_messages` cap so a run is never heavy). When `download_media` is
+// set, each media message's file is fetched to <out_dir>/media via the client's
+// download_media tool and recorded in the JSONL as media_file + media_bytes.
 pub fn spawn_to(
     state: HostState,
     sock: String,
@@ -59,6 +62,7 @@ pub fn spawn_to(
     chat_id: i64,
     title: String,
     max_messages: Option<i64>,
+    download_media: bool,
     out_dir: PathBuf,
 ) {
     thread::spawn(move || {
@@ -81,8 +85,10 @@ pub fn spawn_to(
         };
         state.log("export", format!("export {title} → {path_str}"));
 
+        let media_dir = out_dir.join("media");
         let mut offset = 0i64;
         let (mut done, mut total, mut bytes) = (0i64, 0i64, 0i64);
+        let mut media_files = 0i64;
         let running = |done, total, bytes| ExportRun {
             chat: title.clone(),
             done,
@@ -122,15 +128,49 @@ pub fn spawn_to(
 
             let msgs = p.get("messages").and_then(|v| v.as_array()).cloned().unwrap_or_default();
             for m in &msgs {
-                let _ = writeln!(file, "{}", serde_json::to_string(m).unwrap_or_default());
-                bytes += i64_of(m, "media_size");
+                let mut record = m.clone();
+                // Attachment bytes: the get_chat_history estimate by default,
+                // replaced by the real downloaded size when we fetch the file.
+                let mut msg_bytes = i64_of(m, "media_size");
+                if download_media && m.get("media_type").is_some() {
+                    let mid = i64_of(m, "id");
+                    let dl = call_slow(&sock, &token, "download_media", &json!({
+                        "chat_id": chat_id,
+                        "message_id": mid,
+                        "out_dir": media_dir.display().to_string(),
+                    }));
+                    match dl {
+                        Some(d) if d.get("success").and_then(|v| v.as_bool()) == Some(true) => {
+                            let fbytes = i64_of(&d, "bytes");
+                            msg_bytes = fbytes; // real, not the estimate
+                            media_files += 1;
+                            if let Some(o) = record.as_object_mut() {
+                                o.insert("media_file".into(), json!(str_of(&d, "path")));
+                                o.insert("media_bytes".into(), json!(fbytes));
+                            }
+                        }
+                        Some(d) => {
+                            if let Some(o) = record.as_object_mut() {
+                                o.insert("media_error".into(), json!(str_of(&d, "error")));
+                            }
+                        }
+                        None => {
+                            if let Some(o) = record.as_object_mut() {
+                                o.insert("media_error".into(), json!("client did not answer"));
+                            }
+                        }
+                    }
+                }
+                let _ = writeln!(file, "{}", serde_json::to_string(&record).unwrap_or_default());
+                bytes += msg_bytes;
                 done += 1;
+                state.set_export_run(Some(running(done, total, bytes)));
                 if let Some(cap) = max_messages {
                     if done >= cap {
                         let _ = file.flush();
                         state.set_export_run(None);
                         state.set_result(1, format!(
-                            "✓ exported {done} messages ({}) → {path_str} (test cap {cap})", mb(bytes)));
+                            "✓ exported {done} messages · {media_files} media file(s) ({}) → {path_str} (test cap {cap})", mb(bytes)));
                         state.log("export", format!("export capped at {cap} → {path_str}"));
                         return;
                     }
@@ -145,8 +185,8 @@ pub fn spawn_to(
                 let _ = file.flush();
                 state.set_export_run(None);
                 state.set_result(1, format!(
-                    "✓ exported {done} of {total} messages ({}) → {path_str}", mb(bytes)));
-                state.log("export", format!("export complete: {done} messages → {path_str}"));
+                    "✓ exported {done} of {total} messages · {media_files} media file(s) ({}) → {path_str}", mb(bytes)));
+                state.log("export", format!("export complete: {done} messages, {media_files} media → {path_str}"));
                 return;
             }
             offset = next;

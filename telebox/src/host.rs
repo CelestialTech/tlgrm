@@ -7,6 +7,7 @@
 // HostState method the QA socket calls; there is no second implementation to
 // drift.
 
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -140,6 +141,14 @@ pub struct ExportRun {
     pub path: String,  // where it's being written
 }
 
+// One voice/audio message found in a chat, offered as a transcription target.
+#[derive(Clone, Default)]
+pub struct VoiceMsg {
+    pub id: i64,    // message id
+    pub date: i64,  // unix seconds
+    pub bytes: i64, // media size
+}
+
 // A queued tool call: a button click parks one here; the poller runs it and
 // writes the outcome back into that plugin's PanelData.result.
 #[derive(Clone)]
@@ -206,10 +215,26 @@ pub struct Inner {
     pub mcp_selected: Option<String>,
     // Live tool info from tools/list: name -> (description, params summary).
     pub mcp_tool_info: HashMap<String, (String, String)>,
+    // Arg form for the selected tool: param name -> typed value, and which
+    // field is currently receiving keystrokes. Lets read tools that need a
+    // param (get_chat_history's chat_id) be filled in and invoked from here.
+    pub mcp_args: HashMap<String, String>,
+    pub mcp_active_arg: Option<String>,
     // A safe read-only invoke the user asked for; the poller runs it.
     pub mcp_invoke_pending: Option<String>,
+    pub mcp_invoke_args: Value,
     pub mcp_invoke_result: String,
     pub mcp_invoke_busy: bool,
+    // AI transcription flow (G4): pick a chat, list its voice/audio messages,
+    // transcribe the chosen one via the client's transcribe_voice_message.
+    pub ai_search: String,
+    pub ai_chat: Option<(i64, String)>,
+    pub ai_voice: Vec<VoiceMsg>,
+    pub ai_voice_loaded_for: Option<i64>,
+    pub ai_voice_sel: Option<i64>,
+    pub ai_transcript: String,
+    pub ai_transcribe_pending: Option<(i64, i64)>,
+    pub ai_transcribe_busy: bool,
     pub shot_request: Option<String>,
     pub shot_armed: bool,
     pub shot_result: Option<(u32, u32, bool)>,
@@ -319,8 +344,19 @@ impl HostState {
                 mcp_search: String::new(),
                 mcp_selected: None,
                 mcp_tool_info: HashMap::new(),
+                mcp_args: HashMap::new(),
+                mcp_active_arg: None,
                 mcp_invoke_pending: None,
+                mcp_invoke_args: Value::Null,
                 mcp_invoke_result: String::new(),
+                ai_search: String::new(),
+                ai_chat: None,
+                ai_voice: Vec::new(),
+                ai_voice_loaded_for: None,
+                ai_voice_sel: None,
+                ai_transcript: String::new(),
+                ai_transcribe_pending: None,
+                ai_transcribe_busy: false,
                 mcp_invoke_busy: false,
                 shot_request: None,
                 shot_armed: false,
@@ -597,6 +633,43 @@ impl HostState {
         if let Ok(mut i) = self.0.lock() {
             i.mcp_selected = Some(tool);
             i.mcp_invoke_result.clear(); // the last invoke was for a different tool
+            i.mcp_args.clear(); // a different tool has different params
+            i.mcp_active_arg = None;
+        }
+    }
+    // --- arg form (G1) --------------------------------------------------------
+    pub fn mcp_arg_value(&self, name: &str) -> String {
+        self.0.lock().ok().and_then(|i| i.mcp_args.get(name).cloned()).unwrap_or_default()
+    }
+    pub fn mcp_active_arg(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|i| i.mcp_active_arg.clone())
+    }
+    pub fn mcp_set_active_arg(&self, name: Option<String>) {
+        if let Ok(mut i) = self.0.lock() {
+            if let Some(ref n) = name {
+                i.mcp_args.entry(n.clone()).or_default(); // ensure a slot exists
+            }
+            i.mcp_active_arg = name;
+        }
+    }
+    pub fn mcp_arg_push(&self, s: &str) {
+        if let Ok(mut i) = self.0.lock() {
+            if let Some(n) = i.mcp_active_arg.clone() {
+                i.mcp_args.entry(n).or_default().push_str(s);
+            }
+        }
+    }
+    pub fn mcp_arg_backspace(&self) {
+        if let Ok(mut i) = self.0.lock() {
+            if let Some(n) = i.mcp_active_arg.clone() {
+                i.mcp_args.entry(n).or_default().pop();
+            }
+        }
+    }
+    // Directly set an arg (QA drives this deterministically).
+    pub fn mcp_set_arg(&self, name: &str, value: &str) {
+        if let Ok(mut i) = self.0.lock() {
+            i.mcp_args.insert(name.to_string(), value.to_string());
         }
     }
     pub fn set_mcp_tool_info(&self, m: HashMap<String, (String, String)>) {
@@ -627,13 +700,37 @@ impl HostState {
             if i.mcp_invoke_busy {
                 return;
             }
+            // Build typed args from the form: parse ints and bools, keep the
+            // rest as strings; skip blank fields so an optional param is omitted.
+            let mut m = serde_json::Map::new();
+            for (k, v) in &i.mcp_args {
+                let v = v.trim();
+                if v.is_empty() {
+                    continue;
+                }
+                let val = if let Ok(n) = v.parse::<i64>() {
+                    Value::from(n)
+                } else if v == "true" || v == "false" {
+                    Value::from(v == "true")
+                } else {
+                    Value::from(v)
+                };
+                m.insert(k.clone(), val);
+            }
+            i.mcp_invoke_args = Value::Object(m);
             i.mcp_invoke_busy = true;
             i.mcp_invoke_result = format!("… invoking {tool}");
             i.mcp_invoke_pending = Some(tool);
         }
     }
-    pub fn take_mcp_invoke(&self) -> Option<String> {
-        self.0.lock().ok().and_then(|mut i| i.mcp_invoke_pending.take())
+    // Returns the pending tool and the typed args built from the form.
+    pub fn take_mcp_invoke(&self) -> Option<(String, Value)> {
+        self.0.lock().ok().and_then(|mut i| {
+            i.mcp_invoke_pending.take().map(|t| {
+                let a = std::mem::replace(&mut i.mcp_invoke_args, Value::Null);
+                (t, if a.is_null() { serde_json::json!({}) } else { a })
+            })
+        })
     }
     pub fn set_mcp_invoke_result(&self, r: String) {
         if let Ok(mut i) = self.0.lock() {
@@ -646,6 +743,80 @@ impl HostState {
     }
     pub fn mcp_invoke_busy(&self) -> bool {
         self.0.lock().map(|i| i.mcp_invoke_busy).unwrap_or(false)
+    }
+
+    // --- AI transcription flow (G4) ------------------------------------------
+    pub fn ai_search(&self) -> String {
+        self.0.lock().map(|i| i.ai_search.clone()).unwrap_or_default()
+    }
+    pub fn ai_search_push(&self, s: &str) {
+        if let Ok(mut i) = self.0.lock() { i.ai_search.push_str(s); }
+    }
+    pub fn ai_search_backspace(&self) {
+        if let Ok(mut i) = self.0.lock() { i.ai_search.pop(); }
+    }
+    pub fn ai_search_clear(&self) {
+        if let Ok(mut i) = self.0.lock() { i.ai_search.clear(); }
+    }
+    pub fn ai_chat(&self) -> Option<(i64, String)> {
+        self.0.lock().ok().and_then(|i| i.ai_chat.clone())
+    }
+    // Pick (or clear) the chat to transcribe from — resets everything downstream
+    // so a new chat's voice list is fetched fresh.
+    pub fn set_ai_chat(&self, c: Option<(i64, String)>) {
+        if let Ok(mut i) = self.0.lock() {
+            i.ai_chat = c;
+            i.ai_voice.clear();
+            i.ai_voice_loaded_for = None;
+            i.ai_voice_sel = None;
+            i.ai_transcript.clear();
+            i.ai_search.clear();
+        }
+    }
+    pub fn ai_voice(&self) -> Vec<VoiceMsg> {
+        self.0.lock().map(|i| i.ai_voice.clone()).unwrap_or_default()
+    }
+    pub fn ai_voice_loaded_for(&self) -> Option<i64> {
+        self.0.lock().ok().and_then(|i| i.ai_voice_loaded_for)
+    }
+    // Record the voice messages found for a chat (fetched once per selection).
+    pub fn set_ai_voice(&self, chat_id: i64, v: Vec<VoiceMsg>) {
+        if let Ok(mut i) = self.0.lock() {
+            i.ai_voice = v;
+            i.ai_voice_loaded_for = Some(chat_id);
+        }
+    }
+    pub fn ai_voice_sel(&self) -> Option<i64> {
+        self.0.lock().ok().and_then(|i| i.ai_voice_sel)
+    }
+    pub fn set_ai_voice_sel(&self, id: Option<i64>) {
+        if let Ok(mut i) = self.0.lock() { i.ai_voice_sel = id; }
+    }
+    pub fn ai_transcript(&self) -> String {
+        self.0.lock().map(|i| i.ai_transcript.clone()).unwrap_or_default()
+    }
+    pub fn ai_transcribe_busy(&self) -> bool {
+        self.0.lock().map(|i| i.ai_transcribe_busy).unwrap_or(false)
+    }
+    // Ask the poller to transcribe one voice message; guarded against re-entry.
+    pub fn request_transcribe(&self, chat_id: i64, msg_id: i64) {
+        if let Ok(mut i) = self.0.lock() {
+            if i.ai_transcribe_busy {
+                return;
+            }
+            i.ai_transcribe_busy = true;
+            i.ai_transcript = format!("… transcribing message {msg_id}");
+            i.ai_transcribe_pending = Some((chat_id, msg_id));
+        }
+    }
+    pub fn take_transcribe(&self) -> Option<(i64, i64)> {
+        self.0.lock().ok().and_then(|mut i| i.ai_transcribe_pending.take())
+    }
+    pub fn set_ai_transcript(&self, r: String) {
+        if let Ok(mut i) = self.0.lock() {
+            i.ai_transcribe_busy = false;
+            i.ai_transcript = r;
+        }
     }
 
     // The one primary action for device `i`, built from its current selection.
@@ -875,6 +1046,13 @@ impl HostState {
                 "invoke_busy": i.mcp_invoke_busy,
                 "invoke_result": i.mcp_invoke_result,
                 "tools_known": i.mcp_tool_info.len(),
+                "active_arg": i.mcp_active_arg,
+                "args": i.mcp_args.iter().map(|(k, v)| serde_json::json!([k, v])).collect::<Vec<_>>(),
+                // Live endpoint traffic (G2): newest-first recent calls + per-minute rate.
+                "rate_1m": crate::retention::call_rate(60_000),
+                "recent": crate::retention::recent_calls().iter().take(12)
+                    .map(|(t, ts, ok)| serde_json::json!({ "tool": t, "ts": ts, "ok": ok }))
+                    .collect::<Vec<_>>(),
             },
             "panel": {
                 "result": panel.result,
@@ -902,6 +1080,15 @@ impl HostState {
             "bots": {
                 "selected": i.bots_selected,
                 "detail": i.bots_detail.iter().map(|(k, v)| serde_json::json!([k, v])).collect::<Vec<_>>(),
+            },
+            "ai": {
+                "search": i.ai_search,
+                "chat": i.ai_chat.as_ref().map(|(id, t)| serde_json::json!({ "id": id, "title": t })),
+                "voice_count": i.ai_voice.len(),
+                "voice": i.ai_voice.iter().map(|m| serde_json::json!({ "id": m.id, "date": m.date, "bytes": m.bytes })).collect::<Vec<_>>(),
+                "voice_sel": i.ai_voice_sel,
+                "transcribe_busy": i.ai_transcribe_busy,
+                "transcript": i.ai_transcript,
             },
         })
     }

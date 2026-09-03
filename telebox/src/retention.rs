@@ -11,15 +11,65 @@
 // connection, so each call gets its OWN short-lived connection (initialize + one
 // request), retried a few times with a small gap.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
+use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
-use crate::host::{HostState, MsgVersion, PanelRow, RetentionStats, TrackedMsg};
+// --- live endpoint traffic (the MCP monitor) ---------------------------------
+// Every relay call TeleBox makes to the aggregated endpoint is recorded here —
+// tool name, unix-ms, ok — newest first, capped. The MCP panel renders this as
+// the endpoint's live traffic + a per-minute rate. This is real usage, not a
+// mock: the poller, actions and invokes all flow through call/call_slow.
+static RECENT: Mutex<VecDeque<(String, i64, bool)>> = Mutex::new(VecDeque::new());
+
+// The one gate that removes bridge contention. The client's MCP bridge handles
+// exactly one tool call at a time — its re-entrancy guard rejects a second, and
+// the single-call socket drops concurrent connections. TeleBox drives it from
+// several threads at once (the UI poller, the export engine, queued actions and
+// invokes), so without serialization two of them collide and the loser gets
+// "client did not answer". Every client call acquires this lock for the whole
+// connect+initialize+call+read, turning collisions into an orderly queue —
+// exactly one TeleBox↔client conversation is ever in flight.
+//
+// ponytail: global bridge lock — a slow call (a media download) makes the UI
+// poller wait behind it; upgrade to a priority queue only if refresh latency
+// during long exports becomes a real problem. (POSD P8: complexity pulled down
+// into the bridge so no caller has to reason about concurrency.)
+static BRIDGE: Mutex<()> = Mutex::new(());
+
+// Acquire the bridge gate, recovering a poisoned lock (a caller that panicked
+// mid-call left no shared invariant broken — the next call is still safe).
+fn bridge_gate() -> std::sync::MutexGuard<'static, ()> {
+    BRIDGE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+fn record(name: &str, ok: bool) {
+    if let Ok(mut q) = RECENT.lock() {
+        q.push_front((name.to_string(), now_ms(), ok));
+        while q.len() > 60 {
+            q.pop_back();
+        }
+    }
+}
+// (tool, unix_ms, ok), newest first.
+pub(crate) fn recent_calls() -> Vec<(String, i64, bool)> {
+    RECENT.lock().map(|q| q.iter().cloned().collect()).unwrap_or_default()
+}
+// Calls in the last `window_ms` — the live rate.
+pub(crate) fn call_rate(window_ms: i64) -> usize {
+    let cutoff = now_ms() - window_ms;
+    RECENT.lock().map(|q| q.iter().filter(|(_, ts, _)| *ts >= cutoff).count()).unwrap_or(0)
+}
+
+use crate::host::{HostState, MsgVersion, PanelRow, RetentionStats, TrackedMsg, VoiceMsg};
 
 // One initialize + one tools/call over a fresh connection. The tool returns its
 // payload as a JSON string in result.content[0].text, so unwrap and re-parse.
@@ -48,15 +98,19 @@ fn call_once(sock: &str, token: &str, name: &str, args: &Value) -> Option<Value>
 // call_once with retries + a gap between attempts, to ride out the bridge's
 // occasional refusal of a rapid reconnect. Shared with the export engine.
 pub(crate) fn call(sock: &str, token: &str, name: &str, args: Value) -> Option<Value> {
+    let _gate = bridge_gate(); // serialize with every other client call
+    let mut out = None;
     for attempt in 0..4 {
         if attempt > 0 {
             thread::sleep(Duration::from_millis(180));
         }
         if let Some(v) = call_once(sock, token, name, &args) {
-            return Some(v);
+            out = Some(v);
+            break;
         }
     }
-    None
+    record(name, out.is_some());
+    out
 }
 
 // A single call that tolerates a slow tool. An action button can trigger real
@@ -64,9 +118,13 @@ pub(crate) fn call(sock: &str, token: &str, name: &str, args: Value) -> Option<V
 // 5s read window a poll uses, so the outcome is worth waiting for. One long
 // attempt, then one retry.
 pub(crate) fn call_slow(sock: &str, token: &str, name: &str, args: &Value) -> Option<Value> {
-    for attempt in 0..2 {
+    let _gate = bridge_gate(); // serialize with every other client call
+    // Up to 4 attempts with exponential backoff (0.4s, 0.8s, 1.6s), so a
+    // transient refusal on the flaky single-call bridge recovers on its own
+    // instead of surfacing as "no response" for the user to retry by hand.
+    for attempt in 0..4 {
         if attempt > 0 {
-            thread::sleep(Duration::from_millis(250));
+            thread::sleep(Duration::from_millis(200 * (1u64 << attempt)));
         }
         let Ok(s) = UnixStream::connect(sock) else { continue };
         let _ = s.set_read_timeout(Some(Duration::from_secs(60)));
@@ -86,11 +144,13 @@ pub(crate) fn call_slow(sock: &str, token: &str, name: &str, args: &Value) -> Op
                 .and_then(|x| x.get(0)).and_then(|x| x.get("text")).and_then(Value::as_str)
             {
                 if let Ok(parsed) = serde_json::from_str::<Value>(text) {
+                    record(name, true);
                     return Some(parsed);
                 }
             }
         }
     }
+    record(name, false);
     None
 }
 
@@ -143,15 +203,19 @@ fn list_tools_once(sock: &str, token: &str) -> Option<Vec<(String, String, Strin
     )
 }
 fn list_tools(sock: &str, token: &str) -> Option<Vec<(String, String, String)>> {
+    let _gate = bridge_gate(); // serialize with every other client call
+    let mut out = None;
     for attempt in 0..4 {
         if attempt > 0 {
             thread::sleep(Duration::from_millis(180));
         }
         if let Some(v) = list_tools_once(sock, token) {
-            return Some(v);
+            out = Some(v);
+            break;
         }
     }
-    None
+    record("tools/list", out.is_some());
+    out
 }
 
 pub(crate) fn i64_of(v: &Value, k: &str) -> i64 {
@@ -344,6 +408,9 @@ fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
         // empty-text probe), then stop, so it doesn't starve the Speak action on
         // the single-call bridge.
         6 => {
+            // (a) Probe the TTS service + load the chat set for the transcription
+            // picker — ONCE (readout empty), so it never starves the Speak or
+            // Transcribe actions on the single-call bridge.
             if state.panel(6).readout.is_empty() {
                 let status = match call(sock, token, "text_to_speech", json!({ "text": "" })) {
                     Some(s) => {
@@ -361,7 +428,33 @@ fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
                     ("engine".into(), "local TTS · Piper / espeak / coqui".into()),
                     ("service".into(), status),
                 ];
-                state.set_panel_readout(6, readout, Vec::new(), true);
+                let rows = chat_rows(sock, token, 2000); // chats to pick from
+                state.set_panel_readout(6, readout, rows, true);
+            }
+            // (b) A chat is picked but its voice list isn't loaded yet: page its
+            // recent history once and keep the audio/voice documents.
+            if let Some((chat_id, _)) = state.ai_chat() {
+                if state.ai_voice_loaded_for() != Some(chat_id) {
+                    if let Some(p) = call_slow(sock, token, "get_chat_history",
+                        &json!({ "chat_id": chat_id, "limit": 100 }))
+                    {
+                        let mut voice = Vec::new();
+                        if let Some(arr) = p.get("messages").and_then(Value::as_array) {
+                            for m in arr {
+                                let mt = str_of(m, "media_type");
+                                let mime = str_of(m, "media_mime");
+                                if mt == "document" && mime.contains("audio") {
+                                    voice.push(VoiceMsg {
+                                        id: i64_of(m, "id"),
+                                        date: i64_of(m, "date"),
+                                        bytes: i64_of(m, "media_size"),
+                                    });
+                                }
+                            }
+                        }
+                        state.set_ai_voice(chat_id, voice);
+                    }
+                }
             }
         }
         _ => {}
@@ -383,8 +476,8 @@ fn run_action(state: &HostState, sock: &str, token: &str) {
 // compact result. The host guards this to get_/list_/search_ tools, so calling
 // with no arguments is safe (worst case: an honest "missing X" error).
 fn run_mcp_invoke(state: &HostState, sock: &str, token: &str) {
-    let Some(tool) = state.take_mcp_invoke() else { return };
-    let res = call_slow(sock, token, &tool, &json!({}));
+    let Some((tool, args)) = state.take_mcp_invoke() else { return };
+    let res = call_slow(sock, token, &tool, &args);
     let msg = match res {
         None => format!("✕ {tool}: no response from client"),
         Some(v) => {
@@ -401,6 +494,51 @@ fn run_mcp_invoke(state: &HostState, sock: &str, token: &str) {
         }
     };
     state.set_mcp_invoke_result(msg);
+}
+
+// Transcribe one voice/audio message the user picked in the AI panel. Shows the
+// real transcript text, or the engine's honest state (no model, empty) — never
+// a fabricated success.
+fn run_transcribe(state: &HostState, sock: &str, token: &str) {
+    let Some((chat_id, msg_id)) = state.take_transcribe() else { return };
+    // The engine transcribes from the client's local cache, so the file has to
+    // be downloaded first (otherwise "file not found in local cache"). Fetch it
+    // with download_media, then transcribe. Both calls serialize on the gate.
+    let dl = call_slow(sock, token, "download_media",
+        &json!({ "chat_id": chat_id, "message_id": msg_id }));
+    if let Some(d) = &dl {
+        if d.get("success").and_then(Value::as_bool) == Some(false) {
+            state.set_ai_transcript(format!("✕ download: {}",
+                if str_of(d, "error").is_empty() { str_of(d, "message") } else { str_of(d, "error") }));
+            return;
+        }
+    }
+    let res = call_slow(sock, token, "transcribe_voice_message",
+        &json!({ "chat_id": chat_id, "message_id": msg_id }));
+    let msg = match res {
+        None => "✕ transcribe: no response from client".to_string(),
+        Some(v) => {
+            if let Some(e) = v.get("error").and_then(Value::as_str) {
+                format!("✕ {e}")
+            } else if v.get("success").and_then(Value::as_bool) == Some(false) {
+                let m = str_of(&v, "message");
+                format!("✕ {}", if m.is_empty() { str_of(&v, "error") } else { m })
+            } else {
+                // The transcript may be under text / transcription / result.
+                let t = ["text", "transcription", "transcript", "result"]
+                    .iter()
+                    .map(|k| str_of(&v, k))
+                    .find(|s| !s.is_empty())
+                    .unwrap_or_default();
+                if t.is_empty() {
+                    "✓ transcribed (no text returned by the engine)".to_string()
+                } else {
+                    format!("✓ {t}")
+                }
+            }
+        }
+    };
+    state.set_ai_transcript(msg);
 }
 
 // Turn a tool's raw JSON into one honest line for the panel's result field.
@@ -536,6 +674,7 @@ pub fn spawn(state: HostState, sock: String, token_path: String) {
         //    waiting on its result line).
         run_action(&state, &sock, &token);
         run_mcp_invoke(&state, &sock, &token);
+        run_transcribe(&state, &sock, &token);
 
         // 2. Refresh only the device on stage.
         match state.selected() {

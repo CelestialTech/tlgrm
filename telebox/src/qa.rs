@@ -152,9 +152,37 @@ fn handle(state: HostState, s: UnixStream) {
                 state.mcp_select(t);
                 state.snapshot()
             }
+            "mcp_arg" => {
+                // Fill one param of the selected tool's arg form (G1).
+                let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                let val = v.get("value").and_then(|x| x.as_str()).unwrap_or("");
+                state.mcp_set_arg(name, val);
+                state.snapshot()
+            }
             "mcp_invoke" => {
                 let t = v.get("tool").and_then(|x| x.as_str()).unwrap_or("").to_string();
                 state.request_mcp_invoke(t);
+                state.snapshot()
+            }
+            "pick_ai_chat" => {
+                let id = v.get("chat_id").and_then(|x| x.as_i64()).unwrap_or(0);
+                let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("chat").to_string();
+                state.set_ai_chat(Some((id, title)));
+                state.snapshot()
+            }
+            "clear_ai_chat" => {
+                state.set_ai_chat(None);
+                state.snapshot()
+            }
+            "select_voice" => {
+                let mid = v.get("message_id").and_then(|x| x.as_i64());
+                state.set_ai_voice_sel(mid);
+                state.snapshot()
+            }
+            "transcribe" => {
+                if let (Some((cid, _)), Some(mid)) = (state.ai_chat(), state.ai_voice_sel()) {
+                    state.request_transcribe(cid, mid);
+                }
                 state.snapshot()
             }
             "export_engine" => {
@@ -163,10 +191,11 @@ fn handle(state: HostState, s: UnixStream) {
                 let id = v.get("chat_id").and_then(|x| x.as_i64()).unwrap_or(0);
                 let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("test").to_string();
                 let max = v.get("max").and_then(|x| x.as_i64());
+                let media = v.get("media").and_then(|x| x.as_bool()).unwrap_or(true);
                 let (sock, token) = state.relay_creds();
                 match v.get("dir").and_then(|x| x.as_str()) {
                     Some(d) => crate::export_engine::spawn_to(
-                        state.clone(), sock, token, id, title, max, std::path::PathBuf::from(d)),
+                        state.clone(), sock, token, id, title, max, media, std::path::PathBuf::from(d)),
                     None => crate::export_engine::spawn(state.clone(), sock, token, id, title, max),
                 }
                 state.snapshot()
