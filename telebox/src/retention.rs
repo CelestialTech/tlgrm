@@ -48,6 +48,30 @@ fn bridge_gate() -> std::sync::MutexGuard<'static, ()> {
     BRIDGE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+// The client bridge opens a fresh connection per call and needs a moment to
+// retire the previous one; back-to-back connects churn the socket and it drops
+// a call. Under the gate (so this is already serialized) enforce a minimum gap
+// between the START of consecutive calls: a burst is smoothed to a safe rate,
+// while normal paced traffic (poller every ~2s, export throttled 300ms/page)
+// never waits, since it is already spaced wider than the gap.
+// ponytail: fixed 150ms floor — tune only if a real workload needs a tighter
+// or looser cadence than the socket's settle time.
+static LAST_START_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+const MIN_GAP_MS: u64 = 150;
+
+fn throttle() {
+    use std::sync::atomic::Ordering;
+    let last = LAST_START_MS.load(Ordering::Relaxed);
+    let now = now_ms() as u64;
+    if last > 0 {
+        let elapsed = now.saturating_sub(last);
+        if elapsed < MIN_GAP_MS {
+            thread::sleep(Duration::from_millis(MIN_GAP_MS - elapsed));
+        }
+    }
+    LAST_START_MS.store(now_ms() as u64, Ordering::Relaxed);
+}
+
 fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
@@ -99,6 +123,7 @@ fn call_once(sock: &str, token: &str, name: &str, args: &Value) -> Option<Value>
 // occasional refusal of a rapid reconnect. Shared with the export engine.
 pub(crate) fn call(sock: &str, token: &str, name: &str, args: Value) -> Option<Value> {
     let _gate = bridge_gate(); // serialize with every other client call
+    throttle(); // and keep a safe gap between connects
     let mut out = None;
     for attempt in 0..4 {
         if attempt > 0 {
@@ -119,6 +144,7 @@ pub(crate) fn call(sock: &str, token: &str, name: &str, args: Value) -> Option<V
 // attempt, then one retry.
 pub(crate) fn call_slow(sock: &str, token: &str, name: &str, args: &Value) -> Option<Value> {
     let _gate = bridge_gate(); // serialize with every other client call
+    throttle(); // and keep a safe gap between connects
     // Up to 4 attempts with exponential backoff (0.4s, 0.8s, 1.6s), so a
     // transient refusal on the flaky single-call bridge recovers on its own
     // instead of surfacing as "no response" for the user to retry by hand.
@@ -204,6 +230,7 @@ fn list_tools_once(sock: &str, token: &str) -> Option<Vec<(String, String, Strin
 }
 fn list_tools(sock: &str, token: &str) -> Option<Vec<(String, String, String)>> {
     let _gate = bridge_gate(); // serialize with every other client call
+    throttle(); // and keep a safe gap between connects
     let mut out = None;
     for attempt in 0..4 {
         if attempt > 0 {

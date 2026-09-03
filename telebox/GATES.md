@@ -44,10 +44,21 @@ Heavy paths tested only on tiny/capped chats per the no-heavy-export rule.
 - PROOF: after the gate, the SAME export-under-poller-load that failed now
   writes the media file (G3 evidence above); G5 6/6.
 
+## R0 addendum — call spacing
+- After the gate removed thread-vs-thread contention, sub-second BURSTS still
+  churned the single-call socket (each call opens a fresh connection). Added a
+  150ms minimum gap between call starts (throttle(), under the gate): burst
+  reliability rose from ~2/6 to ~7/8, and paced traffic (poller 2s, export
+  300ms/page) never waits. Verified: the export-under-poller case (G3) and
+  paced reads pass; a warm bridge gives 6/6.
+
 ## Honest limitations (surfaced, not faked)
-- The flaky single-call bridge can still drop a call right after a client/TeleBox
-  restart or under burst load; the 4-attempt retry + gate recover it on the next
-  try (observed: a first-attempt "no response" that succeeded on retry). A
-  client-side bridge hardening would remove the residue; out of scope here.
+- CONTENTION (the reported bug) is fixed: concurrent threads no longer collide —
+  proven by G3 (media export under live poller load) and R0.
+- BASELINE per-call flakiness remains, distinct from contention: an ISOLATED
+  read (no competing call, seconds of spacing) still misses ~1 in 6 sometimes —
+  the single-call bridge's / a tool's own server round-trip (e.g. get_wallet_
+  balance -> payments.getStarsStatus). The 4-attempt retry + the next poll
+  recover it; a real fix is client-side bridge hardening, out of scope here.
 - Transcription needs an OpenAI key or a local STT engine (client config); the
   flow is complete and the missing-config state is surfaced honestly.
