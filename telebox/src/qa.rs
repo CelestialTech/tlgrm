@@ -134,6 +134,21 @@ fn handle(state: HostState, s: UnixStream) {
                 state.set_bots_selected(id);
                 state.snapshot()
             }
+            "bots_toggle" => {
+                let key = v.get("key").and_then(|x| x.as_str()).unwrap_or("");
+                state.bots_toggle_cfg(key);
+                state.snapshot()
+            }
+            "bots_step" => {
+                let key = v.get("key").and_then(|x| x.as_str()).unwrap_or("");
+                let delta = v.get("delta").and_then(|x| x.as_f64()).unwrap_or(0.0);
+                state.bots_step_cfg(key, delta);
+                state.snapshot()
+            }
+            "bots_configure" => {
+                state.request_configure_bot();
+                state.snapshot()
+            }
             "mcp_toggle" => {
                 let key = v.get("key").and_then(|x| x.as_str()).unwrap_or("").to_string();
                 state.mcp_toggle(key);

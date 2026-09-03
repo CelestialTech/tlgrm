@@ -365,32 +365,57 @@ fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
                 ];
                 state.set_panel_readout(4, readout, rows, true);
             }
-            // The selected bot's detail — fetched ONCE per selection (cleared on
-            // (re)select and after a start/stop), so it doesn't compete with the
-            // toggle action on the flaky single-call bridge.
+            // The selected bot's detail + editable config — fetched ONCE per
+            // selection (and once more after a configure, which clears
+            // bots_config_loaded_for), so it doesn't compete with the toggle or
+            // apply action on the flaky single-call bridge.
             if let Some(botid) = state.bots_selected() {
-                if state.bots_detail().is_empty() {
+                let need = state.bots_detail().is_empty()
+                    || state.bots_config_loaded_for().as_deref() != Some(botid.as_str());
+                if need {
                     if let Some(info) = call(sock, token, "get_bot_info", json!({ "bot_id": botid })) {
                         let mut lines = Vec::new();
                         if info.get("error").is_some() {
                             lines.push(("bot".into(), str_of(&info, "error")));
                         } else {
                             let ver = str_of(&info, "version");
-                            if !ver.is_empty() {
-                                lines.push(("version".into(), ver));
-                            }
+                            if !ver.is_empty() { lines.push(("version".into(), ver)); }
                             let auth = str_of(&info, "author");
-                            if !auth.is_empty() {
-                                lines.push(("author".into(), auth));
-                            }
+                            if !auth.is_empty() { lines.push(("author".into(), auth)); }
                             lines.push(("state".into(),
                                 if info.get("is_running").and_then(Value::as_bool) == Some(true) { "running".into() } else { "stopped".into() }));
+                            // What the bot may do, and how it's classified.
+                            if let Some(perms) = info.get("required_permissions").and_then(Value::as_array) {
+                                let p: Vec<&str> = perms.iter().filter_map(Value::as_str).collect();
+                                if !p.is_empty() { lines.push(("permissions".into(), p.join(", "))); }
+                            }
+                            if let Some(tags) = info.get("tags").and_then(Value::as_array) {
+                                let t: Vec<&str> = tags.iter().filter_map(Value::as_str).collect();
+                                if !t.is_empty() { lines.push(("tags".into(), t.join(", "))); }
+                            }
                             if let Some(st) = info.get("statistics") {
                                 lines.push(("messages".into(), i64_of(st, "messages_processed").to_string()));
                                 lines.push(("commands".into(), i64_of(st, "commands_executed").to_string()));
                                 lines.push(("errors".into(), i64_of(st, "errors_occurred").to_string()));
                                 let avg = st.get("avg_execution_ms").and_then(Value::as_f64).unwrap_or(0.0);
                                 lines.push(("avg ms".into(), format!("{avg:.1}")));
+                            }
+                            // The editable config -> typed fields for the panel.
+                            if let Some(cfg) = info.get("config").and_then(Value::as_object) {
+                                let mut fields = Vec::new();
+                                for (k, v) in cfg {
+                                    let tv = if let Some(b) = v.as_bool() {
+                                        crate::host::BotCfgVal::Bool(b)
+                                    } else if v.is_i64() || v.is_u64() {
+                                        crate::host::BotCfgVal::Int(v.as_i64().unwrap_or(0))
+                                    } else if v.is_f64() {
+                                        crate::host::BotCfgVal::Float(v.as_f64().unwrap_or(0.0))
+                                    } else {
+                                        crate::host::BotCfgVal::Str(v.as_str().unwrap_or("").to_string())
+                                    };
+                                    fields.push((k.clone(), tv));
+                                }
+                                state.set_bots_config(botid.clone(), fields);
                             }
                         }
                         state.set_bots_detail(lines);
@@ -568,6 +593,28 @@ fn run_transcribe(state: &HostState, sock: &str, token: &str) {
     state.set_ai_transcript(msg);
 }
 
+// Apply the edited config to a bot via configure_bot. On success the poller
+// re-fetches get_bot_info (bots_config_loaded_for was cleared), so the panel
+// then shows exactly what the bot accepted.
+fn run_bot_configure(state: &HostState, sock: &str, token: &str) {
+    let Some((bot_id, config)) = state.take_configure_bot() else { return };
+    let res = call_slow(sock, token, "configure_bot",
+        &json!({ "bot_id": bot_id, "config": config }));
+    match res {
+        None => state.set_configure_result(false, "✕ configure: no response from client".into()),
+        Some(v) => {
+            if let Some(e) = v.get("error").and_then(Value::as_str) {
+                state.set_configure_result(false, format!("✕ {e}"));
+            } else if v.get("success").and_then(Value::as_bool) == Some(false) {
+                let m = str_of(&v, "message");
+                state.set_configure_result(false, format!("✕ {}", if m.is_empty() { str_of(&v, "error") } else { m }));
+            } else {
+                state.set_configure_result(true, "✓ config applied".into());
+            }
+        }
+    }
+}
+
 // Turn a tool's raw JSON into one honest line for the panel's result field.
 fn summarize(tool: &str, v: &Value) -> String {
     if let Some(e) = v.get("error").and_then(Value::as_str) {
@@ -702,6 +749,7 @@ pub fn spawn(state: HostState, sock: String, token_path: String) {
         run_action(&state, &sock, &token);
         run_mcp_invoke(&state, &sock, &token);
         run_transcribe(&state, &sock, &token);
+        run_bot_configure(&state, &sock, &token);
 
         // 2. Refresh only the device on stage.
         match state.selected() {

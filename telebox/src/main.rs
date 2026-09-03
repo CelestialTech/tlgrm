@@ -24,7 +24,7 @@ use gpui::{App, Bounds, Context, Div, FocusHandle, FontWeight, KeyDownEvent, Win
     WindowOptions, div, prelude::*, px, relative, rgb, size};
 use gpui_platform::application;
 
-use host::{plugin_active, plugin_templates, HostState, PanelRow, Plugin, FAMILIES};
+use host::{plugin_active, plugin_templates, BotCfgVal, HostState, PanelRow, Plugin, FAMILIES};
 
 // Studio-dark instrument palette.
 const VOID: u32 = 0x0A0C0F;
@@ -98,6 +98,32 @@ fn label(t: &'static str) -> Div {
 }
 fn well(p: f32) -> Div {
     div().bg(rgb(WELL)).rounded_md().border_1().border_color(rgb(LINE2)).p(px(p))
+}
+// Stable hash for element ids keyed by a config field name (FNV-1a).
+fn fnv(s: &str) -> usize {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h as usize
+}
+// A −/value/+ stepper for a numeric bot-config field; each button steps the
+// value (Int rounds, Float by `step`) through HostState and marks the edit dirty.
+fn stepper(cx: &mut Context<TeleBox>, key: &str, value: String, step: f64) -> gpui::AnyElement {
+    let kdown = key.to_string();
+    let kup = key.to_string();
+    let bump = |c: u32, glyph: &'static str| {
+        div().w(px(22.)).h(px(22.)).rounded_md().flex().items_center().justify_center()
+            .bg(rgb(PANEL2)).border_1().border_color(rgb(LINE)).child(mono(c).text_xs().child(glyph))
+    };
+    div().flex().items_center().gap_2()
+        .child(bump(INK, "−").id(("botdec", fnv(key))).cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| { this.state.bots_step_cfg(&kdown, -step); cx.notify(); })))
+        .child(mono(INK).text_xs().w(px(52.)).child(value))
+        .child(bump(MINT, "+").id(("botinc", fnv(key))).cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| { this.state.bots_step_cfg(&kup, step); cx.notify(); })))
+        .into_any_element()
 }
 
 // Version-kind → color: created (mint), edited (amber), deleted (red).
@@ -950,6 +976,69 @@ impl TeleBox {
             for (k, v) in detail.iter() {
                 lines = lines.child(field(k.clone(), v.clone()));
             }
+
+            // CONFIG editor — the bot's tunable settings via configure_bot. Bool
+            // fields get a toggle, numeric fields a stepper; Apply is live only
+            // when something changed.
+            let cfg = self.state.bots_config();
+            let dirty = self.state.bots_config_dirty();
+            let cfg_busy = self.state.bots_configure_busy();
+            let cfg_result = self.state.bots_config_result();
+            let config_section = if cfg.is_empty() {
+                None
+            } else {
+                let mut rows = div().flex().flex_col().gap(px(4.));
+                for (k, v) in cfg.iter() {
+                    let key = k.clone();
+                    let label = mono(INK2).text_xs().w(px(210.)).child(k.clone());
+                    let control = match v {
+                        BotCfgVal::Bool(b) => {
+                            let on = *b;
+                            let kk = key.clone();
+                            div().id(("botcfg", fnv(&key))).cursor_pointer().flex().items_center()
+                                .w(px(44.)).h(px(22.)).rounded_full().p(px(2.))
+                                .bg(rgb(if on { MINT_DK } else { LINE2 }))
+                                .border_1().border_color(rgb(if on { MINT } else { LINE }))
+                                .justify_end().when(!on, |d| d.justify_start())
+                                .child(div().w(px(16.)).h(px(16.)).rounded_full().bg(rgb(if on { MINT } else { INK3 })))
+                                .on_click(cx.listener(move |this, _, _, cx| { this.state.bots_toggle_cfg(&kk); cx.notify(); }))
+                                .into_any_element()
+                        }
+                        BotCfgVal::Int(n) => {
+                            let step = if key.contains("minute") || key.contains("timeout") { 5.0 } else { 1.0 };
+                            stepper(cx, &key, format!("{n}"), step)
+                        }
+                        BotCfgVal::Float(f) => {
+                            let step = if key.contains("confidence") || *f <= 1.0 { 0.05 } else { 0.1 };
+                            stepper(cx, &key, format!("{f:.2}"), step)
+                        }
+                        BotCfgVal::Str(s) => mono(INK).text_xs().child(s.clone()).into_any_element(),
+                    };
+                    rows = rows.child(div().flex().items_center().gap_3()
+                        .child(label).child(control));
+                }
+                let apply = div().id("bot-apply").cursor_pointer().flex_shrink_0().px_3().py_1().rounded_md()
+                    .bg(rgb(if dirty && !cfg_busy { MINT_DK } else { WELL }))
+                    .border_1().border_color(rgb(if dirty && !cfg_busy { MINT } else { LINE }))
+                    .child(mono(if dirty && !cfg_busy { MINT } else { INK3 }).text_xs()
+                        .child(if cfg_busy { "applying…".to_string() } else { "Apply changes".to_string() }))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if this.state.bots_config_dirty() { this.state.request_configure_bot(); cx.notify(); }
+                    }));
+                let cfg_line = if cfg_result.is_empty() { None } else {
+                    let c = if cfg_result.starts_with('✕') { CRIT } else if cfg_result.starts_with('✓') { OK } else { INK3 };
+                    Some(mono(c).text_xs().child(cfg_result.clone()))
+                };
+                Some(div().flex().flex_col().gap_2().pt_2()
+                    .child(div().h(px(1.)).bg(rgb(LINE2)))
+                    .child(div().flex().items_center().gap_2()
+                        .child(mono(INK3).text_xs().child("CONFIG · configure_bot"))
+                        .child(div().flex_1())
+                        .child(apply))
+                    .child(rows)
+                    .children(cfg_line))
+            };
+
             div().flex().flex_col().gap_3().p_4().rounded_lg().bg(rgb(WELL)).border_1().border_color(rgb(MINT_DK))
                 .child(div().flex().items_center().gap_2()
                     .child(dot(if running { OK } else { INK3 }, 8.))
@@ -957,6 +1046,7 @@ impl TeleBox {
                     .child(div().flex_1())
                     .child(btn))
                 .child(lines)
+                .children(config_section)
         });
 
         let result_line = if d.result.is_empty() {

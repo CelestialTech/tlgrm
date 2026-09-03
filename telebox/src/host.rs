@@ -141,6 +141,18 @@ pub struct ExportRun {
     pub path: String,  // where it's being written
 }
 
+// One editable field of a bot's configuration. Bots are built-in automations
+// (registered in C++, not user-created), so the UI can't add/remove them — but
+// their config is tunable via configure_bot, and this is one such setting typed
+// so the panel can render the right control (toggle vs stepper).
+#[derive(Clone)]
+pub enum BotCfgVal {
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+}
+
 // One voice/audio message found in a chat, offered as a transcription target.
 #[derive(Clone, Default)]
 pub struct VoiceMsg {
@@ -208,6 +220,14 @@ pub struct Inner {
     // filled by the poller from get_bot_info.
     pub bots_selected: Option<String>,
     pub bots_detail: Vec<(String, String)>,
+    // Editable config of the selected bot (from get_bot_info.config), plus the
+    // identity lines (permissions/tags) and the edit/apply state.
+    pub bots_config: Vec<(String, BotCfgVal)>,
+    pub bots_config_loaded_for: Option<String>,
+    pub bots_config_dirty: bool,
+    pub bots_configure_pending: Option<(String, Value)>,
+    pub bots_configure_busy: bool,
+    pub bots_config_result: String,
     // MCP domain-tree UI: which nodes are expanded (domain name, or
     // "domain\u{1f}sub"), the in-place filter, and the selected tool.
     pub mcp_expanded: HashSet<String>,
@@ -340,6 +360,12 @@ impl HostState {
                 archiver_target: None,
                 bots_selected: None,
                 bots_detail: Vec::new(),
+                bots_config: Vec::new(),
+                bots_config_loaded_for: None,
+                bots_config_dirty: false,
+                bots_configure_pending: None,
+                bots_configure_busy: false,
+                bots_config_result: String::new(),
                 mcp_expanded: HashSet::new(),
                 mcp_search: String::new(),
                 mcp_selected: None,
@@ -594,6 +620,10 @@ impl HostState {
         if let Ok(mut i) = self.0.lock() {
             i.bots_selected = Some(id);
             i.bots_detail.clear(); // the old detail was a different bot
+            i.bots_config.clear(); // and a different config
+            i.bots_config_loaded_for = None;
+            i.bots_config_dirty = false;
+            i.bots_config_result.clear();
         }
     }
     pub fn bots_detail(&self) -> Vec<(String, String)> {
@@ -601,6 +631,94 @@ impl HostState {
     }
     pub fn set_bots_detail(&self, lines: Vec<(String, String)>) {
         if let Ok(mut i) = self.0.lock() { i.bots_detail = lines; }
+    }
+
+    // --- Bots: editable config (configure_bot) -----------------------------
+    pub fn bots_config(&self) -> Vec<(String, BotCfgVal)> {
+        self.0.lock().map(|i| i.bots_config.clone()).unwrap_or_default()
+    }
+    pub fn bots_config_loaded_for(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|i| i.bots_config_loaded_for.clone())
+    }
+    pub fn bots_config_dirty(&self) -> bool {
+        self.0.lock().map(|i| i.bots_config_dirty).unwrap_or(false)
+    }
+    pub fn bots_configure_busy(&self) -> bool {
+        self.0.lock().map(|i| i.bots_configure_busy).unwrap_or(false)
+    }
+    pub fn bots_config_result(&self) -> String {
+        self.0.lock().map(|i| i.bots_config_result.clone()).unwrap_or_default()
+    }
+    // Load config from get_bot_info — but never clobber a live edit (dirty).
+    pub fn set_bots_config(&self, bot_id: String, fields: Vec<(String, BotCfgVal)>) {
+        if let Ok(mut i) = self.0.lock() {
+            if i.bots_config_dirty && i.bots_config_loaded_for.as_deref() == Some(bot_id.as_str()) {
+                return; // keep the user's unsaved edits
+            }
+            i.bots_config = fields;
+            i.bots_config_loaded_for = Some(bot_id);
+            i.bots_config_dirty = false;
+        }
+    }
+    pub fn bots_toggle_cfg(&self, key: &str) {
+        if let Ok(mut i) = self.0.lock() {
+            for (k, v) in i.bots_config.iter_mut() {
+                if k == key {
+                    if let BotCfgVal::Bool(b) = v { *b = !*b; i.bots_config_dirty = true; }
+                    break;
+                }
+            }
+        }
+    }
+    // Step a numeric config field by `delta` (Int rounds; both clamped >= 0).
+    pub fn bots_step_cfg(&self, key: &str, delta: f64) {
+        if let Ok(mut i) = self.0.lock() {
+            for (k, v) in i.bots_config.iter_mut() {
+                if k == key {
+                    match v {
+                        BotCfgVal::Int(n) => { *n = (*n + delta.round() as i64).max(0); i.bots_config_dirty = true; }
+                        BotCfgVal::Float(f) => { *f = (*f + delta).max(0.0); i.bots_config_dirty = true; }
+                        _ => {}
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    // Build the config JSON from the edited fields and queue configure_bot.
+    pub fn request_configure_bot(&self) {
+        if let Ok(mut i) = self.0.lock() {
+            if i.bots_configure_busy { return; }
+            let Some(id) = i.bots_selected.clone() else { return };
+            let mut m = serde_json::Map::new();
+            for (k, v) in &i.bots_config {
+                let jv = match v {
+                    BotCfgVal::Bool(b) => Value::from(*b),
+                    BotCfgVal::Int(n) => Value::from(*n),
+                    BotCfgVal::Float(f) => Value::from(*f),
+                    BotCfgVal::Str(s) => Value::from(s.clone()),
+                };
+                m.insert(k.clone(), jv);
+            }
+            i.bots_configure_busy = true;
+            i.bots_config_result = "… applying config".into();
+            i.bots_configure_pending = Some((id, Value::Object(m)));
+        }
+    }
+    pub fn take_configure_bot(&self) -> Option<(String, Value)> {
+        self.0.lock().ok().and_then(|mut i| i.bots_configure_pending.take())
+    }
+    // Record the outcome; on success clear dirty and force a fresh reload so the
+    // panel shows the values the bot actually accepted.
+    pub fn set_configure_result(&self, ok: bool, msg: String) {
+        if let Ok(mut i) = self.0.lock() {
+            i.bots_configure_busy = false;
+            i.bots_config_result = msg;
+            if ok {
+                i.bots_config_dirty = false;
+                i.bots_config_loaded_for = None; // refetch config next tick
+            }
+        }
     }
 
     // --- MCP domain tree ---------------------------------------------------
@@ -1080,6 +1198,18 @@ impl HostState {
             "bots": {
                 "selected": i.bots_selected,
                 "detail": i.bots_detail.iter().map(|(k, v)| serde_json::json!([k, v])).collect::<Vec<_>>(),
+                "config": i.bots_config.iter().map(|(k, v)| {
+                    let val = match v {
+                        BotCfgVal::Bool(b) => serde_json::json!(b),
+                        BotCfgVal::Int(n) => serde_json::json!(n),
+                        BotCfgVal::Float(f) => serde_json::json!(f),
+                        BotCfgVal::Str(s) => serde_json::json!(s),
+                    };
+                    serde_json::json!([k, val])
+                }).collect::<Vec<_>>(),
+                "config_dirty": i.bots_config_dirty,
+                "configure_busy": i.bots_configure_busy,
+                "config_result": i.bots_config_result,
             },
             "ai": {
                 "search": i.ai_search,
