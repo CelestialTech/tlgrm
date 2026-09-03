@@ -70,8 +70,16 @@ SynthesisResult TextToSpeech::synthesize(
 	// Dispatch to provider
 	switch (_provider) {
 	case TTSProvider::PiperTTS:
-		result = synthesizeWithPiper(text, voiceId, speed);
-		result.provider = "Piper TTS";
+		// Fall back to espeak-ng when piper isn't installed: espeak needs no
+		// voice model and produces real audio, so TTS works out of the box on a
+		// machine that only has espeak-ng (a one-line brew install).
+		if (findBinary("piper").isEmpty() && !findBinary("espeak-ng").isEmpty()) {
+			result = synthesizeWithEspeak(text, voiceId, speed, pitch);
+			result.provider = "espeak-ng (piper fallback)";
+		} else {
+			result = synthesizeWithPiper(text, voiceId, speed);
+			result.provider = "Piper TTS";
+		}
 		break;
 	case TTSProvider::EspeakNG:
 		result = synthesizeWithEspeak(text, voiceId, speed, pitch);
