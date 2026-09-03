@@ -725,8 +725,16 @@ void Server::initializeSessionComponents() {
 
 	qInfo() << "MCP: Session set, live data access enabled";
 
-	// Auto-resume interrupted exports once the main window is ready.
-	tryAutoResumeExport();
+	// DISABLED (fork policy): do NOT auto-resume exports on startup.
+	//
+	// This fork exports HEADLESSLY through TeleBox's engine (get_chat_history ->
+	// JSONL); the client must never auto-open the NATIVE export panel. The
+	// auto-resume re-summoned a previously-queued native export on EVERY client
+	// restart (observed: a 15,655-message export of a channel kept restarting
+	// each time the client was relaunched, downloading media unbidden). Leaving
+	// the call out makes that structurally impossible; a resume, if ever wanted,
+	// is an explicit user action, not a silent startup side effect.
+	// tryAutoResumeExport();  // intentionally not called — see above
 }
 
 void Server::tryAutoResumeExport() {

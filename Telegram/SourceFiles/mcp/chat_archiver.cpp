@@ -304,6 +304,30 @@ bool ChatArchiver::archiveMessage(HistoryItem *message) {
 	const auto from = item->from();
 	const qint64 userId = from ? from->id.value : 0;
 
+	// Record the chat itself so the store can be listed and browsed later. The
+	// archive used to write only `messages`, leaving `chats` empty, so
+	// list_archived_chats returned nothing. Upsert is idempotent (keyed on
+	// chat_id) and keeps the title fresh.
+	{
+		QSqlQuery chatQuery(_db);
+		chatQuery.prepare(R"(
+			INSERT INTO chats (chat_id, chat_type, title, is_archived, first_seen, last_updated)
+			VALUES (:chat_id, :chat_type, :title, 1, :now, :now)
+			ON CONFLICT(chat_id) DO UPDATE SET
+				title = excluded.title,
+				chat_type = excluded.chat_type,
+				last_updated = excluded.last_updated
+		)");
+		chatQuery.bindValue(":chat_id", chatId);
+		chatQuery.bindValue(":chat_type",
+			peer->isUser() ? QStringLiteral("user")
+			: peer->isChat() ? QStringLiteral("group")
+			: QStringLiteral("channel"));
+		chatQuery.bindValue(":title", peer->name());
+		chatQuery.bindValue(":now", QDateTime::currentSecsSinceEpoch());
+		chatQuery.exec();
+	}
+
 	// Get message content
 	QString content = item->originalText().text;
 	const qint64 timestamp = item->date();  // TimeId is already a Unix timestamp (int32)
@@ -648,17 +672,24 @@ QJsonObject ChatArchiver::getChatInfo(qint64 chatId) {
 QJsonArray ChatArchiver::listArchivedChats() {
 	QJsonArray result;
 
+	// Derive the chat list from `messages` (the source of truth for what was
+	// actually archived), LEFT JOINing `chats` for the title/type. The old query
+	// started FROM chats, but the archive path only wrote `messages` and left
+	// `chats` empty, so this returned nothing while get_archive_stats (which
+	// counts DISTINCT chat_id in messages) reported chats — an inconsistency
+	// that made the store look empty. Starting from messages fixes that; the
+	// title is filled in for chats recorded by the upsert in archiveMessage.
 	QSqlQuery query(_db);
 	query.exec(R"(
 		SELECT
-			c.chat_id,
-			c.chat_type,
-			c.title,
+			m.chat_id,
+			COALESCE(c.chat_type, '') as chat_type,
+			COALESCE(c.title, '') as title,
 			COUNT(m.id) as message_count,
 			MAX(m.timestamp) as last_message
-		FROM chats c
-		LEFT JOIN messages m ON c.chat_id = m.chat_id
-		GROUP BY c.chat_id, c.chat_type, c.title
+		FROM messages m
+		LEFT JOIN chats c ON c.chat_id = m.chat_id
+		GROUP BY m.chat_id
 		ORDER BY last_message DESC
 	)");
 
