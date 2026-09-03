@@ -584,7 +584,8 @@ fn run_mcp_invoke(state: &HostState, sock: &str, token: &str) {
             }
         }
     };
-    state.set_mcp_invoke_result(msg);
+    state.set_mcp_invoke_result(msg.clone());
+    state.push_mcp_history(&tool, &msg);
 }
 
 // Transcribe one voice/audio message the user picked in the AI panel. Shows the

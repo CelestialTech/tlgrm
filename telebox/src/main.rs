@@ -99,6 +99,30 @@ fn label(t: &'static str) -> Div {
 fn well(p: f32) -> Div {
     div().bg(rgb(WELL)).rounded_md().border_1().border_color(rgb(LINE2)).p(px(p))
 }
+// The changed segment between two versions: strip the common prefix/suffix and
+// return (removed, added). None when they are identical. Char-based so it is
+// safe on unicode. Kept small — a compact "what changed", not a full diff view.
+fn text_diff(old: &str, new: &str) -> Option<(String, String)> {
+    if old == new {
+        return None;
+    }
+    let ob: Vec<char> = old.chars().collect();
+    let nb: Vec<char> = new.chars().collect();
+    let mut pre = 0;
+    while pre < ob.len() && pre < nb.len() && ob[pre] == nb[pre] {
+        pre += 1;
+    }
+    let mut suf = 0;
+    while suf < ob.len().saturating_sub(pre)
+        && suf < nb.len().saturating_sub(pre)
+        && ob[ob.len() - 1 - suf] == nb[nb.len() - 1 - suf]
+    {
+        suf += 1;
+    }
+    let removed: String = ob[pre..ob.len() - suf].iter().collect();
+    let added: String = nb[pre..nb.len() - suf].iter().collect();
+    Some((removed, added))
+}
 // Stable hash for element ids keyed by a config field name (FNV-1a).
 fn fnv(s: &str) -> usize {
     let mut h: u64 = 0xcbf29ce484222325;
@@ -329,16 +353,31 @@ impl TeleBox {
         if ret.chain.is_empty() {
             chain = chain.child(mono(INK3).text_sm().child("select a message to see its version chain"));
         }
-        for v in ret.chain.iter() {
+        for (idx, v) in ret.chain.iter().enumerate() {
             let kc = kind_color(&v.kind);
-            chain = chain.child(
-                div().flex().items_center().gap_3().py_2().px_3().rounded_md().bg(rgb(WELL))
-                    .border_1().border_color(rgb(LINE2))
+            // Diff vs the adjacent (previous-in-list) version, so an edit shows
+            // exactly what changed rather than just the new full text.
+            let diff = if idx > 0 { text_diff(&ret.chain[idx - 1].content, &v.content) } else { None };
+            let mut row = div().flex().flex_col().gap_1().py_2().px_3().rounded_md().bg(rgb(WELL))
+                .border_1().border_color(rgb(LINE2))
+                .child(div().flex().items_center().gap_3()
                     .child(dot(kc, 8.))
                     .child(mono(INK3).text_xs().w(px(22.)).child(format!("v{}", v.version)))
                     .child(div().w(px(60.)).child(mono(kc).text_xs().child(v.kind.clone())))
-                    .child(div().flex_1().min_w_0().text_sm().text_color(rgb(INK)).whitespace_nowrap().overflow_hidden().text_ellipsis().child(v.content.clone())),
-            );
+                    .child(div().flex_1().min_w_0().text_sm().text_color(rgb(INK)).whitespace_nowrap().overflow_hidden().text_ellipsis().child(v.content.clone())));
+            if let Some((removed, added)) = diff {
+                let mut d = div().flex().flex_wrap().items_baseline().gap_2().pl(px(52.));
+                if !removed.trim().is_empty() {
+                    let r: String = removed.chars().take(60).collect();
+                    d = d.child(mono(CRIT).text_xs().child(format!("− {r}")));
+                }
+                if !added.trim().is_empty() {
+                    let a: String = added.chars().take(60).collect();
+                    d = d.child(mono(OK).text_xs().child(format!("+ {a}")));
+                }
+                row = row.child(d);
+            }
+            chain = chain.child(row);
         }
 
         let hist_label = match sel {
@@ -720,11 +759,32 @@ impl TeleBox {
                 .child(result_line)
         });
 
+        // RECENT INVOKES — a short history, not just the last result.
+        let history = self.state.mcp_invoke_history();
+        let history_el = if history.is_empty() {
+            None
+        } else {
+            let mut h = div().flex().flex_col().gap_1();
+            for (tool, result) in history.iter() {
+                let c = if result.starts_with('✕') { CRIT } else if result.starts_with('✓') { OK } else { INK2 };
+                let snip: String = result.chars().take(90).collect();
+                h = h.child(div().flex().items_baseline().gap_2().py(px(3.)).px_3().rounded_md()
+                    .bg(rgb(WELL)).border_1().border_color(rgb(LINE2))
+                    .child(mono(MINT).text_xs().flex_shrink_0().child(tool.clone()))
+                    .child(div().flex_1().min_w_0().child(mono(c).text_xs()
+                        .whitespace_nowrap().overflow_hidden().text_ellipsis().child(snip))));
+            }
+            Some(div().flex().flex_col().gap_2()
+                .child(mono(INK3).text_xs().child(format!("RECENT INVOKES · {}", history.len())))
+                .child(h))
+        };
+
         div().flex().flex_col().gap_3().w_full()
             .child(readout)
             .child(traffic)
             .child(search_box)
             .children(detail)
+            .children(history_el)
             .child(tree)
     }
 

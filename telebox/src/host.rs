@@ -252,6 +252,9 @@ pub struct Inner {
     pub mcp_invoke_args: Value,
     pub mcp_invoke_result: String,
     pub mcp_invoke_busy: bool,
+    // Recent invokes (tool, result), newest first — so the panel keeps a short
+    // history, not just the last result.
+    pub mcp_invoke_history: Vec<(String, String)>,
     // AI transcription flow (G4): pick a chat, list its voice/audio messages,
     // transcribe the chosen one via the client's transcribe_voice_message.
     pub ai_search: String,
@@ -407,6 +410,7 @@ impl HostState {
                 mcp_invoke_pending: None,
                 mcp_invoke_args: Value::Null,
                 mcp_invoke_result: String::new(),
+                mcp_invoke_history: Vec::new(),
                 ai_search: String::new(),
                 ai_chat: None,
                 ai_voice: Vec::new(),
@@ -1057,10 +1061,17 @@ impl HostState {
                 if v.is_empty() {
                     continue;
                 }
-                let val = if let Ok(n) = v.parse::<i64>() {
+                // A value that looks like JSON (array/object/number/quoted) is
+                // parsed as JSON, so array and object params are fillable by
+                // typing e.g. [1,2,3] or {"k":"v"}; otherwise scalar heuristics.
+                let val = if v.starts_with('[') || v.starts_with('{') {
+                    serde_json::from_str::<Value>(v).unwrap_or_else(|_| Value::from(v))
+                } else if let Ok(n) = v.parse::<i64>() {
                     Value::from(n)
                 } else if v == "true" || v == "false" {
                     Value::from(v == "true")
+                } else if let Ok(f) = v.parse::<f64>() {
+                    Value::from(f)
                 } else {
                     Value::from(v)
                 };
@@ -1089,6 +1100,15 @@ impl HostState {
     }
     pub fn mcp_invoke_result(&self) -> String {
         self.0.lock().map(|i| i.mcp_invoke_result.clone()).unwrap_or_default()
+    }
+    pub fn mcp_invoke_history(&self) -> Vec<(String, String)> {
+        self.0.lock().map(|i| i.mcp_invoke_history.clone()).unwrap_or_default()
+    }
+    pub fn push_mcp_history(&self, tool: &str, result: &str) {
+        if let Ok(mut i) = self.0.lock() {
+            i.mcp_invoke_history.insert(0, (tool.to_string(), result.to_string()));
+            i.mcp_invoke_history.truncate(8);
+        }
     }
     pub fn mcp_invoke_busy(&self) -> bool {
         self.0.lock().map(|i| i.mcp_invoke_busy).unwrap_or(false)
@@ -1397,6 +1417,7 @@ impl HostState {
                 "tools_known": i.mcp_tool_info.len(),
                 "active_arg": i.mcp_active_arg,
                 "args": i.mcp_args.iter().map(|(k, v)| serde_json::json!([k, v])).collect::<Vec<_>>(),
+                "history": i.mcp_invoke_history.iter().map(|(t, r)| serde_json::json!([t, r])).collect::<Vec<_>>(),
                 // Live endpoint traffic (G2): newest-first recent calls + per-minute rate.
                 "rate_1m": crate::retention::call_rate(60_000),
                 "recent": crate::retention::recent_calls().iter().take(12)
