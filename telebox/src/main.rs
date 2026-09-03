@@ -216,6 +216,10 @@ impl TeleBox {
             self.archiver_body(cx).into_any_element()
         } else if i == 4 {
             self.bots_body(cx).into_any_element()
+        } else if i == 5 {
+            self.wallet_body().into_any_element()
+        } else if i == 6 {
+            self.ai_body(cx).into_any_element()
         } else {
             self.relay_body(i, p, active, cx).into_any_element()
         };
@@ -616,6 +620,94 @@ impl TeleBox {
             .child(search_box)
             .children(detail)
             .child(tree)
+    }
+
+    // AI device — local model features: Service (engine ready/offline), an Action
+    // (speak a sample to prove the TTS pipeline). Transcription needs a voice-
+    // message target, surfaced honestly as the next step.
+    fn ai_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let d = self.state.panel(6);
+        let busy = self.state.busy();
+        let engine = d.readout.iter().find(|(k, _)| k == "engine").map(|(_, v)| v.clone())
+            .unwrap_or_else(|| "local TTS".into());
+        let service = d.readout.iter().find(|(k, _)| k == "service").map(|(_, v)| v.clone())
+            .unwrap_or_else(|| "…".into());
+        let ready = service == "ready";
+
+        let field = |k: String, v: String| {
+            div().flex().flex_col().gap_1().flex_shrink_0()
+                .child(mono(INK3).text_xs().child(k))
+                .child(mono(INK).child(v))
+        };
+        let status_card = div().flex().items_center().gap_6().p_5().rounded_lg().bg(rgb(WELL))
+            .border_1().border_color(rgb(LINE))
+            .child(dot(if ready { OK } else { AMBER }, 8.))
+            .child(field("ENGINE".into(), engine))
+            .child(div().w(px(1.)).h(px(28.)).bg(rgb(LINE2)).flex_shrink_0())
+            .child(field("STATUS".into(), service))
+            .child(div().flex_1())
+            .child(mono(INK3).text_xs().child("model · files · ui"));
+
+        let speak_btn = div().id("ai-speak").cursor_pointer().flex_shrink_0().px_4().py_2().rounded_md()
+            .bg(rgb(if busy { WELL } else { MINT_DK })).border_1().border_color(rgb(MINT))
+            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(rgb(MINT))
+                .child(if busy { "working…".to_string() } else { "Speak a sample (TTS) →".to_string() }))
+            .on_click(cx.listener(|this, _, _, cx| { this.state.primary_action(6); cx.notify(); }));
+
+        let result_line = if d.result.is_empty() {
+            mono(INK3).text_xs().child("no action run yet".to_string())
+        } else {
+            let c = if d.result.starts_with('✕') { CRIT } else if d.result.starts_with('✓') { OK } else { INK2 };
+            mono(c).text_sm().child(d.result.clone())
+        };
+
+        div().flex().flex_col().gap_3().w_full()
+            .child(status_card)
+            .child(div().flex().items_center().gap_3().child(speak_btn).child(result_line))
+            .child(div().pl_3().py_2().border_l_2().border_color(rgb(VIOLET_DK))
+                .child(mono(INK3).text_xs().child(
+                    "Transcription runs on a voice message (transcribe_voice_message) — a voice-message picker is the next step.")))
+    }
+
+    // Wallet device — read-only Store: the live Stars balance + local transaction
+    // records. No Job, no action: spending is dark by design.
+    fn wallet_body(&self) -> impl IntoElement {
+        let d = self.state.panel(5);
+        let balance = d.readout.iter().find(|(k, _)| k == "stars_balance").map(|(_, v)| v.clone());
+        let err = d.readout.iter().find(|(k, _)| k == "wallet").map(|(_, v)| v.clone());
+
+        let balance_card = div().flex().items_center().gap_4().p_5().rounded_lg().bg(rgb(WELL))
+            .border_1().border_color(rgb(LINE))
+            .child(div().flex().items_baseline().gap_2()
+                .child(div().text_3xl().font_weight(FontWeight::BOLD).text_color(rgb(INK))
+                    .child(balance.unwrap_or_else(|| "—".into())))
+                .child(mono(AMBER).child("★ Stars")))
+            .child(div().flex_1())
+            .child(mono(INK3).text_xs().child(match err {
+                Some(e) => e,
+                None => "payments.getStarsStatus · live".to_string(),
+            }));
+
+        let mut list = div().flex().flex_col().gap_1();
+        if d.rows.is_empty() {
+            list = list.child(mono(INK3).text_sm().child("no transactions recorded"));
+        }
+        for r in d.rows.iter() {
+            let income = r.on;
+            list = list.child(div().flex().items_center().gap_3().py_2().px_3().rounded_md()
+                .bg(rgb(WELL)).border_1().border_color(rgb(LINE2))
+                .child(dot(if income { OK } else { CRIT }, 6.))
+                .child(div().flex_1().min_w_0().text_sm().text_color(rgb(INK))
+                    .whitespace_nowrap().overflow_hidden().text_ellipsis().child(r.title.clone()))
+                .child(mono(if income { OK } else { CRIT }).text_xs().child(r.sub.clone())));
+        }
+
+        div().flex().flex_col().gap_3().w_full()
+            .child(balance_card)
+            .child(mono(INK3).text_xs().child("TRANSACTIONS"))
+            .child(list)
+            .child(div().pl_3().py_2().border_l_2().border_color(rgb(LINE))
+                .child(mono(INK3).text_xs().child("Read-only — send_stars and all spending are disabled by design.")))
     }
 
     // Bots device — the automation framework: Item (a bot, running/stopped),

@@ -309,17 +309,36 @@ fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
         }
         // Wallet — Stars / TON: the real live balance. Spending stays dark.
         5 => {
+            // Wallet is read-only: the Store is the live Stars balance + the
+            // local transaction records. Spending stays dark by design.
             let mut readout = Vec::new();
             if let Some(s) = call(sock, token, "get_wallet_balance", json!({})) {
                 if s.get("loaded").and_then(Value::as_bool) == Some(true) {
-                    readout.push(("stars balance".into(), i64_of(&s, "stars_balance").to_string()));
-                    readout.push(("source".into(), "payments.getStarsStatus · live".into()));
+                    readout.push(("stars_balance".into(), i64_of(&s, "stars_balance").to_string()));
                 } else {
                     let e = str_of(&s, "error");
                     readout.push(("wallet".into(), if e.is_empty() { "unavailable".into() } else { e }));
                 }
             }
-            state.set_panel_readout(5, readout, Vec::new(), true);
+            let rows = call(sock, token, "get_transactions", json!({ "limit": 50 }))
+                .and_then(|t| t.get("transactions").and_then(Value::as_array).cloned())
+                .map(|arr| {
+                    arr.iter()
+                        .map(|x| {
+                            let amount = x.get("amount").and_then(Value::as_f64).unwrap_or(0.0);
+                            let desc = str_of(x, "description");
+                            PanelRow {
+                                id: amount as i64,
+                                sid: str_of(x, "category"),
+                                title: if desc.is_empty() { str_of(x, "category") } else { desc },
+                                sub: format!("{} · {:+} ★", str_of(x, "date"), amount),
+                                on: amount >= 0.0, // income vs spend
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            state.set_panel_readout(5, readout, rows, true);
         }
         // AI — local LLM / TTS / voice: probe the real TTS service state.
         6 => {
