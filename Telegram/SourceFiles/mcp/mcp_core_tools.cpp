@@ -797,20 +797,37 @@ QJsonObject Server::toolDownloadMedia(const QJsonObject &args) {
 		const auto target = chooseTarget(name);
 		const auto mime = doc->mimeString();
 
-		// Already on disk? Copy from the client's cache — no network round-trip.
+		// Already on disk? Serve it from the client's cache — no network. The
+		// copy to `target` can fail (unwritable dir, locked file), so verify it
+		// landed before reporting success; if it didn't, fall back to the real
+		// cached path (the bytes ARE on disk there) rather than claim success
+		// for a file that isn't there.
 		const auto existing = doc->filepath(true);
 		if (!existing.isEmpty() && QFile::exists(existing)) {
-			if (existing != target) {
-				QFile::remove(target);
-				QFile::copy(existing, target);
-			}
-			return QJsonObject{
-				{ "success", true },
-				{ "path", target },
-				{ "bytes", qint64(QFileInfo(target).size()) },
-				{ "mime", mime },
-				{ "source", "cache" },
+			const auto cacheResult = [&](const QString &path) {
+				return QJsonObject{
+					{ "success", true },
+					{ "path", path },
+					{ "bytes", qint64(QFileInfo(path).size()) },
+					{ "mime", mime },
+					{ "source", "cache" },
+				};
 			};
+			if (existing == target) {
+				return cacheResult(target);
+			}
+			QFile::remove(target);
+			if (QFile::copy(existing, target)
+				&& QFile::exists(target)
+				&& QFileInfo(target).size() > 0) {
+				return cacheResult(target);
+			}
+			// Couldn't place it at `target`; the cached original is still valid.
+			if (QFileInfo(existing).size() > 0) {
+				return cacheResult(existing);
+			}
+			return toolError(
+				"media is cached but could not be copied to the destination");
 		}
 
 		rpl::lifetime lifetime;
