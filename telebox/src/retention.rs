@@ -337,6 +337,27 @@ fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
                     readout.push(("db size".into(), human_bytes(i64_of(&s, "database_size_bytes"))));
                 }
             }
+            // The STORE contents — the chats actually archived — so the panel
+            // shows what you've saved, not just a count. Derived server-side from
+            // the archived messages, with titles for chats recorded on archive.
+            if let Some(a) = call(sock, token, "list_archived_chats", json!({})) {
+                let store = a.get("chats").and_then(Value::as_array).map(|arr| {
+                    arr.iter().map(|c| {
+                        let id = i64_of(c, "chat_id");
+                        let title = str_of(c, "title");
+                        let mc = i64_of(c, "message_count");
+                        let ty = str_of(c, "type");
+                        PanelRow {
+                            id,
+                            sid: String::new(),
+                            title: if title.is_empty() { format!("chat {id}") } else { title },
+                            sub: format!("{mc} msg{}", if ty.is_empty() { String::new() } else { format!(" · {ty}") }),
+                            on: false,
+                        }
+                    }).collect::<Vec<_>>()
+                }).unwrap_or_default();
+                state.set_archive_store(store);
+            }
             // Full chat set so the Archiver's search reaches every chat.
             let rows = chat_rows(sock, token, 2000);
             state.set_panel_readout(3, readout, rows, true);

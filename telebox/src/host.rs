@@ -216,6 +216,9 @@ pub struct Inner {
     // driving archive_chat into the local SQLite store.
     pub archiver_search: String,
     pub archiver_target: Option<(i64, String)>,
+    // The archive STORE contents — the chats actually archived (list_archived_chats),
+    // so the panel shows what you've saved, not just a count.
+    pub archive_store: Vec<PanelRow>,
     // Bots: the selected bot (id) and its detail lines (info + activity stats),
     // filled by the poller from get_bot_info.
     pub bots_selected: Option<String>,
@@ -358,6 +361,7 @@ impl HostState {
                 export_cancel: false,
                 archiver_search: String::new(),
                 archiver_target: None,
+                archive_store: Vec::new(),
                 bots_selected: None,
                 bots_detail: Vec::new(),
                 bots_config: Vec::new(),
@@ -610,6 +614,12 @@ impl HostState {
     }
     pub fn set_archiver_target(&self, id: i64, title: String) {
         if let Ok(mut i) = self.0.lock() { i.archiver_target = Some((id, title)); }
+    }
+    pub fn archive_store(&self) -> Vec<PanelRow> {
+        self.0.lock().map(|i| i.archive_store.clone()).unwrap_or_default()
+    }
+    pub fn set_archive_store(&self, rows: Vec<PanelRow>) {
+        if let Ok(mut i) = self.0.lock() { i.archive_store = rows; }
     }
 
     // --- Bots: selection + detail ------------------------------------------
@@ -1194,6 +1204,8 @@ impl HostState {
                 "search": i.archiver_search,
                 "matches": arc_matches,
                 "target": i.archiver_target.as_ref().map(|(id, t)| serde_json::json!({ "id": id, "title": t })),
+                "store_count": i.archive_store.len(),
+                "store": i.archive_store.iter().take(20).map(|r| serde_json::json!({ "id": r.id, "title": r.title, "sub": r.sub })).collect::<Vec<_>>(),
             },
             "bots": {
                 "selected": i.bots_selected,

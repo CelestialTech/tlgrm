@@ -1165,8 +1165,31 @@ impl TeleBox {
         };
         let meta = if typing { format!("{shown} of {total} chats") } else { format!("{total} chats · type to filter") };
 
+        // STORE CONTENTS — the chats actually in the archive, so the store is
+        // browsable, not a write-only black box. Read from list_archived_chats.
+        let archived = self.state.archive_store();
+        let mut store_list = div().flex().flex_col().gap_1();
+        if archived.is_empty() {
+            store_list = store_list.child(mono(INK3).text_sm()
+                .child("nothing archived yet — pick a chat below to archive it".to_string()));
+        }
+        for r in archived.iter().take(30) {
+            store_list = store_list.child(div().flex().items_center().gap_2().py_2().px_3().rounded_md()
+                .bg(rgb(WELL)).border_1().border_color(rgb(LINE2))
+                .child(dot(OK, 6.))
+                .child(div().flex_1().min_w_0().text_sm().text_color(rgb(INK))
+                    .whitespace_nowrap().overflow_hidden().text_ellipsis().child(r.title.clone()))
+                .child(mono(INK3).text_xs().child(r.sub.clone())));
+        }
+        let store_contents = div().flex().flex_col().gap_2()
+            .child(mono(INK3).text_xs().child(format!("STORE CONTENTS · {} archived", archived.len())))
+            .child(store_list);
+
         div().flex().flex_col().gap_3().w_full()
             .child(store)
+            .child(store_contents)
+            .child(div().h(px(1.)).bg(rgb(LINE2)))
+            .child(mono(INK3).text_xs().child("ARCHIVE ANOTHER CHAT"))
             .child(div().flex().items_center().gap_3()
                 .child(div().flex_1().child(search_box))
                 .child(archive_btn))
