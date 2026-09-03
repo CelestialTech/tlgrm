@@ -1,0 +1,321 @@
+{
+  "total": 362,
+  "domains": [
+    {
+      "name": "Messaging",
+      "tool_count": 18,
+      "subdomains": [
+        {
+          "name": "Compose & Send",
+          "tools": ["send_message", "send_document", "send_rich_message", "batch_send"]
+        },
+        {
+          "name": "Edit, Delete & Forward",
+          "tools": ["edit_message", "delete_message", "forward_message", "batch_delete", "batch_forward"]
+        },
+        {
+          "name": "Pin & React",
+          "tools": ["pin_message", "unpin_message", "add_reaction", "batch_pin", "batch_reaction"]
+        },
+        {
+          "name": "Scheduling",
+          "tools": ["schedule_message", "cancel_scheduled", "list_scheduled", "update_scheduled"]
+        }
+      ]
+    },
+    {
+      "name": "Chats & Folders",
+      "tool_count": 10,
+      "subdomains": [
+        {
+          "name": "Chats & Users",
+          "tools": ["list_chats", "get_chat_info", "read_messages", "get_user_info", "rename_chat"]
+        },
+        {
+          "name": "Folders & Filters",
+          "tools": ["list_folders", "create_folder", "update_folder", "delete_folder", "reorder_folders"]
+        }
+      ]
+    },
+    {
+      "name": "Channels, Groups & Communities",
+      "tool_count": 19,
+      "subdomains": [
+        {
+          "name": "Channels & Groups",
+          "tools": ["get_channel_full", "transfer_group_ownership", "create_channel", "delete_channel", "set_channel_username", "check_channel_username", "list_topics"]
+        },
+        {
+          "name": "Admin & Welcome Messages",
+          "tools": ["get_welcome_messages", "delete_welcome_message", "delete_all_welcome_messages", "set_admin_rights"]
+        },
+        {
+          "name": "Communities",
+          "tools": ["list_communities", "get_community", "create_community", "add_chat_to_community", "remove_chat_from_community", "set_community_collapsed", "list_community_join_requests", "review_community_join_request"]
+        }
+      ]
+    },
+    {
+      "name": "Media, Files & Downloads",
+      "tool_count": 8,
+      "subdomains": [
+        {
+          "name": "Downloads",
+          "tools": ["list_downloads", "clear_finished_downloads", "delete_downloaded_files", "get_auto_download_settings", "set_auto_download_settings"]
+        },
+        {
+          "name": "Web Pages & Rich Content",
+          "tools": ["get_web_page", "list_rich_messages", "save_rich_message_html"]
+        }
+      ]
+    },
+    {
+      "name": "Search, Organization & AI Intelligence",
+      "tool_count": 26,
+      "subdomains": [
+        {
+          "name": "Search & Semantic",
+          "tools": ["search_messages", "semantic_search", "index_messages", "detect_topics", "semantic_index_messages"]
+        },
+        {
+          "name": "Content Understanding",
+          "tools": ["classify_intent", "extract_entities", "request_message_summary"]
+        },
+        {
+          "name": "Translation",
+          "tools": ["translate_messages", "auto_translate_chat", "get_translation_languages", "translate_message", "get_translation_history"]
+        },
+        {
+          "name": "Tags",
+          "tools": ["tag_message", "get_tagged_messages", "list_tags", "delete_tag", "add_message_tag", "remove_message_tag", "get_message_tags", "search_by_tag", "get_tag_suggestions"]
+        },
+        {
+          "name": "Tasks",
+          "tools": ["create_task", "list_tasks", "create_task_from_message", "update_task"]
+        }
+      ]
+    },
+    {
+      "name": "Voice, Video & Transcription",
+      "tool_count": 18,
+      "subdomains": [
+        {
+          "name": "Transcription",
+          "tools": ["transcribe_voice", "get_transcription", "transcribe_voice_message", "get_transcription_status", "get_voice_transcription"]
+        },
+        {
+          "name": "Text-to-Speech & Voice",
+          "tools": ["configure_voice_persona", "generate_voice_message", "send_voice_reply", "list_voice_presets", "clone_voice", "list_voice_personas", "text_to_speech"]
+        },
+        {
+          "name": "Video Avatars",
+          "tools": ["configure_video_avatar", "generate_video_circle", "send_video_reply", "upload_avatar_source", "list_avatar_presets", "text_to_video"]
+        }
+      ]
+    },
+    {
+      "name": "Bots & Automation",
+      "tool_count": 34,
+      "subdomains": [
+        {
+          "name": "Bots",
+          "tools": ["list_bots", "get_bot_info", "start_bot", "stop_bot", "configure_bot", "get_bot_stats", "send_bot_command", "get_bot_suggestions"]
+        },
+        {
+          "name": "Chat Rules",
+          "tools": ["create_chat_rule", "list_chat_rules", "execute_chat_rules", "delete_chat_rule", "get_chat_rules", "set_chat_rules", "test_chat_rules"]
+        },
+        {
+          "name": "Auto-Reply Rules",
+          "tools": ["create_auto_reply_rule", "list_auto_reply_rules", "update_auto_reply_rule", "delete_auto_reply_rule", "test_auto_reply_rule", "get_auto_reply_stats"]
+        },
+        {
+          "name": "Ad Filtering",
+          "tools": ["configure_ad_filter", "get_filtered_ads", "get_ad_filter_stats"]
+        },
+        {
+          "name": "AI Chatbot",
+          "tools": ["configure_ai_chatbot", "get_chatbot_config", "pause_chatbot", "resume_chatbot", "set_chatbot_prompt", "get_chatbot_stats", "train_chatbot", "configure_chatbot", "test_chatbot", "get_chatbot_analytics"]
+        }
+      ]
+    },
+    {
+      "name": "Business Suite",
+      "tool_count": 29,
+      "subdomains": [
+        {
+          "name": "Quick Replies",
+          "tools": ["create_quick_reply", "list_quick_replies", "send_quick_reply", "edit_quick_reply", "delete_quick_reply", "update_quick_reply", "use_quick_reply"]
+        },
+        {
+          "name": "Greetings",
+          "tools": ["configure_greeting", "get_greeting_config", "test_greeting", "get_greeting_stats", "set_greeting_message", "get_greeting_message", "disable_greeting"]
+        },
+        {
+          "name": "Away Messages",
+          "tools": ["configure_away_message", "get_away_config", "set_away_now", "disable_away", "get_away_stats", "set_away_message", "test_away", "get_away_message"]
+        },
+        {
+          "name": "Business Hours & Location",
+          "tools": ["set_business_hours", "get_business_hours", "is_open_now", "set_business_location", "get_business_location", "check_business_status", "get_next_available_slot"]
+        }
+      ]
+    },
+    {
+      "name": "Export, Archive & Retention",
+      "tool_count": 30,
+      "subdomains": [
+        {
+          "name": "Chat Export",
+          "tools": ["export_chat", "get_export_status", "export_topic"]
+        },
+        {
+          "name": "Gradual Export",
+          "tools": ["start_gradual_export", "get_gradual_export_status", "pause_gradual_export", "resume_gradual_export", "cancel_gradual_export", "get_gradual_export_config", "set_gradual_export_config", "queue_gradual_export", "get_gradual_export_queue"]
+        },
+        {
+          "name": "Archive Database",
+          "tools": ["archive_chat", "list_archived_chats", "get_archive_stats", "search_archive", "purge_archive"]
+        },
+        {
+          "name": "Deleted Account Archiving",
+          "tools": ["list_deleted_accounts", "archive_deleted_accounts", "get_deleted_archive_status", "pause_deleted_archive", "resume_deleted_archive", "cancel_deleted_archive", "list_deleted_channels"]
+        },
+        {
+          "name": "Message Version History",
+          "tools": ["get_message_history", "get_retention_stats", "list_message_history"]
+        },
+        {
+          "name": "Ephemeral Capture",
+          "tools": ["configure_ephemeral_capture", "get_ephemeral_stats", "get_ephemeral_messages"]
+        }
+      ]
+    },
+    {
+      "name": "Analytics & Statistics",
+      "tool_count": 8,
+      "subdomains": [
+        {
+          "name": "Activity & Trends",
+          "tools": ["get_user_activity", "get_chat_activity", "get_time_series", "get_trends"]
+        },
+        {
+          "name": "Message & Word Stats",
+          "tools": ["get_message_stats", "get_top_users", "get_top_words", "export_analytics"]
+        }
+      ]
+    },
+    {
+      "name": "Account, Privacy & Security",
+      "tool_count": 23,
+      "subdomains": [
+        {
+          "name": "Profile",
+          "tools": ["get_profile_settings", "update_profile_name", "update_profile_bio", "update_profile_username", "update_profile_phone"]
+        },
+        {
+          "name": "Privacy",
+          "tools": ["get_privacy_settings", "update_last_seen_privacy", "update_profile_photo_privacy", "update_phone_number_privacy", "update_forwards_privacy", "update_birthday_privacy", "update_about_privacy"]
+        },
+        {
+          "name": "Blocking",
+          "tools": ["get_blocked_users", "block_user", "unblock_user"]
+        },
+        {
+          "name": "Security & Sessions",
+          "tools": ["get_security_settings", "get_active_sessions", "terminate_session", "update_auto_delete_period"]
+        },
+        {
+          "name": "System & Server",
+          "tools": ["get_cache_stats", "get_server_info", "get_audit_log", "health_check"]
+        }
+      ]
+    },
+    {
+      "name": "Wallet & Payments",
+      "tool_count": 41,
+      "subdomains": [
+        {
+          "name": "Balance & Transactions",
+          "tools": ["get_wallet_balance", "get_balance_history", "get_transactions", "get_transaction_details", "export_transactions", "search_transactions", "get_stars_history", "categorize_transaction"]
+        },
+        {
+          "name": "Stars Exchange & Top-up",
+          "tools": ["send_stars", "get_topup_options", "get_withdrawal_status", "create_crypto_payment", "get_stars_rate", "convert_stars"]
+        },
+        {
+          "name": "Budgets & Financial Reports",
+          "tools": ["get_spending_analytics", "get_income_analytics", "set_wallet_budget", "get_budget_status", "configure_wallet_alerts", "generate_financial_report", "get_tax_summary", "set_spending_budget", "set_budget_alert"]
+        },
+        {
+          "name": "Subscriptions",
+          "tools": ["list_subscriptions", "get_subscription_alerts", "cancel_subscription", "subscribe_to_channel", "unsubscribe_from_channel", "get_subscription_stats"]
+        },
+        {
+          "name": "Mini App Spending",
+          "tools": ["get_miniapp_spending", "get_miniapp_history", "set_miniapp_budget", "list_miniapp_permissions", "approve_miniapp_spend", "revoke_miniapp_permission"]
+        },
+        {
+          "name": "Star Rating & Leaderboards",
+          "tools": ["get_star_rating", "get_star_rating_details", "get_rating_history", "simulate_rating_change", "get_stars_leaderboard", "get_leaderboard"]
+        }
+      ]
+    },
+    {
+      "name": "Gifts & Collectibles",
+      "tool_count": 57,
+      "subdomains": [
+        {
+          "name": "Gifts",
+          "tools": ["list_gifts", "get_gift_details", "get_gift_analytics", "list_star_gifts", "get_star_gift_details", "get_unique_gift_analytics", "get_collectibles_portfolio", "send_star_gift", "get_gift_transfer_history", "get_upgrade_options", "transfer_gift", "send_gift", "get_gift_history", "list_available_gifts", "get_gift_suggestions", "get_gift_price_history"]
+        },
+        {
+          "name": "Profile Gifts Display",
+          "tools": ["get_profile_gifts", "update_gift_display", "reorder_profile_gifts", "toggle_gift_notifications"]
+        },
+        {
+          "name": "Collections & Crafting",
+          "tools": ["list_gift_collections", "get_collection_details", "get_collection_completion", "create_gift_collection", "delete_gift_collection", "add_to_collection", "remove_from_collection", "craft_star_gift", "get_craft_options"]
+        },
+        {
+          "name": "Auctions",
+          "tools": ["list_active_auctions", "get_auction_details", "get_auction_alerts", "place_auction_bid", "get_auction_history", "create_auction_alert", "place_bid", "list_auctions", "get_auction_status"]
+        },
+        {
+          "name": "Marketplace & Resale",
+          "tools": ["browse_gift_marketplace", "get_market_trends", "list_gift_for_sale", "update_listing", "cancel_listing", "get_fragment_listings", "list_marketplace", "buy_gift", "delist_gift"]
+        },
+        {
+          "name": "Portfolio & Investment",
+          "tools": ["get_gift_investment_advice", "backtest_strategy", "get_portfolio_performance", "create_price_alert", "export_portfolio_report", "get_portfolio", "get_portfolio_value", "get_portfolio_history", "set_price_alert", "get_price_predictions"]
+        }
+      ]
+    },
+    {
+      "name": "Monetization & Creator",
+      "tool_count": 41,
+      "subdomains": [
+        {
+          "name": "Earnings & Monetization",
+          "tools": ["get_channel_earnings", "get_all_channels_earnings", "get_earnings_chart", "get_paid_content_earnings", "get_earnings", "withdraw_earnings", "set_monetization_rules", "get_monetization_analytics", "get_creator_dashboard"]
+        },
+        {
+          "name": "Paid Content & Subscribers",
+          "tools": ["get_paid_messages_stats", "configure_paid_messages", "get_paid_media_stats", "get_unlocked_content", "create_paid_post", "set_content_price", "get_paid_content_stats", "unlock_content", "list_purchased_content", "refund_content", "create_exclusive_content", "get_subscriber_analytics", "send_subscriber_message", "set_subscriber_tiers"]
+        },
+        {
+          "name": "Star Reactions",
+          "tools": ["get_reaction_stats", "get_star_reactions_received", "get_star_reactions_sent", "get_top_supporters", "send_star_reaction", "get_star_reactions", "get_reaction_analytics", "get_top_reacted", "set_reaction_price"]
+        },
+        {
+          "name": "Giveaways",
+          "tools": ["get_giveaway_options", "list_giveaways", "get_giveaway_stats", "create_giveaway"]
+        },
+        {
+          "name": "Achievements & Rewards",
+          "tools": ["list_achievements", "get_achievement_progress", "claim_achievement_reward", "share_achievement", "get_achievement_suggestions"]
+        }
+      ]
+    }
+  ]
+}

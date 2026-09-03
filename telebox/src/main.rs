@@ -13,6 +13,7 @@
 mod export_engine;
 mod host;
 mod mcp_relay;
+mod mcp_tree;
 mod plugin;
 mod qa;
 mod retention;
@@ -54,6 +55,8 @@ struct TeleBox {
     loop_started: bool,
     // Focus for the Export chat-search field (a real typed input).
     search_focus: FocusHandle,
+    // Focus for the MCP tool-tree search field.
+    mcp_focus: FocusHandle,
 }
 
 impl TeleBox {
@@ -73,7 +76,12 @@ impl TeleBox {
         })
         .detach();
 
-        Self { state, loop_started: false, search_focus: cx.focus_handle() }
+        Self {
+            state,
+            loop_started: false,
+            search_focus: cx.focus_handle(),
+            mcp_focus: cx.focus_handle(),
+        }
     }
 }
 
@@ -198,7 +206,9 @@ impl TeleBox {
             .child(div().flex_1())
             .child(self.toggle_el(i, active, cx));
 
-        let body = if i == 1 {
+        let body = if i == 0 {
+            self.mcp_body(cx).into_any_element()
+        } else if i == 1 {
             self.export_body(cx).into_any_element()
         } else if i == 2 {
             self.retention_body(cx).into_any_element()
@@ -445,6 +455,126 @@ impl TeleBox {
         }
         col.child(div().pl_3().py_2().border_l_2().border_color(rgb(VIOLET_DK))
             .child(div().text_sm().text_color(rgb(INK2)).child(p.desc)))
+    }
+
+    // MCP device — the aggregated endpoint as a navigable DOMAIN TREE (mcp_tree),
+    // not a flat 362-row dump: 14 domains -> 58 subdomains -> 362 tools, with a
+    // sticky filter, count gutter, and the selected tool's path lit in mint.
+    fn mcp_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let query = self.state.mcp_search();
+        let ql = query.to_lowercase();
+        let searching = !ql.is_empty();
+        let selected = self.state.mcp_selected();
+        let doms = mcp_tree::domains();
+        let total = mcp_tree::total_tools();
+        let clear = PANEL2; // "invisible" left border == panel ground (keeps rows aligned)
+
+        let match_count = if searching {
+            doms.iter().flat_map(|d| d.subs.iter()).flat_map(|s| s.tools.iter())
+                .filter(|t| t.to_lowercase().contains(&ql)).count()
+        } else {
+            total
+        };
+
+        let field = |k: String, v: String| {
+            div().flex().flex_col().gap_1().flex_shrink_0()
+                .child(mono(INK3).text_xs().child(k))
+                .child(mono(INK).child(v))
+        };
+        let readout = div().flex().items_center().gap_6().p_4().rounded_lg().bg(rgb(WELL))
+            .border_1().border_color(rgb(LINE))
+            .child(field("ENDPOINT".into(), "/tmp/tlgrm_mcp.sock".into()))
+            .child(div().w(px(1.)).h(px(28.)).bg(rgb(LINE2)))
+            .child(field("TOOLS".into(), total.to_string()))
+            .child(div().w(px(1.)).h(px(28.)).bg(rgb(LINE2)))
+            .child(field("DOMAINS".into(), doms.len().to_string()))
+            .child(div().flex_1())
+            .child(mono(INK3).text_xs().child("JSON-RPC · unix socket"));
+
+        let search_box = div().id("mcp-search").track_focus(&self.mcp_focus)
+            .flex().items_center().gap_2().px_3().py_2().rounded_md().bg(rgb(WELL))
+            .border_1().border_color(rgb(if searching { MINT_DK } else { LINE }))
+            .child(mono(INK3).child("⌕"))
+            .child(if searching { mono(INK).child(format!("{query}▏")) }
+                   else { mono(INK3).child("filter tools…".to_string()) })
+            .child(div().flex_1())
+            .child(mono(INK3).text_xs().child(if searching {
+                format!("{match_count} matches")
+            } else {
+                format!("{total} tools · {} domains", doms.len())
+            }))
+            .on_click(cx.listener(|this, _, window, cx| { window.focus(&this.mcp_focus, cx); cx.notify(); }))
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _w, cx| {
+                let ks = &ev.keystroke;
+                if ks.modifiers.control || ks.modifiers.platform { return; }
+                match ks.key.as_str() {
+                    "backspace" => this.state.mcp_search_backspace(),
+                    "escape" => this.state.mcp_search_clear(),
+                    _ => { if let Some(ch) = ks.key_char.as_ref() { this.state.mcp_search_push(ch.as_str()); } }
+                }
+                cx.notify();
+            }));
+
+        let mut tree = div().flex().flex_col().gap(px(1.));
+        for (di, d) in doms.iter().enumerate() {
+            if searching && !d.subs.iter().any(|s| s.tools.iter().any(|t| t.to_lowercase().contains(&ql))) {
+                continue;
+            }
+            let d_open = searching || self.state.mcp_expanded(&d.name);
+            let on_path = selected.as_ref()
+                .map(|sel| d.subs.iter().any(|s| s.tools.iter().any(|t| t == sel))).unwrap_or(false);
+            let dname = d.name.clone();
+            tree = tree.child(div().id(("mcpd", di)).cursor_pointer()
+                .flex().items_center().gap_2().pl_2().pr_3().py(px(6.)).rounded_md()
+                .border_l_2().border_color(rgb(if on_path { MINT } else { clear }))
+                .child(mono(if d_open { MINT } else { INK3 }).text_xs().w(px(10.)).child(if d_open { "▾" } else { "▸" }))
+                .child(div().flex_1().min_w_0().font_weight(FontWeight::SEMIBOLD).text_sm().text_color(rgb(INK)).child(d.name.clone()))
+                .child(mono(INK3).text_xs().child(d.count.to_string()))
+                .on_click(cx.listener(move |this, _, _, cx| { this.state.mcp_toggle(dname.clone()); cx.notify(); })));
+            if !d_open {
+                continue;
+            }
+            for (si, sub) in d.subs.iter().enumerate() {
+                let stools: Vec<&String> = if searching {
+                    sub.tools.iter().filter(|t| t.to_lowercase().contains(&ql)).collect()
+                } else {
+                    sub.tools.iter().collect()
+                };
+                if searching && stools.is_empty() {
+                    continue;
+                }
+                let skey = format!("{}\u{1f}{}", d.name, sub.name);
+                let s_open = searching || self.state.mcp_expanded(&skey);
+                let s_on_path = selected.as_ref().map(|sel| sub.tools.iter().any(|t| t == sel)).unwrap_or(false);
+                let skey2 = skey.clone();
+                tree = tree.child(div().id(("mcps", di * 100 + si)).cursor_pointer()
+                    .flex().items_center().gap_2().pl(px(28.)).pr_3().py(px(5.)).rounded_md()
+                    .border_l_2().border_color(rgb(if s_on_path { MINT_DK } else { clear }))
+                    .child(mono(INK3).text_xs().w(px(10.)).child(if s_open { "▾" } else { "▸" }))
+                    .child(div().flex_1().min_w_0().text_sm().text_color(rgb(INK2)).child(sub.name.clone()))
+                    .child(mono(INK3).text_xs().child(stools.len().to_string()))
+                    .on_click(cx.listener(move |this, _, _, cx| { this.state.mcp_toggle(skey2.clone()); cx.notify(); })));
+                if !s_open {
+                    continue;
+                }
+                for (ti, t) in stools.iter().enumerate() {
+                    let is_sel = selected.as_deref() == Some(t.as_str());
+                    let tool = (*t).clone();
+                    let tool2 = tool.clone();
+                    tree = tree.child(div().id(("mcpl", di * 10000 + si * 100 + ti)).cursor_pointer()
+                        .flex().items_center().gap_2().pl(px(50.)).pr_3().py(px(4.)).rounded_md()
+                        .bg(rgb(if is_sel { WELL } else { clear }))
+                        .child(dot(if is_sel { MINT } else { INK3 }, 5.))
+                        .child(mono(if is_sel { MINT } else { INK2 }).text_sm().child(tool.clone()))
+                        .on_click(cx.listener(move |this, _, _, cx| { this.state.mcp_select(tool2.clone()); cx.notify(); })));
+                }
+            }
+        }
+
+        div().flex().flex_col().gap_3().w_full()
+            .child(readout)
+            .child(search_box)
+            .child(tree)
     }
 
     // Export device — built strictly from the ontology (ONTOLOGY.md): Service in

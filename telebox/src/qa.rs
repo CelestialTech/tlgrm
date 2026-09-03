@@ -115,6 +115,19 @@ fn handle(state: HostState, s: UnixStream) {
                 state.set_export_target(id, title);
                 state.snapshot()
             }
+            "mcp_toggle" => {
+                let key = v.get("key").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                state.mcp_toggle(key);
+                state.snapshot()
+            }
+            "mcp_search" => {
+                let t = v.get("text").and_then(|x| x.as_str()).unwrap_or("");
+                state.mcp_search_clear();
+                if !t.is_empty() {
+                    state.mcp_search_push(t);
+                }
+                state.snapshot()
+            }
             "export_engine" => {
                 // Start the Rust export engine directly — for tests, with a small
                 // `max` cap and a scratch `dir`, so a run is never a heavy export.

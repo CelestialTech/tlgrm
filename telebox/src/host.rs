@@ -7,6 +7,7 @@
 // HostState method the QA socket calls; there is no second implementation to
 // drift.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -190,6 +191,11 @@ pub struct Inner {
     pub export_run: Option<ExportRun>,
     // Set to ask the Rust export engine thread to stop; it clears it on start.
     pub export_cancel: bool,
+    // MCP domain-tree UI: which nodes are expanded (domain name, or
+    // "domain\u{1f}sub"), the in-place filter, and the selected tool.
+    pub mcp_expanded: HashSet<String>,
+    pub mcp_search: String,
+    pub mcp_selected: Option<String>,
     pub shot_request: Option<String>,
     pub shot_armed: bool,
     pub shot_result: Option<(u32, u32, bool)>,
@@ -291,6 +297,9 @@ impl HostState {
                 export_target: None,
                 export_run: None,
                 export_cancel: false,
+                mcp_expanded: HashSet::new(),
+                mcp_search: String::new(),
+                mcp_selected: None,
                 shot_request: None,
                 shot_armed: false,
                 shot_result: None,
@@ -497,6 +506,36 @@ impl HostState {
     // client's MCP socket and the auth-token path.
     pub fn relay_creds(&self) -> (String, String) {
         self.0.lock().map(|i| (i.upstream.clone(), i.token.clone())).unwrap_or_default()
+    }
+
+    // --- MCP domain tree ---------------------------------------------------
+    pub fn mcp_expanded(&self, key: &str) -> bool {
+        self.0.lock().map(|i| i.mcp_expanded.contains(key)).unwrap_or(false)
+    }
+    pub fn mcp_toggle(&self, key: String) {
+        if let Ok(mut i) = self.0.lock() {
+            if !i.mcp_expanded.remove(&key) {
+                i.mcp_expanded.insert(key);
+            }
+        }
+    }
+    pub fn mcp_search(&self) -> String {
+        self.0.lock().map(|i| i.mcp_search.clone()).unwrap_or_default()
+    }
+    pub fn mcp_search_push(&self, s: &str) {
+        if let Ok(mut i) = self.0.lock() { i.mcp_search.push_str(s); }
+    }
+    pub fn mcp_search_backspace(&self) {
+        if let Ok(mut i) = self.0.lock() { i.mcp_search.pop(); }
+    }
+    pub fn mcp_search_clear(&self) {
+        if let Ok(mut i) = self.0.lock() { i.mcp_search.clear(); }
+    }
+    pub fn mcp_selected(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|i| i.mcp_selected.clone())
+    }
+    pub fn mcp_select(&self, tool: String) {
+        if let Ok(mut i) = self.0.lock() { i.mcp_selected = Some(tool); }
     }
 
     // The one primary action for device `i`, built from its current selection.
