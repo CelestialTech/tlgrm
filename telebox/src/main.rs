@@ -240,7 +240,7 @@ impl TeleBox {
         } else if i == 4 {
             self.bots_body(cx).into_any_element()
         } else if i == 5 {
-            self.wallet_body().into_any_element()
+            self.wallet_body(cx).into_any_element()
         } else if i == 6 {
             self.ai_body(cx).into_any_element()
         } else {
@@ -858,10 +858,50 @@ impl TeleBox {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(mid) = this.state.ai_voice_sel() { this.state.request_transcribe(cid, mid); cx.notify(); }
                     }));
+
+                // SEND A VOICE MESSAGE — synthesize `text` and send it to this
+                // chat (send_voice_reply). The TTS is no longer a dead-end.
+                let vm = self.state.ai_vm_text();
+                let vm_busy = self.state.ai_vm_busy();
+                let vm_result = self.state.ai_vm_result();
+                let vm_typing = !vm.is_empty();
+                let vm_box = div().id("ai-vm").track_focus(&self.mcp_focus)
+                    .flex_1().flex().items_center().gap_2().px_3().py_2().rounded_md().bg(rgb(PANEL2))
+                    .border_1().border_color(rgb(if vm_typing { MINT_DK } else { LINE }))
+                    .child(mono(INK3).child("🎙"))
+                    .child(if vm_typing { mono(INK).text_sm().child(format!("{vm}▏")) }
+                           else { mono(INK3).text_sm().child("speak this to the chat…".to_string()) })
+                    .on_click(cx.listener(|this, _, window, cx| { window.focus(&this.mcp_focus, cx); cx.notify(); }))
+                    .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _w, cx| {
+                        let ks = &ev.keystroke;
+                        if ks.modifiers.control || ks.modifiers.platform { return; }
+                        match ks.key.as_str() {
+                            "backspace" => this.state.ai_vm_backspace(),
+                            "escape" => this.state.ai_vm_clear(),
+                            "enter" => this.state.request_send_vm(),
+                            _ => { if let Some(ch) = ks.key_char.as_ref() { this.state.ai_vm_push(ch.as_str()); } }
+                        }
+                        cx.notify();
+                    }));
+                let vm_send = div().id("ai-vm-send").cursor_pointer().flex_shrink_0().px_3().py_2().rounded_md()
+                    .bg(rgb(if vm_typing && !vm_busy { MINT_DK } else { WELL }))
+                    .border_1().border_color(rgb(if vm_typing && !vm_busy { MINT } else { LINE }))
+                    .child(mono(if vm_typing && !vm_busy { MINT } else { INK3 }).text_xs()
+                        .child(if vm_busy { "sending…".to_string() } else { "Send voice ▸".to_string() }))
+                    .on_click(cx.listener(|this, _, _, cx| { this.state.request_send_vm(); cx.notify(); }));
+                let vm_result_line = if vm_result.is_empty() { None } else {
+                    let c = if vm_result.starts_with('✕') { CRIT } else if vm_result.starts_with('✓') { OK } else { INK3 };
+                    Some(mono(c).text_xs().child(vm_result.clone()))
+                };
+
                 div().flex().flex_col().gap_2()
                     .child(header)
                     .child(list)
                     .child(div().flex().child(tbtn))
+                    .child(div().h(px(1.)).bg(rgb(LINE2)))
+                    .child(mono(INK3).text_xs().child("SEND A VOICE MESSAGE · send_voice_reply"))
+                    .child(div().flex().items_center().gap_2().child(vm_box).child(vm_send))
+                    .children(vm_result_line)
             }
         };
 
@@ -876,7 +916,7 @@ impl TeleBox {
 
     // Wallet device — read-only Store: the live Stars balance + local transaction
     // records. No Job, no action: spending is dark by design.
-    fn wallet_body(&self) -> impl IntoElement {
+    fn wallet_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let d = self.state.panel(5);
         let balance = d.readout.iter().find(|(k, _)| k == "stars_balance").map(|(_, v)| v.clone());
         let err = d.readout.iter().find(|(k, _)| k == "wallet").map(|(_, v)| v.clone());
@@ -893,26 +933,80 @@ impl TeleBox {
                 None => "payments.getStarsStatus · live".to_string(),
             }));
 
+        // SEARCH transactions (search_transactions) — makes the ledger queryable.
+        let wq = self.state.wallet_query();
+        let w_typing = !wq.is_empty();
+        let w_busy = self.state.wallet_search_busy();
+        let search = div().id("wallet-search").track_focus(&self.search_focus)
+            .flex().items_center().gap_2().px_3().py_2().rounded_md().bg(rgb(WELL))
+            .border_1().border_color(rgb(if w_typing { MINT_DK } else { LINE }))
+            .child(mono(INK3).child("⌕"))
+            .child(if w_typing { mono(INK).child(format!("{wq}▏")) }
+                   else { mono(INK3).child("search transactions…".to_string()) })
+            .child(div().flex_1())
+            .child(mono(if w_busy { AMBER } else { INK3 }).text_xs()
+                .child(if w_busy { "searching…".to_string() } else { "↵ search".to_string() }))
+            .on_click(cx.listener(|this, _, window, cx| { window.focus(&this.search_focus, cx); cx.notify(); }))
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _w, cx| {
+                let ks = &ev.keystroke;
+                if ks.modifiers.control || ks.modifiers.platform { return; }
+                match ks.key.as_str() {
+                    "backspace" => this.state.wallet_query_backspace(),
+                    "escape" => this.state.wallet_query_clear(),
+                    "enter" => this.state.request_wallet_search(),
+                    _ => { if let Some(ch) = ks.key_char.as_ref() { this.state.wallet_query_push(ch.as_str()); } }
+                }
+                cx.notify();
+            }));
+
+        // Which rows to show: search hits when a query is active, else recent.
+        let hits = self.state.wallet_hits();
         let mut list = div().flex().flex_col().gap_1();
-        if d.rows.is_empty() {
-            list = list.child(mono(INK3).text_sm().child("no transactions recorded"));
+        let (label, rows): (String, Vec<(String, String, bool)>) = if w_typing {
+            (format!("{} match(es)", hits.len()), hits)
+        } else {
+            ("TRANSACTIONS".into(),
+             d.rows.iter().map(|r| (r.title.clone(), r.sub.clone(), r.on)).collect())
+        };
+        if rows.is_empty() {
+            list = list.child(mono(INK3).text_sm().child(if w_typing { "no matching transactions".to_string() } else { "no transactions recorded".to_string() }));
         }
-        for r in d.rows.iter() {
-            let income = r.on;
+        for (title, sub, income) in rows.iter() {
             list = list.child(div().flex().items_center().gap_3().py_2().px_3().rounded_md()
                 .bg(rgb(WELL)).border_1().border_color(rgb(LINE2))
-                .child(dot(if income { OK } else { CRIT }, 6.))
+                .child(dot(if *income { OK } else { CRIT }, 6.))
                 .child(div().flex_1().min_w_0().text_sm().text_color(rgb(INK))
-                    .whitespace_nowrap().overflow_hidden().text_ellipsis().child(r.title.clone()))
-                .child(mono(if income { OK } else { CRIT }).text_xs().child(r.sub.clone())));
+                    .whitespace_nowrap().overflow_hidden().text_ellipsis().child(title.clone()))
+                .child(mono(if *income { OK } else { CRIT }).text_xs().child(sub.clone())));
+        }
+
+        // GIFT PORTFOLIO — the owned gifts (get_profile_gifts).
+        let gifts = self.state.wallet_gifts();
+        let gifts_loaded = self.state.wallet_gifts_loaded();
+        let mut gift_list = div().flex().flex_wrap().gap_2();
+        if !gifts_loaded {
+            gift_list = gift_list.child(mono(INK3).text_sm().child("loading gifts…".to_string()));
+        } else if gifts.is_empty() {
+            gift_list = gift_list.child(mono(INK3).text_sm().child("no gifts owned".to_string()));
+        }
+        for (title, sub) in gifts.iter().take(24) {
+            gift_list = gift_list.child(div().flex().items_center().gap_2().py_1().px_3().rounded_md()
+                .bg(rgb(WELL)).border_1().border_color(rgb(LINE2))
+                .child(mono(AMBER).text_xs().child("✦"))
+                .child(mono(INK).text_xs().child(title.clone()))
+                .child(mono(INK3).text_xs().child(sub.clone())));
         }
 
         div().flex().flex_col().gap_3().w_full()
             .child(balance_card)
-            .child(mono(INK3).text_xs().child("TRANSACTIONS"))
+            .child(search)
+            .child(mono(INK3).text_xs().child(label))
             .child(list)
+            .child(div().h(px(1.)).bg(rgb(LINE2)))
+            .child(mono(INK3).text_xs().child(format!("GIFT PORTFOLIO · {}", gifts.len())))
+            .child(gift_list)
             .child(div().pl_3().py_2().border_l_2().border_color(rgb(LINE))
-                .child(mono(INK3).text_xs().child("Read-only — send_stars and all spending are disabled by design.")))
+                .child(mono(INK3).text_xs().child("Read-only — send_stars and all spending stay disabled by design.")))
     }
 
     // Bots device — the automation framework: Item (a bot, running/stopped),
@@ -1039,6 +1133,45 @@ impl TeleBox {
                     .children(cfg_line))
             };
 
+            // SEND A COMMAND — run one of the bot's commands (send_bot_command).
+            let cmd = self.state.bots_command();
+            let cmd_busy = self.state.bots_command_busy();
+            let cmd_result = self.state.bots_command_result();
+            let cmd_typing = !cmd.is_empty();
+            let cmd_box = div().id("bot-cmd").track_focus(&self.search_focus)
+                .flex_1().flex().items_center().gap_2().px_3().py_2().rounded_md().bg(rgb(PANEL2))
+                .border_1().border_color(rgb(if cmd_typing { MINT_DK } else { LINE }))
+                .child(mono(INK3).child("/"))
+                .child(if cmd_typing { mono(INK).text_sm().child(format!("{cmd}▏")) }
+                       else { mono(INK3).text_sm().child("command to run…".to_string()) })
+                .on_click(cx.listener(|this, _, window, cx| { window.focus(&this.search_focus, cx); cx.notify(); }))
+                .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _w, cx| {
+                    let ks = &ev.keystroke;
+                    if ks.modifiers.control || ks.modifiers.platform { return; }
+                    match ks.key.as_str() {
+                        "backspace" => this.state.bots_command_backspace(),
+                        "escape" => this.state.bots_command_clear(),
+                        "enter" => this.state.request_bot_command(),
+                        _ => { if let Some(ch) = ks.key_char.as_ref() { this.state.bots_command_push(ch.as_str()); } }
+                    }
+                    cx.notify();
+                }));
+            let send_cmd = div().id("bot-cmd-send").cursor_pointer().flex_shrink_0().px_3().py_2().rounded_md()
+                .bg(rgb(if cmd_typing && !cmd_busy { MINT_DK } else { WELL }))
+                .border_1().border_color(rgb(if cmd_typing && !cmd_busy { MINT } else { LINE }))
+                .child(mono(if cmd_typing && !cmd_busy { MINT } else { INK3 }).text_xs()
+                    .child(if cmd_busy { "sending…".to_string() } else { "Run ▸".to_string() }))
+                .on_click(cx.listener(|this, _, _, cx| { this.state.request_bot_command(); cx.notify(); }));
+            let cmd_result_line = if cmd_result.is_empty() { None } else {
+                let c = if cmd_result.starts_with('✕') { CRIT } else if cmd_result.starts_with('✓') { OK } else { INK3 };
+                Some(mono(c).text_xs().child(cmd_result.clone()))
+            };
+            let command_section = div().flex().flex_col().gap_2().pt_2()
+                .child(div().h(px(1.)).bg(rgb(LINE2)))
+                .child(mono(INK3).text_xs().child("SEND A COMMAND · send_bot_command"))
+                .child(div().flex().items_center().gap_2().child(cmd_box).child(send_cmd))
+                .children(cmd_result_line);
+
             div().flex().flex_col().gap_3().p_4().rounded_lg().bg(rgb(WELL)).border_1().border_color(rgb(MINT_DK))
                 .child(div().flex().items_center().gap_2()
                     .child(dot(if running { OK } else { INK3 }, 8.))
@@ -1046,6 +1179,7 @@ impl TeleBox {
                     .child(div().flex_1())
                     .child(btn))
                 .child(lines)
+                .child(command_section)
                 .children(config_section)
         });
 
@@ -1181,8 +1315,49 @@ impl TeleBox {
                     .whitespace_nowrap().overflow_hidden().text_ellipsis().child(r.title.clone()))
                 .child(mono(INK3).text_xs().child(r.sub.clone())));
         }
+        // SEARCH THE ARCHIVE — full-text over archived messages (search_archive).
+        let aq = self.state.archive_query();
+        let a_typing = !aq.is_empty();
+        let a_busy = self.state.archive_search_busy();
+        let a_hits = self.state.archive_hits();
+        let arc_content_search = div().id("arc-content-search").track_focus(&self.mcp_focus)
+            .flex().items_center().gap_2().px_3().py_2().rounded_md().bg(rgb(WELL))
+            .border_1().border_color(rgb(if a_typing { MINT_DK } else { LINE }))
+            .child(mono(INK3).child("⌕"))
+            .child(if a_typing { mono(INK).child(format!("{aq}▏")) }
+                   else { mono(INK3).child("search archived messages…".to_string()) })
+            .child(div().flex_1())
+            .child(mono(if a_busy { AMBER } else { INK3 }).text_xs()
+                .child(if a_busy { "searching…".to_string() } else { "↵ search".to_string() }))
+            .on_click(cx.listener(|this, _, window, cx| { window.focus(&this.mcp_focus, cx); cx.notify(); }))
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _w, cx| {
+                let ks = &ev.keystroke;
+                if ks.modifiers.control || ks.modifiers.platform { return; }
+                match ks.key.as_str() {
+                    "backspace" => this.state.archive_query_backspace(),
+                    "escape" => this.state.archive_query_clear(),
+                    "enter" => this.state.request_archive_search(),
+                    _ => { if let Some(ch) = ks.key_char.as_ref() { this.state.archive_query_push(ch.as_str()); } }
+                }
+                cx.notify();
+            }));
+        let mut hits_list = div().flex().flex_col().gap_1();
+        if a_typing {
+            if a_hits.is_empty() && !a_busy {
+                hits_list = hits_list.child(mono(INK3).text_xs().child("no matches in the archive".to_string()));
+            }
+            for (who, snippet) in a_hits.iter().take(30) {
+                hits_list = hits_list.child(div().flex().items_baseline().gap_2().py_1().px_3().rounded_md()
+                    .bg(rgb(WELL)).border_1().border_color(rgb(LINE2))
+                    .child(mono(MINT).text_xs().flex_shrink_0().child(who.clone()))
+                    .child(div().flex_1().min_w_0().text_sm().text_color(rgb(INK2))
+                        .whitespace_nowrap().overflow_hidden().text_ellipsis().child(snippet.clone())));
+            }
+        }
         let store_contents = div().flex().flex_col().gap_2()
             .child(mono(INK3).text_xs().child(format!("STORE CONTENTS · {} archived", archived.len())))
+            .child(arc_content_search)
+            .child(hits_list)
             .child(store_list);
 
         div().flex().flex_col().gap_3().w_full()
@@ -1240,6 +1415,14 @@ impl TeleBox {
                     .child(mono(INK3).text_xs().min_w_0().overflow_hidden().text_ellipsis()
                         .child(format!("{} · {}", run.state, run.path)))
                     .child(div().flex_1())
+                    .child({
+                        let paused = self.state.export_pause_requested();
+                        div().id("exp-pause").cursor_pointer().px_4().py_2().rounded_md()
+                            .bg(rgb(MINT_DK)).border_1().border_color(rgb(MINT))
+                            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(rgb(MINT))
+                                .child(if paused { "Resume" } else { "Pause" }))
+                            .on_click(cx.listener(|this, _, _, cx| { this.state.toggle_export_pause(); cx.notify(); }))
+                    })
                     .child(div().id("exp-cancel").cursor_pointer().px_4().py_2().rounded_md()
                         .bg(rgb(0x2A1512)).border_1().border_color(rgb(CRIT))
                         .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(rgb(CRIT))
@@ -1332,9 +1515,21 @@ impl TeleBox {
         } else {
             format!("{total} chats · type to filter")
         };
+        // Media toggle — whether the export downloads media files or just records
+        // their sizes (a lighter, faster run).
+        let with_media = self.state.export_with_media();
+        let media_chip = div().id("exp-media").cursor_pointer().flex_shrink_0()
+            .flex().items_center().gap_2().px_3().py_1().rounded_md()
+            .bg(rgb(WELL)).border_1().border_color(rgb(if with_media { MINT_DK } else { LINE }))
+            .child(dot(if with_media { MINT } else { INK3 }, 6.))
+            .child(mono(if with_media { MINT } else { INK3 }).text_xs()
+                .child(if with_media { "media: on" } else { "media: off" }))
+            .on_click(cx.listener(|this, _, _, cx| { this.state.toggle_export_media(); cx.notify(); }));
+
         div().flex().flex_col().gap_3().w_full()
             .child(div().flex().items_center().gap_3()
                 .child(div().flex_1().child(search_box))
+                .child(media_chip)
                 .child(export_btn))
             .child(div().flex().items_center().gap_2()
                 .child(mono(INK3).text_xs().child(meta))

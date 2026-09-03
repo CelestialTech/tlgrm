@@ -476,6 +476,24 @@ fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
                 })
                 .unwrap_or_default();
             state.set_panel_readout(5, readout, rows, true);
+            // The owned-gift portfolio — fetched ONCE (get_profile_gifts), so it
+            // doesn't compete with a transaction search on the single-call bridge.
+            if !state.wallet_gifts_loaded() {
+                if let Some(g) = call(sock, token, "get_profile_gifts", json!({})) {
+                    let gifts = g.get("gifts").and_then(Value::as_array).map(|arr| {
+                        arr.iter().map(|x| {
+                            let title = {
+                                let t = str_of(x, "title");
+                                if !t.is_empty() { t } else { str_of(x, "name") }
+                            };
+                            let stars = i64_of(x, "stars");
+                            (if title.is_empty() { "gift".into() } else { title },
+                             if stars > 0 { format!("{stars} ★") } else { str_of(x, "date") })
+                        }).collect::<Vec<_>>()
+                    }).unwrap_or_default();
+                    state.set_wallet_gifts(gifts);
+                }
+            }
         }
         // AI — local LLM / TTS / voice: probe the TTS service state ONCE (the
         // empty-text probe), then stop, so it doesn't starve the Speak action on
@@ -636,6 +654,77 @@ fn run_bot_configure(state: &HostState, sock: &str, token: &str) {
     }
 }
 
+// Search archived message content (search_archive) -> hits (who · snippet).
+fn run_archive_search(state: &HostState, sock: &str, token: &str) {
+    let Some(q) = state.take_archive_search() else { return };
+    let res = call_slow(sock, token, "search_archive", &json!({ "query": q, "limit": 50 }));
+    let hits = res
+        .and_then(|v| v.get("results").and_then(Value::as_array).cloned())
+        .map(|arr| arr.iter().map(|r| {
+            let who = {
+                let u = str_of(r, "username");
+                let n = str_of(r, "first_name");
+                if !n.is_empty() { n } else if !u.is_empty() { u } else { format!("chat {}", i64_of(r, "chat_id")) }
+            };
+            (who, str_of(r, "content"))
+        }).collect::<Vec<_>>())
+        .unwrap_or_default();
+    state.set_archive_hits(hits);
+}
+
+// Search Stars/TON transactions (search_transactions) -> matching rows.
+fn run_wallet_search(state: &HostState, sock: &str, token: &str) {
+    let Some(q) = state.take_wallet_search() else { return };
+    let res = call_slow(sock, token, "search_transactions", &json!({ "query": q, "limit": 50 }));
+    let hits = res
+        .and_then(|v| v.get("transactions").and_then(Value::as_array).cloned())
+        .map(|arr| arr.iter().map(|x| {
+            let amount = x.get("amount").and_then(Value::as_f64).unwrap_or(0.0);
+            let desc = str_of(x, "description");
+            let title = if desc.is_empty() { str_of(x, "category") } else { desc };
+            (title, format!("{} · {:+} ★", str_of(x, "date"), amount), amount >= 0.0)
+        }).collect::<Vec<_>>())
+        .unwrap_or_default();
+    state.set_wallet_hits(hits);
+}
+
+// Send a command to the selected bot (send_bot_command).
+fn run_bot_command(state: &HostState, sock: &str, token: &str) {
+    let Some((bot_id, command)) = state.take_bot_command() else { return };
+    let res = call_slow(sock, token, "send_bot_command",
+        &json!({ "bot_id": bot_id, "command": command }));
+    let msg = match res {
+        None => "✕ command: no response from client".to_string(),
+        Some(v) => {
+            if let Some(e) = v.get("error").and_then(Value::as_str) { format!("✕ {e}") }
+            else if v.get("success").and_then(Value::as_bool) == Some(false) {
+                let m = str_of(&v, "message"); format!("✕ {}", if m.is_empty() { str_of(&v, "error") } else { m })
+            } else {
+                let m = str_of(&v, "message");
+                if m.is_empty() { "✓ command sent".into() } else { format!("✓ {m}") }
+            }
+        }
+    };
+    state.set_bot_command_result(msg);
+}
+
+// Send a synthesized voice message to the picked chat (send_voice_reply).
+fn run_send_vm(state: &HostState, sock: &str, token: &str) {
+    let Some((chat_id, text)) = state.take_send_vm() else { return };
+    let res = call_slow(sock, token, "send_voice_reply",
+        &json!({ "chat_id": chat_id, "text": text }));
+    let msg = match res {
+        None => "✕ voice message: no response from client".to_string(),
+        Some(v) => {
+            if let Some(e) = v.get("error").and_then(Value::as_str) { format!("✕ {e}") }
+            else if v.get("success").and_then(Value::as_bool) == Some(false) {
+                let m = str_of(&v, "message"); format!("✕ {}", if m.is_empty() { str_of(&v, "error") } else { m })
+            } else { "✓ voice message sent".into() }
+        }
+    };
+    state.set_vm_result(msg);
+}
+
 // Turn a tool's raw JSON into one honest line for the panel's result field.
 fn summarize(tool: &str, v: &Value) -> String {
     if let Some(e) = v.get("error").and_then(Value::as_str) {
@@ -771,6 +860,10 @@ pub fn spawn(state: HostState, sock: String, token_path: String) {
         run_mcp_invoke(&state, &sock, &token);
         run_transcribe(&state, &sock, &token);
         run_bot_configure(&state, &sock, &token);
+        run_archive_search(&state, &sock, &token);
+        run_wallet_search(&state, &sock, &token);
+        run_bot_command(&state, &sock, &token);
+        run_send_vm(&state, &sock, &token);
 
         // 2. Refresh only the device on stage.
         match state.selected() {

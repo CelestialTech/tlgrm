@@ -48,7 +48,8 @@ fn mb(bytes: i64) -> String {
 // export fetches the actual media files, so `download_media` is on.
 pub fn spawn(state: HostState, sock: String, token_path: String, chat_id: i64, title: String, max_messages: Option<i64>) {
     let dir = default_out_dir(&title);
-    spawn_to(state, sock, token_path, chat_id, title, max_messages, true, dir);
+    let media = state.export_with_media(); // honor the panel's media toggle
+    spawn_to(state, sock, token_path, chat_id, title, max_messages, media, dir);
 }
 
 // The engine proper, with an explicit output dir (QA tests use a scratch dir and
@@ -67,6 +68,7 @@ pub fn spawn_to(
 ) {
     thread::spawn(move || {
         state.clear_export_cancel();
+        state.clear_export_pause();
         let token = fs::read_to_string(&token_path).unwrap_or_default().trim().to_string();
         let path_str = out_dir.display().to_string();
 
@@ -100,6 +102,16 @@ pub fn spawn_to(
         state.set_export_run(Some(running(0, 0, 0)));
 
         loop {
+            // Pause: hold between pages until resumed or cancelled, showing a
+            // "paused" run so the panel reflects it (partial file is kept).
+            while state.export_pause_requested() && !state.export_cancel_requested() {
+                state.set_export_run(Some(ExportRun {
+                    chat: title.clone(), done, total, bytes,
+                    state: "paused".into(), path: path_str.clone(),
+                }));
+                let _ = file.flush();
+                thread::sleep(Duration::from_millis(400));
+            }
             if state.export_cancel_requested() {
                 let _ = file.flush();
                 state.set_export_run(None);

@@ -149,6 +149,42 @@ fn handle(state: HostState, s: UnixStream) {
                 state.request_configure_bot();
                 state.snapshot()
             }
+            "bot_command" => {
+                let cmd = v.get("command").and_then(|x| x.as_str()).unwrap_or("");
+                state.bots_command_clear();
+                state.bots_command_push(cmd);
+                state.request_bot_command();
+                state.snapshot()
+            }
+            "archive_search" => {
+                let q = v.get("query").and_then(|x| x.as_str()).unwrap_or("");
+                state.archive_query_clear();
+                state.archive_query_push(q);
+                state.request_archive_search();
+                state.snapshot()
+            }
+            "wallet_search" => {
+                let q = v.get("query").and_then(|x| x.as_str()).unwrap_or("");
+                state.wallet_query_clear();
+                state.wallet_query_push(q);
+                state.request_wallet_search();
+                state.snapshot()
+            }
+            "send_vm" => {
+                let t = v.get("text").and_then(|x| x.as_str()).unwrap_or("");
+                state.ai_vm_clear();
+                state.ai_vm_push(t);
+                state.request_send_vm();
+                state.snapshot()
+            }
+            "export_pause" => {
+                state.toggle_export_pause();
+                state.snapshot()
+            }
+            "export_media" => {
+                state.toggle_export_media();
+                state.snapshot()
+            }
             "mcp_toggle" => {
                 let key = v.get("key").and_then(|x| x.as_str()).unwrap_or("").to_string();
                 state.mcp_toggle(key);

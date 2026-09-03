@@ -212,6 +212,10 @@ pub struct Inner {
     pub export_run: Option<ExportRun>,
     // Set to ask the Rust export engine thread to stop; it clears it on start.
     pub export_cancel: bool,
+    // Pause the engine (it holds between pages until cleared); and whether a run
+    // downloads media files or just records their sizes.
+    pub export_pause: bool,
+    pub export_with_media: bool,
     // Archiver: the same find-a-chat ontology as Export (Item picked by search),
     // driving archive_chat into the local SQLite store.
     pub archiver_search: String,
@@ -258,6 +262,28 @@ pub struct Inner {
     pub ai_transcript: String,
     pub ai_transcribe_pending: Option<(i64, i64)>,
     pub ai_transcribe_busy: bool,
+    // AI: send a synthesized voice message to the picked chat (send_voice_reply).
+    pub ai_vm_text: String,
+    pub ai_vm_pending: Option<(i64, String)>,
+    pub ai_vm_busy: bool,
+    pub ai_vm_result: String,
+    // Bots: send a command to the selected bot (send_bot_command).
+    pub bots_command: String,
+    pub bots_command_pending: Option<(String, String)>,
+    pub bots_command_busy: bool,
+    pub bots_command_result: String,
+    // Wallet: search transactions (search_transactions) + owned gifts (get_profile_gifts).
+    pub wallet_query: String,
+    pub wallet_search_pending: bool,
+    pub wallet_search_busy: bool,
+    pub wallet_hits: Vec<(String, String, bool)>, // (title, sub, income)
+    pub wallet_gifts: Vec<(String, String)>,      // (title, sub)
+    pub wallet_gifts_loaded: bool,
+    // Archiver: search archived message content (search_archive).
+    pub archive_query: String,
+    pub archive_search_pending: bool,
+    pub archive_search_busy: bool,
+    pub archive_hits: Vec<(String, String)>, // (chat/who, snippet)
     pub shot_request: Option<String>,
     pub shot_armed: bool,
     pub shot_result: Option<(u32, u32, bool)>,
@@ -359,6 +385,8 @@ impl HostState {
                 export_target: None,
                 export_run: None,
                 export_cancel: false,
+                export_pause: false,
+                export_with_media: true,
                 archiver_search: String::new(),
                 archiver_target: None,
                 archive_store: Vec::new(),
@@ -387,6 +415,24 @@ impl HostState {
                 ai_transcript: String::new(),
                 ai_transcribe_pending: None,
                 ai_transcribe_busy: false,
+                ai_vm_text: String::new(),
+                ai_vm_pending: None,
+                ai_vm_busy: false,
+                ai_vm_result: String::new(),
+                bots_command: String::new(),
+                bots_command_pending: None,
+                bots_command_busy: false,
+                bots_command_result: String::new(),
+                wallet_query: String::new(),
+                wallet_search_pending: false,
+                wallet_search_busy: false,
+                wallet_hits: Vec::new(),
+                wallet_gifts: Vec::new(),
+                wallet_gifts_loaded: false,
+                archive_query: String::new(),
+                archive_search_pending: false,
+                archive_search_busy: false,
+                archive_hits: Vec::new(),
                 mcp_invoke_busy: false,
                 shot_request: None,
                 shot_armed: false,
@@ -620,6 +666,181 @@ impl HostState {
     }
     pub fn set_archive_store(&self, rows: Vec<PanelRow>) {
         if let Ok(mut i) = self.0.lock() { i.archive_store = rows; }
+    }
+    // --- Archiver: search the archived content (search_archive) --------------
+    pub fn archive_query(&self) -> String {
+        self.0.lock().map(|i| i.archive_query.clone()).unwrap_or_default()
+    }
+    pub fn archive_query_push(&self, s: &str) {
+        if let Ok(mut i) = self.0.lock() { i.archive_query.push_str(s); }
+    }
+    pub fn archive_query_backspace(&self) {
+        if let Ok(mut i) = self.0.lock() { i.archive_query.pop(); }
+    }
+    pub fn archive_query_clear(&self) {
+        if let Ok(mut i) = self.0.lock() { i.archive_query.clear(); }
+    }
+    pub fn archive_hits(&self) -> Vec<(String, String)> {
+        self.0.lock().map(|i| i.archive_hits.clone()).unwrap_or_default()
+    }
+    pub fn archive_search_busy(&self) -> bool {
+        self.0.lock().map(|i| i.archive_search_busy).unwrap_or(false)
+    }
+    pub fn request_archive_search(&self) {
+        if let Ok(mut i) = self.0.lock() {
+            if i.archive_query.trim().is_empty() || i.archive_search_busy { return; }
+            i.archive_search_busy = true;
+            i.archive_search_pending = true;
+        }
+    }
+    pub fn take_archive_search(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|mut i| {
+            if i.archive_search_pending { i.archive_search_pending = false; Some(i.archive_query.clone()) } else { None }
+        })
+    }
+    pub fn set_archive_hits(&self, hits: Vec<(String, String)>) {
+        if let Ok(mut i) = self.0.lock() { i.archive_hits = hits; i.archive_search_busy = false; }
+    }
+
+    // --- Wallet: search transactions + owned gifts --------------------------
+    pub fn wallet_query(&self) -> String {
+        self.0.lock().map(|i| i.wallet_query.clone()).unwrap_or_default()
+    }
+    pub fn wallet_query_push(&self, s: &str) {
+        if let Ok(mut i) = self.0.lock() { i.wallet_query.push_str(s); }
+    }
+    pub fn wallet_query_backspace(&self) {
+        if let Ok(mut i) = self.0.lock() { i.wallet_query.pop(); }
+    }
+    pub fn wallet_query_clear(&self) {
+        if let Ok(mut i) = self.0.lock() { i.wallet_query.clear(); }
+    }
+    pub fn wallet_hits(&self) -> Vec<(String, String, bool)> {
+        self.0.lock().map(|i| i.wallet_hits.clone()).unwrap_or_default()
+    }
+    pub fn wallet_search_busy(&self) -> bool {
+        self.0.lock().map(|i| i.wallet_search_busy).unwrap_or(false)
+    }
+    pub fn request_wallet_search(&self) {
+        if let Ok(mut i) = self.0.lock() {
+            if i.wallet_query.trim().is_empty() || i.wallet_search_busy { return; }
+            i.wallet_search_busy = true;
+            i.wallet_search_pending = true;
+        }
+    }
+    pub fn take_wallet_search(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|mut i| {
+            if i.wallet_search_pending { i.wallet_search_pending = false; Some(i.wallet_query.clone()) } else { None }
+        })
+    }
+    pub fn set_wallet_hits(&self, hits: Vec<(String, String, bool)>) {
+        if let Ok(mut i) = self.0.lock() { i.wallet_hits = hits; i.wallet_search_busy = false; }
+    }
+    pub fn wallet_gifts(&self) -> Vec<(String, String)> {
+        self.0.lock().map(|i| i.wallet_gifts.clone()).unwrap_or_default()
+    }
+    pub fn wallet_gifts_loaded(&self) -> bool {
+        self.0.lock().map(|i| i.wallet_gifts_loaded).unwrap_or(false)
+    }
+    pub fn set_wallet_gifts(&self, gifts: Vec<(String, String)>) {
+        if let Ok(mut i) = self.0.lock() { i.wallet_gifts = gifts; i.wallet_gifts_loaded = true; }
+    }
+
+    // --- Export: pause/resume + media toggle --------------------------------
+    pub fn export_pause_requested(&self) -> bool {
+        self.0.lock().map(|i| i.export_pause).unwrap_or(false)
+    }
+    pub fn toggle_export_pause(&self) {
+        if let Ok(mut i) = self.0.lock() { i.export_pause = !i.export_pause; }
+    }
+    pub fn clear_export_pause(&self) {
+        if let Ok(mut i) = self.0.lock() { i.export_pause = false; }
+    }
+    pub fn export_with_media(&self) -> bool {
+        self.0.lock().map(|i| i.export_with_media).unwrap_or(true)
+    }
+    pub fn toggle_export_media(&self) {
+        if let Ok(mut i) = self.0.lock() { i.export_with_media = !i.export_with_media; }
+    }
+
+    // --- Bots: send a command (send_bot_command) ----------------------------
+    pub fn bots_command(&self) -> String {
+        self.0.lock().map(|i| i.bots_command.clone()).unwrap_or_default()
+    }
+    pub fn bots_command_push(&self, s: &str) {
+        if let Ok(mut i) = self.0.lock() { i.bots_command.push_str(s); }
+    }
+    pub fn bots_command_backspace(&self) {
+        if let Ok(mut i) = self.0.lock() { i.bots_command.pop(); }
+    }
+    pub fn bots_command_clear(&self) {
+        if let Ok(mut i) = self.0.lock() { i.bots_command.clear(); }
+    }
+    pub fn bots_command_busy(&self) -> bool {
+        self.0.lock().map(|i| i.bots_command_busy).unwrap_or(false)
+    }
+    pub fn bots_command_result(&self) -> String {
+        self.0.lock().map(|i| i.bots_command_result.clone()).unwrap_or_default()
+    }
+    pub fn request_bot_command(&self) {
+        if let Ok(mut i) = self.0.lock() {
+            let cmd = i.bots_command.trim().to_string();
+            let Some(bot) = i.bots_selected.clone() else { return };
+            if cmd.is_empty() || i.bots_command_busy { return; }
+            i.bots_command_busy = true;
+            i.bots_command_result = format!("… /{cmd}");
+            i.bots_command_pending = Some((bot, cmd));
+        }
+    }
+    pub fn take_bot_command(&self) -> Option<(String, String)> {
+        self.0.lock().ok().and_then(|mut i| i.bots_command_pending.take())
+    }
+    pub fn set_bot_command_result(&self, r: String) {
+        if let Ok(mut i) = self.0.lock() {
+            i.bots_command_busy = false;
+            i.bots_command_result = r;
+            i.bots_command.clear();
+        }
+    }
+
+    // --- AI: send a voice message to the picked chat (send_voice_reply) ------
+    pub fn ai_vm_text(&self) -> String {
+        self.0.lock().map(|i| i.ai_vm_text.clone()).unwrap_or_default()
+    }
+    pub fn ai_vm_push(&self, s: &str) {
+        if let Ok(mut i) = self.0.lock() { i.ai_vm_text.push_str(s); }
+    }
+    pub fn ai_vm_backspace(&self) {
+        if let Ok(mut i) = self.0.lock() { i.ai_vm_text.pop(); }
+    }
+    pub fn ai_vm_clear(&self) {
+        if let Ok(mut i) = self.0.lock() { i.ai_vm_text.clear(); }
+    }
+    pub fn ai_vm_busy(&self) -> bool {
+        self.0.lock().map(|i| i.ai_vm_busy).unwrap_or(false)
+    }
+    pub fn ai_vm_result(&self) -> String {
+        self.0.lock().map(|i| i.ai_vm_result.clone()).unwrap_or_default()
+    }
+    pub fn request_send_vm(&self) {
+        if let Ok(mut i) = self.0.lock() {
+            let text = i.ai_vm_text.trim().to_string();
+            let Some((cid, _)) = i.ai_chat.clone() else { return };
+            if text.is_empty() || i.ai_vm_busy { return; }
+            i.ai_vm_busy = true;
+            i.ai_vm_result = "… sending voice message".into();
+            i.ai_vm_pending = Some((cid, text));
+        }
+    }
+    pub fn take_send_vm(&self) -> Option<(i64, String)> {
+        self.0.lock().ok().and_then(|mut i| i.ai_vm_pending.take())
+    }
+    pub fn set_vm_result(&self, r: String) {
+        if let Ok(mut i) = self.0.lock() {
+            i.ai_vm_busy = false;
+            i.ai_vm_result = r;
+            i.ai_vm_text.clear();
+        }
     }
 
     // --- Bots: selection + detail ------------------------------------------
@@ -1196,6 +1417,8 @@ impl HostState {
                 "chats_total": export_total,
                 "matches": export_matches,
                 "target": i.export_target.as_ref().map(|(id, t)| serde_json::json!({ "id": id, "title": t })),
+                "paused": i.export_pause,
+                "with_media": i.export_with_media,
                 "run": i.export_run.as_ref().map(|r| serde_json::json!({
                     "chat": r.chat, "done": r.done, "total": r.total,
                     "bytes": r.bytes, "state": r.state, "path": r.path })),
@@ -1206,6 +1429,9 @@ impl HostState {
                 "target": i.archiver_target.as_ref().map(|(id, t)| serde_json::json!({ "id": id, "title": t })),
                 "store_count": i.archive_store.len(),
                 "store": i.archive_store.iter().take(20).map(|r| serde_json::json!({ "id": r.id, "title": r.title, "sub": r.sub })).collect::<Vec<_>>(),
+                "query": i.archive_query,
+                "search_busy": i.archive_search_busy,
+                "hits": i.archive_hits.iter().map(|(a, b)| serde_json::json!([a, b])).collect::<Vec<_>>(),
             },
             "bots": {
                 "selected": i.bots_selected,
@@ -1222,6 +1448,9 @@ impl HostState {
                 "config_dirty": i.bots_config_dirty,
                 "configure_busy": i.bots_configure_busy,
                 "config_result": i.bots_config_result,
+                "command": i.bots_command,
+                "command_busy": i.bots_command_busy,
+                "command_result": i.bots_command_result,
             },
             "ai": {
                 "search": i.ai_search,
@@ -1231,6 +1460,16 @@ impl HostState {
                 "voice_sel": i.ai_voice_sel,
                 "transcribe_busy": i.ai_transcribe_busy,
                 "transcript": i.ai_transcript,
+                "vm_text": i.ai_vm_text,
+                "vm_busy": i.ai_vm_busy,
+                "vm_result": i.ai_vm_result,
+            },
+            "wallet": {
+                "query": i.wallet_query,
+                "search_busy": i.wallet_search_busy,
+                "hits": i.wallet_hits.iter().map(|(t, s, inc)| serde_json::json!({ "title": t, "sub": s, "income": inc })).collect::<Vec<_>>(),
+                "gifts_loaded": i.wallet_gifts_loaded,
+                "gifts": i.wallet_gifts.iter().map(|(t, s)| serde_json::json!([t, s])).collect::<Vec<_>>(),
             },
         })
     }
