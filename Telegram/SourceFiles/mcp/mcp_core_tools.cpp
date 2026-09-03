@@ -605,6 +605,129 @@ QJsonObject Server::toolGetChatInfo(const QJsonObject &args) {
 	return chatInfo;
 }
 
+// The raw server-side history API: one page of messages.getHistory straight
+// from Telegram, carrying the chat's TRUE total (`count`) and REAL media byte
+// sizes. This is the API a Rust export engine pages on — it does no exporting
+// itself. Unlike read_messages (local cache) it reaches the whole chat, and
+// unlike the gradual engine's estimate it never lies about the total.
+QJsonObject Server::toolGetChatHistory(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto offsetId = args.value("offset_id").toVariant().toLongLong();
+	const auto limit = clampLimit(args.value("limit").toInt(100), 200);
+
+	auto peer = resolvePeer(chatId);
+	if (!peer) {
+		return toolError(QString("Chat %1 is not loaded; open it once in the "
+			"client, or use list_chats to get a valid chat_id").arg(chatId));
+	}
+
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetHistory(
+			peer->input(),
+			MTP_int(int(offsetId)), // offset_id: 0 = newest; page older via next_offset_id
+			MTP_int(0),             // offset_date
+			MTP_int(0),             // add_offset
+			MTP_int(int(limit)),    // limit
+			MTP_int(0),             // max_id
+			MTP_int(0),             // min_id
+			MTP_long(0)             // hash
+		)).done([=](const MTPmessages_Messages &result) {
+			int total = 0;
+			const QVector<MTPMessage> *list = nullptr;
+			result.match([&](const MTPDmessages_messages &d) {
+				total = int(d.vmessages().v.size()); // small chat: fully returned
+				list = &d.vmessages().v;
+			}, [&](const MTPDmessages_messagesSlice &d) {
+				total = d.vcount().v;                // the chat's REAL total
+				list = &d.vmessages().v;
+			}, [&](const MTPDmessages_channelMessages &d) {
+				total = d.vcount().v;                // the chat's REAL total
+				list = &d.vmessages().v;
+			}, [&](const MTPDmessages_messagesNotModified &) {
+			});
+
+			QJsonArray msgs;
+			qint64 oldest = 0;
+			if (list) {
+				for (const auto &m : *list) {
+					m.match([&](const MTPDmessage &data) {
+						QJsonObject o;
+						const auto id = qint64(data.vid().v);
+						o["id"] = id;
+						o["date"] = qint64(data.vdate().v);
+						o["out"] = data.is_out();
+						const auto text = data.vmessage().v;
+						if (!text.isEmpty()) {
+							o["text"] = QString::fromUtf8(text);
+						}
+						if (const auto media = data.vmedia()) {
+							media->match([&](const MTPDmessageMediaDocument &mm) {
+								o["media_type"] = "document";
+								if (const auto doc = mm.vdocument()) {
+									doc->match([&](const MTPDdocument &dd) {
+										o["media_size"] = qint64(dd.vsize().v);
+										o["media_mime"] = QString::fromUtf8(dd.vmime_type().v);
+									}, [](const MTPDdocumentEmpty &) {});
+								}
+							}, [&](const MTPDmessageMediaPhoto &mm) {
+								o["media_type"] = "photo";
+								if (const auto photo = mm.vphoto()) {
+									photo->match([&](const MTPDphoto &pp) {
+										qint64 best = 0;
+										for (const auto &sz : pp.vsizes().v) {
+											sz.match([&](const MTPDphotoSize &s) {
+												best = std::max(best, qint64(s.vsize().v));
+											}, [&](const MTPDphotoSizeProgressive &s) {
+												for (const auto &b : s.vsizes().v) {
+													best = std::max(best, qint64(b.v));
+												}
+											}, [&](const auto &) {});
+										}
+										if (best > 0) {
+											o["media_size"] = best; // REAL, not a 512KB guess
+										}
+									}, [](const MTPDphotoEmpty &) {});
+								}
+							}, [&](const auto &) {
+								o["media_type"] = "other";
+							});
+						}
+						if (oldest == 0 || id < oldest) {
+							oldest = id;
+						}
+						msgs.append(o);
+					}, [&](const MTPDmessageService &data) {
+						QJsonObject o;
+						const auto id = qint64(data.vid().v);
+						o["id"] = id;
+						o["date"] = qint64(data.vdate().v);
+						o["service"] = true;
+						if (oldest == 0 || id < oldest) {
+							oldest = id;
+						}
+						msgs.append(o);
+					}, [&](const MTPDmessageEmpty &) {});
+				}
+			}
+
+			QJsonObject value;
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			value["count"] = total;           // the chat's TRUE message total
+			value["returned"] = int(msgs.size());
+			value["messages"] = msgs;
+			value["next_offset_id"] = oldest; // page older from here; 0 = none
+			value["has_more"] = (oldest != 0 && total > int(msgs.size()));
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
 QJsonObject Server::toolReadMessages(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	if (chatId == 0) {

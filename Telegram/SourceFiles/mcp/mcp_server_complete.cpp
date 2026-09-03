@@ -795,6 +795,17 @@ void Server::tryAutoResumeExport() {
 					});
 				if (peerId) {
 					const auto peer = self->resolvePeer(peerId);
+					if (!peer) {
+						// The peer's dialog is not loaded this early in
+						// startup, so resolvePeer returns null. Passing that to
+						// startAutoExport (which takes not_null<PeerData*>)
+						// asserts and crashes the whole client on launch
+						// whenever an export is resumable. Skip instead: the
+						// export can be restarted from the UI once loaded.
+						qInfo() << "[MCP] Auto-resume (TDF): peer" << peerId.value
+							<< "not loaded yet; skipping to avoid a null deref";
+						return;
+					}
 					qInfo() << "[MCP] Auto-resuming export (TDF) for peer"
 						<< peer->name() << "from message"
 						<< settings.singlePeerResumeFromId
@@ -989,6 +1000,14 @@ void Server::tryAutoResumeExport() {
 
 		const auto peerId = PeerId(PeerIdHelper(rawId));
 		const auto peer = self->resolvePeer(peerId);
+		if (!peer) {
+			// Same startup null-peer hazard as the TDF branch: startAutoExport
+			// takes not_null<PeerData*>, so a null here crashes the client on
+			// launch. Skip the auto-resume; it can be restarted from the UI.
+			qInfo() << "[MCP] Auto-resume (JSON): peer" << rawId
+				<< "not loaded yet; skipping to avoid a null deref";
+			return;
+		}
 
 		auto rs = self->_session->local().readExportSettings();
 		rs.gradualMode = true;
@@ -1440,6 +1459,7 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["set_channel_username"] = [this](const QJsonObject &args) { return toolSetChannelUsername(args); };
 	_toolHandlers["check_channel_username"] = [this](const QJsonObject &args) { return toolCheckChannelUsername(args); };
 	_toolHandlers["read_messages"] = [this](const QJsonObject &args) { return toolReadMessages(args); };
+	_toolHandlers["get_chat_history"] = [this](const QJsonObject &args) { return toolGetChatHistory(args); };
 	_toolHandlers["send_message"] = [this](const QJsonObject &args) { return toolSendMessage(args); };
 	_toolHandlers["send_document"] = [this](const QJsonObject &args) { return toolSendDocument(args); };
 	_toolHandlers["send_rich_message"] = [this](const QJsonObject &args) { return toolSendRichMessage(args); };

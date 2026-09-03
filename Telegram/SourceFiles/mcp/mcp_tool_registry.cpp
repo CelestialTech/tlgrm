@@ -57,6 +57,33 @@ void Server::registerTools() {
 			}
 		},
 		Tool{
+			"get_chat_history",
+			"Raw server-side history: one page of messages.getHistory carrying the "
+				"chat's TRUE total (count) and real media byte sizes. Pages the whole "
+				"chat (unlike read_messages, which is local cache only). Use "
+				"next_offset_id from the result to page older.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (from list_chats)"}
+					}},
+					{"offset_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Return messages older than this id; 0 = newest"},
+						{"default", 0}
+					}},
+					{"limit", QJsonObject{
+						{"type", "integer"},
+						{"description", "Messages per page (max 200)"},
+						{"default", 100}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id"}},
+			}
+		},
+		Tool{
 			"send_message",
 			"Send a message with full formatting: markdown (parse_mode) or precise "
 				"entities (bold/italic/underline/strike/spoiler/code/pre/blockquote/"
