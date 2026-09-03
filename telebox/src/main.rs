@@ -10,6 +10,7 @@
 // (qa.rs) drives the identical path — and grabs the rendered window as a PNG via
 // the app's own render_to_image, no screen and no system tools needed.
 
+mod export_engine;
 mod host;
 mod mcp_relay;
 mod plugin;
@@ -478,12 +479,13 @@ impl TeleBox {
                     .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).text_color(rgb(INK))
                         .child(format!("Exporting {}", run.chat)))
                     .child(div().flex_1())
-                    .child(mono(INK2).child(format!("{} / {} messages", run.done, run.total))))
+                    .child(mono(INK2).child(format!(
+                        "{} / {} messages · {:.1} MB",
+                        run.done, run.total, run.bytes as f64 / 1_048_576.0))))
                 .child(bar)
                 .child(div().flex().items_center().gap_3()
-                    .child(mono(INK3).text_xs().child(format!(
-                        "{} messages exported to disk · {}",
-                        run.done, run.state)))
+                    .child(mono(INK3).text_xs().min_w_0().overflow_hidden().text_ellipsis()
+                        .child(format!("{} · {}", run.state, run.path)))
                     .child(div().flex_1())
                     .child(div().id("exp-cancel").cursor_pointer().px_4().py_2().rounded_md()
                         .bg(rgb(0x2A1512)).border_1().border_color(rgb(CRIT))

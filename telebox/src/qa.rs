@@ -115,6 +115,20 @@ fn handle(state: HostState, s: UnixStream) {
                 state.set_export_target(id, title);
                 state.snapshot()
             }
+            "export_engine" => {
+                // Start the Rust export engine directly — for tests, with a small
+                // `max` cap and a scratch `dir`, so a run is never a heavy export.
+                let id = v.get("chat_id").and_then(|x| x.as_i64()).unwrap_or(0);
+                let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("test").to_string();
+                let max = v.get("max").and_then(|x| x.as_i64());
+                let (sock, token) = state.relay_creds();
+                match v.get("dir").and_then(|x| x.as_str()) {
+                    Some(d) => crate::export_engine::spawn_to(
+                        state.clone(), sock, token, id, title, max, std::path::PathBuf::from(d)),
+                    None => crate::export_engine::spawn(state.clone(), sock, token, id, title, max),
+                }
+                state.snapshot()
+            }
             "view" => {
                 if let Some(pv) = v
                     .get("name")

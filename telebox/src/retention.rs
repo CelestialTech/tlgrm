@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::host::{ExportRun, HostState, MsgVersion, PanelRow, RetentionStats, TrackedMsg};
+use crate::host::{HostState, MsgVersion, PanelRow, RetentionStats, TrackedMsg};
 
 // One initialize + one tools/call over a fresh connection. The tool returns its
 // payload as a JSON string in result.content[0].text, so unwrap and re-parse.
@@ -45,8 +45,8 @@ fn call_once(sock: &str, token: &str, name: &str, args: &Value) -> Option<Value>
 }
 
 // call_once with retries + a gap between attempts, to ride out the bridge's
-// occasional refusal of a rapid reconnect.
-fn call(sock: &str, token: &str, name: &str, args: Value) -> Option<Value> {
+// occasional refusal of a rapid reconnect. Shared with the export engine.
+pub(crate) fn call(sock: &str, token: &str, name: &str, args: Value) -> Option<Value> {
     for attempt in 0..4 {
         if attempt > 0 {
             thread::sleep(Duration::from_millis(180));
@@ -62,7 +62,7 @@ fn call(sock: &str, token: &str, name: &str, args: Value) -> Option<Value> {
 // work — synthesizing speech, archiving a large chat — that runs well past the
 // 5s read window a poll uses, so the outcome is worth waiting for. One long
 // attempt, then one retry.
-fn call_slow(sock: &str, token: &str, name: &str, args: &Value) -> Option<Value> {
+pub(crate) fn call_slow(sock: &str, token: &str, name: &str, args: &Value) -> Option<Value> {
     for attempt in 0..2 {
         if attempt > 0 {
             thread::sleep(Duration::from_millis(250));
@@ -134,10 +134,10 @@ fn list_tools(sock: &str, token: &str) -> Option<Vec<(String, String)>> {
     None
 }
 
-fn i64_of(v: &Value, k: &str) -> i64 {
+pub(crate) fn i64_of(v: &Value, k: &str) -> i64 {
     v.get(k).and_then(Value::as_i64).unwrap_or(0)
 }
-fn str_of(v: &Value, k: &str) -> String {
+pub(crate) fn str_of(v: &Value, k: &str) -> String {
     v.get(k).and_then(Value::as_str).unwrap_or("").to_string()
 }
 // A field that may arrive as a string or a number, always rendered as a string.
@@ -203,20 +203,12 @@ fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
         // client's Export::Controller). Ontology: set export_run to Some ONLY
         // while a run truly exists; otherwise None (no phantom "idle 0/6").
         1 => {
-            if let Some(s) = call(sock, token, "get_gradual_export_status", json!({})) {
-                let st = str_of(&s, "state");
-                if matches!(st.as_str(), "running" | "paused" | "scanning" | "archiving" | "queued") {
-                    state.set_export_run(Some(ExportRun {
-                        chat: str_of(&s, "chat_title"),
-                        done: i64_of(&s, "archived_messages"),
-                        total: i64_of(&s, "total_messages"),
-                        state: st,
-                    }));
-                } else {
-                    state.set_export_run(None);
-                }
+            // The Rust export engine owns export_run. While a run is active, stop
+            // the heavy list_chats refresh so it doesn't starve the engine's
+            // get_chat_history calls on the flaky single-call bridge.
+            if state.export_run().is_some() {
+                return;
             }
-            // The FULL chat set, so the panel's search can reach every chat.
             let rows = chat_rows(sock, token, 2000);
             state.set_panel_readout(1, Vec::new(), rows, true);
         }

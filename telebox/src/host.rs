@@ -132,9 +132,11 @@ pub struct PanelData {
 #[derive(Clone)]
 pub struct ExportRun {
     pub chat: String,
-    pub done: i64,
-    pub total: i64,
-    pub state: String,
+    pub done: i64,     // messages written so far
+    pub total: i64,    // the chat's REAL total (from get_chat_history's count)
+    pub bytes: i64,    // real attachment bytes seen so far
+    pub state: String, // exporting / done / cancelled / error
+    pub path: String,  // where it's being written
 }
 
 // A queued tool call: a button click parks one here; the poller runs it and
@@ -186,6 +188,8 @@ pub struct Inner {
     pub export_search: String,
     pub export_target: Option<(i64, String)>,
     pub export_run: Option<ExportRun>,
+    // Set to ask the Rust export engine thread to stop; it clears it on start.
+    pub export_cancel: bool,
     pub shot_request: Option<String>,
     pub shot_armed: bool,
     pub shot_result: Option<(u32, u32, bool)>,
@@ -286,6 +290,7 @@ impl HostState {
                 export_search: String::new(),
                 export_target: None,
                 export_run: None,
+                export_cancel: false,
                 shot_request: None,
                 shot_armed: false,
                 shot_result: None,
@@ -479,6 +484,20 @@ impl HostState {
     pub fn set_export_run(&self, r: Option<ExportRun>) {
         if let Ok(mut i) = self.0.lock() { i.export_run = r; }
     }
+    pub fn request_export_cancel(&self) {
+        if let Ok(mut i) = self.0.lock() { i.export_cancel = true; }
+    }
+    pub fn clear_export_cancel(&self) {
+        if let Ok(mut i) = self.0.lock() { i.export_cancel = false; }
+    }
+    pub fn export_cancel_requested(&self) -> bool {
+        self.0.lock().map(|i| i.export_cancel).unwrap_or(false)
+    }
+    // The relay endpoint the export engine pages get_chat_history over: the
+    // client's MCP socket and the auth-token path.
+    pub fn relay_creds(&self) -> (String, String) {
+        self.0.lock().map(|i| (i.upstream.clone(), i.token.clone())).unwrap_or_default()
+    }
 
     // The one primary action for device `i`, built from its current selection.
     // BOTH the on-screen button and the QA socket call this, so there is a
@@ -489,16 +508,17 @@ impl HostState {
         match i {
             // MCP: a canary invoke proving the relay round-trips a tools/call.
             0 => self.enqueue(0, "list_chats", serde_json::json!({}), "invoke · list_chats".into()),
-            // Export: the HEADLESS gradual engine (GradualArchiver) — never the
-            // client's native export window. If a run is live, the action cancels
-            // it; otherwise it starts an export for the chosen chat (by id, so it
-            // is unaffected by search filtering).
+            // Export: the RUST engine (export_engine.rs), which pages the client's
+            // get_chat_history API by its REAL count and writes to disk — Tlgrm is
+            // never asked to export. A live run cancels; otherwise start the chosen
+            // chat. No message cap here: this is a full export from the UI.
             1 => {
                 if self.export_run().is_some() {
-                    self.enqueue(1, "cancel_gradual_export", serde_json::json!({}), "cancel export".into());
+                    self.request_export_cancel();
+                    self.set_result(1, "cancelling export…".into());
                 } else if let Some((id, title)) = self.export_target() {
-                    self.enqueue(1, "start_gradual_export", serde_json::json!({ "chat_id": id }),
-                        format!("export {title}"));
+                    let (sock, token) = self.relay_creds();
+                    crate::export_engine::spawn(self.clone(), sock, token, id, title, None);
                 } else {
                     self.set_result(1, "pick a chat to export first".into());
                 }
@@ -707,7 +727,8 @@ impl HostState {
                 "matches": export_matches,
                 "target": i.export_target.as_ref().map(|(id, t)| serde_json::json!({ "id": id, "title": t })),
                 "run": i.export_run.as_ref().map(|r| serde_json::json!({
-                    "chat": r.chat, "done": r.done, "total": r.total, "state": r.state })),
+                    "chat": r.chat, "done": r.done, "total": r.total,
+                    "bytes": r.bytes, "state": r.state, "path": r.path })),
             },
         })
     }
