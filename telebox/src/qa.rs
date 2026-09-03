@@ -128,6 +128,16 @@ fn handle(state: HostState, s: UnixStream) {
                 }
                 state.snapshot()
             }
+            "mcp_select" => {
+                let t = v.get("tool").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                state.mcp_select(t);
+                state.snapshot()
+            }
+            "mcp_invoke" => {
+                let t = v.get("tool").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                state.request_mcp_invoke(t);
+                state.snapshot()
+            }
             "export_engine" => {
                 // Start the Rust export engine directly — for tests, with a small
                 // `max` cap and a scratch `dir`, so a run is never a heavy export.

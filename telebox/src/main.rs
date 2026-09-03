@@ -571,9 +571,46 @@ impl TeleBox {
             }
         }
 
+        // Detail card for the selected tool: what it does, what it takes, and —
+        // for read-only tools only — an Invoke that shows the raw result.
+        let detail = selected.as_ref().map(|tool| {
+            let (desc, params) = self.state.mcp_tool_info(tool).unwrap_or_default();
+            let read = HostState::is_read_tool(tool);
+            let busy = self.state.mcp_invoke_busy();
+            let result = self.state.mcp_invoke_result();
+            let tool_click = tool.clone();
+            let action = if read {
+                div().id("mcp-invoke").cursor_pointer().flex_shrink_0().px_3().py_1().rounded_md()
+                    .bg(rgb(if busy { WELL } else { MINT_DK })).border_1().border_color(rgb(MINT))
+                    .child(mono(MINT).text_xs().child(if busy { "invoking…".to_string() } else { "Invoke ▸".to_string() }))
+                    .on_click(cx.listener(move |this, _, _, cx| { this.state.request_mcp_invoke(tool_click.clone()); cx.notify(); }))
+                    .into_any_element()
+            } else {
+                mono(AMBER).text_xs().flex_shrink_0().child("mutating — run from its plugin").into_any_element()
+            };
+            let result_line = if result.is_empty() {
+                mono(INK3).text_xs().child(String::new())
+            } else {
+                let c = if result.starts_with('✕') { CRIT } else if result.starts_with('✓') { OK } else { INK2 };
+                mono(c).text_xs().child(result)
+            };
+            div().flex().flex_col().gap_2().p_4().rounded_lg().bg(rgb(WELL))
+                .border_1().border_color(rgb(MINT_DK))
+                .child(div().flex().items_center().gap_2()
+                    .child(mono(MINT).text_sm().child(tool.clone()))
+                    .child(div().flex_1())
+                    .child(action))
+                .child(div().text_sm().text_color(rgb(INK2))
+                    .child(if desc.is_empty() { "(no description advertised)".to_string() } else { desc }))
+                .child(mono(INK3).text_xs()
+                    .child(if params.is_empty() { "parameters: none".to_string() } else { format!("parameters: {params}   (* = required)") }))
+                .child(result_line)
+        });
+
         div().flex().flex_col().gap_3().w_full()
             .child(readout)
             .child(search_box)
+            .children(detail)
             .child(tree)
     }
 

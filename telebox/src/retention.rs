@@ -11,6 +11,7 @@
 // connection, so each call gets its OWN short-lived connection (initialize + one
 // request), retried a few times with a small gap.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::thread;
@@ -93,8 +94,27 @@ pub(crate) fn call_slow(sock: &str, token: &str, name: &str, args: &Value) -> Op
     None
 }
 
-// The raw tools/list method (not a tools/call): returns result.tools[] directly.
-fn list_tools_once(sock: &str, token: &str) -> Option<Vec<(String, String)>> {
+// Summarize a tool's inputSchema into "chat_id* · limit · offset_id" (required
+// params get a trailing *). Empty when the tool takes no arguments.
+fn params_of(t: &Value) -> String {
+    let Some(schema) = t.get("inputSchema") else { return String::new() };
+    let req: Vec<&str> = schema
+        .get("required")
+        .and_then(|r| r.as_array())
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    match schema.get("properties").and_then(|p| p.as_object()) {
+        Some(props) => props
+            .keys()
+            .map(|k| if req.contains(&k.as_str()) { format!("{k}*") } else { k.clone() })
+            .collect::<Vec<_>>()
+            .join(" · "),
+        None => String::new(),
+    }
+}
+
+// The raw tools/list method: name -> (description, params summary) for every tool.
+fn list_tools_once(sock: &str, token: &str) -> Option<Vec<(String, String, String)>> {
     let s = UnixStream::connect(sock).ok()?;
     s.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
     let mut w = s.try_clone().ok()?;
@@ -117,12 +137,12 @@ fn list_tools_once(sock: &str, token: &str) -> Option<Vec<(String, String)>> {
             .filter_map(|t| {
                 let name = t.get("name")?.as_str()?.to_string();
                 let desc = t.get("description").and_then(Value::as_str).unwrap_or("").to_string();
-                Some((name, desc))
+                Some((name, desc, params_of(t)))
             })
             .collect(),
     )
 }
-fn list_tools(sock: &str, token: &str) -> Option<Vec<(String, String)>> {
+fn list_tools(sock: &str, token: &str) -> Option<Vec<(String, String, String)>> {
     for attempt in 0..4 {
         if attempt > 0 {
             thread::sleep(Duration::from_millis(180));
@@ -183,20 +203,20 @@ fn chat_rows(sock: &str, token: &str, limit: usize) -> Vec<PanelRow> {
 // Refresh the on-stage generic device from real tools.
 fn refresh_panel(state: &HostState, sock: &str, token: &str, idx: usize) {
     match idx {
-        // MCP — the aggregated endpoint: browse the real tool catalog.
+        // MCP — the aggregated endpoint: the tree is static (taxonomy), so the
+        // poller's job is to keep each tool's live description + params so the
+        // detail card can show what a selected tool does and takes.
         0 => {
-            if let Some(tools) = list_tools(sock, token) {
-                let readout = vec![
-                    ("endpoint".into(), "/tmp/tlgrm_mcp.sock".into()),
-                    ("tools advertised".into(), tools.len().to_string()),
-                    ("transport".into(), "JSON-RPC · unix socket".into()),
-                ];
-                let rows = tools
-                    .into_iter()
-                    .take(400)
-                    .map(|(n, d)| PanelRow { id: 0, sid: n.clone(), title: n, sub: d, on: false })
-                    .collect();
-                state.set_panel_readout(0, readout, rows, true);
+            // The tool catalog is static — fetch it ONCE, then stop, so it never
+            // competes with an invoke on the flaky single-call bridge.
+            if !state.mcp_has_tools() {
+                if let Some(tools) = list_tools(sock, token) {
+                    let mut info = HashMap::new();
+                    for (name, desc, params) in tools {
+                        info.insert(name, (desc, params));
+                    }
+                    state.set_mcp_tool_info(info);
+                }
             }
         }
         // Export — the HEADLESS gradual engine (GradualArchiver, never the
@@ -301,6 +321,30 @@ fn run_action(state: &HostState, sock: &str, token: &str) {
         Some(v) => summarize(&a.tool, &v),
     };
     state.set_result(a.plugin, msg);
+}
+
+// Run a user-requested READ-ONLY tool invoke from the MCP tree and show a
+// compact result. The host guards this to get_/list_/search_ tools, so calling
+// with no arguments is safe (worst case: an honest "missing X" error).
+fn run_mcp_invoke(state: &HostState, sock: &str, token: &str) {
+    let Some(tool) = state.take_mcp_invoke() else { return };
+    let res = call_slow(sock, token, &tool, &json!({}));
+    let msg = match res {
+        None => format!("✕ {tool}: no response from client"),
+        Some(v) => {
+            if let Some(e) = v.get("error").and_then(Value::as_str) {
+                format!("✕ {e}")
+            } else if v.get("success").and_then(Value::as_bool) == Some(false) {
+                format!("✕ {}", str_of(&v, "message"))
+            } else {
+                let raw = serde_json::to_string(&v).unwrap_or_default();
+                let snip: String = raw.chars().take(300).collect();
+                let ell = if raw.chars().count() > 300 { "…" } else { "" };
+                format!("✓ {snip}{ell}")
+            }
+        }
+    };
+    state.set_mcp_invoke_result(msg);
 }
 
 // Turn a tool's raw JSON into one honest line for the panel's result field.
@@ -435,6 +479,7 @@ pub fn spawn(state: HostState, sock: String, token_path: String) {
         // 1. Run any action a button queued (highest priority — the user is
         //    waiting on its result line).
         run_action(&state, &sock, &token);
+        run_mcp_invoke(&state, &sock, &token);
 
         // 2. Refresh only the device on stage.
         match state.selected() {

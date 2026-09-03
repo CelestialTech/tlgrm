@@ -7,7 +7,7 @@
 // HostState method the QA socket calls; there is no second implementation to
 // drift.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -196,6 +196,12 @@ pub struct Inner {
     pub mcp_expanded: HashSet<String>,
     pub mcp_search: String,
     pub mcp_selected: Option<String>,
+    // Live tool info from tools/list: name -> (description, params summary).
+    pub mcp_tool_info: HashMap<String, (String, String)>,
+    // A safe read-only invoke the user asked for; the poller runs it.
+    pub mcp_invoke_pending: Option<String>,
+    pub mcp_invoke_result: String,
+    pub mcp_invoke_busy: bool,
     pub shot_request: Option<String>,
     pub shot_armed: bool,
     pub shot_result: Option<(u32, u32, bool)>,
@@ -300,6 +306,10 @@ impl HostState {
                 mcp_expanded: HashSet::new(),
                 mcp_search: String::new(),
                 mcp_selected: None,
+                mcp_tool_info: HashMap::new(),
+                mcp_invoke_pending: None,
+                mcp_invoke_result: String::new(),
+                mcp_invoke_busy: false,
                 shot_request: None,
                 shot_armed: false,
                 shot_result: None,
@@ -535,7 +545,58 @@ impl HostState {
         self.0.lock().ok().and_then(|i| i.mcp_selected.clone())
     }
     pub fn mcp_select(&self, tool: String) {
-        if let Ok(mut i) = self.0.lock() { i.mcp_selected = Some(tool); }
+        if let Ok(mut i) = self.0.lock() {
+            i.mcp_selected = Some(tool);
+            i.mcp_invoke_result.clear(); // the last invoke was for a different tool
+        }
+    }
+    pub fn set_mcp_tool_info(&self, m: HashMap<String, (String, String)>) {
+        if let Ok(mut i) = self.0.lock() { i.mcp_tool_info = m; }
+    }
+    pub fn mcp_has_tools(&self) -> bool {
+        self.0.lock().map(|i| !i.mcp_tool_info.is_empty()).unwrap_or(false)
+    }
+    pub fn mcp_tool_info(&self, name: &str) -> Option<(String, String)> {
+        self.0.lock().ok().and_then(|i| i.mcp_tool_info.get(name).cloned())
+    }
+    // Only read-only tools are one-click invokable here; a mutating tool is the
+    // job of its owning plugin, not a raw tree click (a stray send_/delete_ would
+    // act on the real account).
+    pub fn is_read_tool(name: &str) -> bool {
+        name.starts_with("get_")
+            || name.starts_with("list_")
+            || name.starts_with("search_")
+            || name.starts_with("count_")
+    }
+    pub fn request_mcp_invoke(&self, tool: String) {
+        if !Self::is_read_tool(&tool) {
+            self.set_mcp_invoke_result(format!(
+                "✕ {tool} can change state — invoke it from its plugin, not here. Read-only tools (get_/list_/search_) only."));
+            return;
+        }
+        if let Ok(mut i) = self.0.lock() {
+            if i.mcp_invoke_busy {
+                return;
+            }
+            i.mcp_invoke_busy = true;
+            i.mcp_invoke_result = format!("… invoking {tool}");
+            i.mcp_invoke_pending = Some(tool);
+        }
+    }
+    pub fn take_mcp_invoke(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|mut i| i.mcp_invoke_pending.take())
+    }
+    pub fn set_mcp_invoke_result(&self, r: String) {
+        if let Ok(mut i) = self.0.lock() {
+            i.mcp_invoke_busy = false;
+            i.mcp_invoke_result = r;
+        }
+    }
+    pub fn mcp_invoke_result(&self) -> String {
+        self.0.lock().map(|i| i.mcp_invoke_result.clone()).unwrap_or_default()
+    }
+    pub fn mcp_invoke_busy(&self) -> bool {
+        self.0.lock().map(|i| i.mcp_invoke_busy).unwrap_or(false)
     }
 
     // The one primary action for device `i`, built from its current selection.
@@ -751,6 +812,12 @@ impl HostState {
             "plugins": plugins,
             "log_tail": log_tail,
             "selected_plugin": selp,
+            "mcp": {
+                "selected": i.mcp_selected,
+                "invoke_busy": i.mcp_invoke_busy,
+                "invoke_result": i.mcp_invoke_result,
+                "tools_known": i.mcp_tool_info.len(),
+            },
             "panel": {
                 "result": panel.result,
                 "rows": panel.rows.len(),
