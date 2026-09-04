@@ -18,7 +18,7 @@ and every action is verified end-to-end through the QA socket.
 
 | Device | What it does | Key tools |
 |---|---|---|
-| **MCP** | The aggregated tool socket: a collapsible 14-domain / 359-tool tree; select a tool to see its description + params; fill params (scalars, and array/object via JSON) and **Invoke** read tools; a **live-traffic monitor** (recent calls + per-minute rate) and a **recent-invokes history**. Mutating tools are guarded — run from their own plugin. | `tools/list`, any `get_/list_/search_/count_` |
+| **MCP** | The aggregated tool socket: a collapsible tool tree across **14 domains** (the live endpoint serves 364 tools); select a tool to see its description + params; fill params (scalars, and array/object via JSON) and **Invoke** read tools; a **live-traffic monitor** (recent calls + per-minute rate) and a **recent-invokes history**. Mutating tools are guarded — run from their own plugin. | `tools/list`, any `get_/list_/search_/count_` |
 | **Export** | A **headless** Rust engine (`export_engine.rs`) that pages `get_chat_history` → JSONL and downloads each media file, tracking real message + byte progress. Pause/Resume, Cancel, and a media on/off toggle. **No native Tlgrm export window.** | `get_chat_history`, `download_media` |
 | **Retention** | The git-style message-version store: version/edit/deletion stats; three **ephemeral-capture** toggles (self-destruct / view-once / vanishing); the tracked-message list; and a version chain with a per-version **diff** (− removed / + added). | `get_retention_stats`, `list_message_history`, `configure_ephemeral_capture` |
 | **Archiver** | Archive any chat to a local SQLite store, **browse** what you've archived (`list_archived_chats`), and **search** the archived message content (`search_archive`), plus store stats. | `archive_chat`, `list_archived_chats`, `search_archive`, `get_archive_stats` |
@@ -88,7 +88,7 @@ stale frame; the QA snapshot is the authority.
 | `src/retention.rs` | The relay driver — the poller loop, the serialized `call`/`call_slow` bridge (gate + throttle + traffic recorder), and every action runner. |
 | `src/export_engine.rs` | The headless Rust export engine (paging + media download + pause/cancel). |
 | `src/mcp_relay.rs` | The aggregated MCP endpoint proxying to the client bridge. |
-| `src/mcp_tree.rs` + `src/mcp_taxonomy.json` | The verified 14-domain / 58-subdomain / 359-tool taxonomy behind the MCP tree. |
+| `src/mcp_tree.rs` + `src/mcp_taxonomy.json` | The 14-domain / 58-subdomain taxonomy behind the MCP tree. |
 | `src/qa.rs` | The QA socket — drive controls and render the window to a PNG offscreen. |
 | `ONTOLOGY.md` | How every panel derives from Service / Item / Job / Store / Setting. |
 | `GATES.md` | The gap-closing ledger (each gate proven live). |
