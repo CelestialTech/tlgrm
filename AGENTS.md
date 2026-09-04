@@ -220,7 +220,7 @@ same discovery**, so an agent written to the recipe above keeps working. The
 | `docs/MCP_STAR_GIFTS.md` | Which star/gift/wallet tools are real, and the rule that keeps them so. |
 | `PROPOSAL_REFACTOR.md` | Splitting the local-only surface out (the telebox direction). |
 | `PROPOSAL_MCP_CONTROL_PANEL.md` | Proposed UI to run/configure the server, with a Claude DBA agent. |
-| `telebox/` | The TeleBox app (GPUI/Rust). M0: shell + interactive controls + MCP re-host proxying to the client bridge, plus a QA socket that drives controls and renders the window to a PNG offscreen (works with the screen locked). Pins Rust 1.95; needs `font-kit` + gpui `test-support`. See `telebox/README.md`. |
+| `telebox/` | The TeleBox app (GPUI/Rust) — the plugin-hosted controller. All seven device panels are wired end-to-end against the live client: **MCP** (tool tree + arg-form invoke + traffic + history), **Export** (headless Rust engine → JSONL + media, pause/resume), **Retention** (version store + capture toggles + version diff), **Archiver** (store browser + content search), **Bots** (inspect/start-stop/config/command), **Wallet** (balance + tx search + gift portfolio), **AI** (TTS + transcription + send voice message). All client I/O serializes through one bridge gate + throttle. Pins Rust 1.95; needs `font-kit`. See `telebox/README.md`; operational guardrails in `SELF_GATES.md`. |
 
 ### Branches, and one sharp edge
 
