@@ -207,6 +207,56 @@ void Server::registerTools() {
 			}
 		},
 		Tool{
+			"send_video",
+			"Send a local video file to a chat as a playable, STREAMABLE video "
+				"message (inline preview, scrubbable) — not a document attachment. "
+				"Reuses the same chunked upload + size limits as send_document; the "
+				"client derives width/height/duration/thumbnail from the file. "
+				"Async: success means queued, not delivered.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (Saved Messages = your own user id)"}
+					}},
+					{"file_path", QJsonObject{
+						{"type", "string"},
+						{"description", "Absolute path to an existing local video (mp4)"}
+					}},
+					{"caption", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional caption (plain, or the source parsed by parse_mode)"}
+					}},
+					{"supports_streaming", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Enable progressive playback before full download (default true)"}
+					}},
+					{"parse_mode", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional 'markdown' for the caption; ignored when 'entities' is given."}
+					}},
+					{"entities", QJsonObject{
+						{"type", "array"},
+						{"description", "Optional precise caption formatting (wins over parse_mode)."}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}},
+					{"schedule_date", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: unix timestamp to send the video later"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "file_path"}},
+			}
+		},
+		Tool{
 			"send_rich_message",
 			"Send a structured rich-article message (Instant-View-style "
 				"blocks) to a chat, built and serialized through the client's "

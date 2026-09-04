@@ -684,6 +684,19 @@ QJsonObject Server::toolGetChatHistory(const QJsonObject &args) {
 									doc->match([&](const MTPDdocument &dd) {
 										o["media_size"] = qint64(dd.vsize().v);
 										o["media_mime"] = QString::fromUtf8(dd.vmime_type().v);
+										// A document carrying documentAttributeVideo is a
+										// video message (inline/streamable), not a plain
+										// file — surface that so callers can tell a
+										// send_video post from a send_document one.
+										for (const auto &attr : dd.vattributes().v) {
+											attr.match([&](const MTPDdocumentAttributeVideo &vid) {
+												o["is_video"] = true;
+												o["supports_streaming"] = vid.is_supports_streaming();
+												o["duration"] = vid.vduration().v;
+												o["width"] = qint64(vid.vw().v);
+												o["height"] = qint64(vid.vh().v);
+											}, [](const auto &) {});
+										}
 									}, [](const MTPDdocumentEmpty &) {});
 								}
 							}, [&](const MTPDmessageMediaPhoto &mm) {
@@ -1159,6 +1172,114 @@ QJsonObject Server::toolSendDocument(const QJsonObject &args) {
 	result["status"] = "Document queued for upload";
 
 	qInfo() << "MCP: Queued document" << info.fileName()
+		<< "(" << info.size() << "bytes ) to chat" << chatId;
+	return result;
+}
+
+// Send a local video file as a Telegram VIDEO message (inline, streamable) —
+// NOT a document attachment. Identical to send_document (same PrepareMediaList,
+// the same chunked upload with the account's 2 GB/4 GB ceiling, the same
+// caption/reply/silent/schedule handling) EXCEPT it hands sendFiles
+// SendMediaType::Photo instead of ::File. For a detected video that flips
+// forceFile off (apiwrap.cpp: forceFile = (type==File) && file is Video), so the
+// FileLoadTask builds a documentAttributeVideo with f_supports_streaming and the
+// client library's own w/h/duration/thumbnail detection — the send_file(
+// force_document=False, video=True, supports_streaming=True) path. No ffprobe:
+// the library reads the mp4 itself; a non-video file just sends as its media.
+QJsonObject Server::toolSendVideo(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto path = args["file_path"].toString();
+	const auto caption = args.value("caption").toString();
+
+	if (chatId == 0) {
+		return toolError("chat_id is required and must be non-zero");
+	}
+	if (path.isEmpty()) {
+		return toolError("file_path is required and must not be empty");
+	}
+	const auto info = QFileInfo(path);
+	if (!info.exists() || !info.isFile()) {
+		return toolError("file_path is not an existing file: " + path);
+	}
+	if (!_session) {
+		return toolError("Session not available");
+	}
+
+	const auto history = _session->data().history(PeerId(chatId));
+	if (!history) {
+		return toolError("Chat not found");
+	}
+
+	const auto premium = _session->user()->isPremium();
+	auto list = Storage::PrepareMediaList(
+		QStringList(info.absoluteFilePath()),
+		st::sendMediaPreviewSize,
+		premium);
+	if (list.error != Ui::PreparedList::Error::None) {
+		const auto reason = (list.error == Ui::PreparedList::Error::TooLargeFile)
+			? QString("file exceeds this account's upload limit")
+			: QString("could not prepare file (error %1)"
+				).arg(int(list.error));
+		return toolError(reason + ": " + list.errorData);
+	}
+	if (list.files.empty()) {
+		return toolError("File prepared to an empty list: " + path);
+	}
+
+	// Read every advertised arg (mirror send_document for the shared fields).
+	const auto entities = args.value("entities").toArray();
+	const auto parseMode = args.value("parse_mode").toString();
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	const auto scheduleDate = TimeId(
+		args.value("schedule_date").toVariant().toLongLong());
+	const auto supportsStreaming = args.value("supports_streaming").toBool(true);
+
+	// Honor supports_streaming: a well-formed (faststart) mp4 the library reads
+	// as streamable already gets the flag; set it on the prepared video info so
+	// an explicit request is respected. Guarded — a non-video file has no Video
+	// information and is left to send as its natural media.
+	if (supportsStreaming) {
+		for (auto &file : list.files) {
+			if (file.information) {
+				if (auto video = std::get_if<Ui::PreparedFileInformation::Video>(
+						&file.information->media)) {
+					video->supportsStreaming = true;
+				}
+			}
+		}
+	}
+
+	if (!caption.isEmpty()) {
+		const auto resolved = ResolveFormatting(caption, parseMode, entities);
+		list.files.back().caption = TextWithTags{
+			resolved.text,
+			TextUtilities::ConvertEntitiesToTextTags(resolved.entities),
+		};
+	}
+
+	// SendMediaType::Photo == "send as natural media" -> a video goes as a
+	// streamable video; ::File would force a document (that's send_document).
+	_session->api().sendFiles(
+		std::move(list),
+		SendMediaType::Photo,
+		nullptr, // not an album
+		BuildSendAction(history, PeerId(chatId), replyToId, silent, scheduleDate));
+
+	QJsonObject result;
+	result["success"] = true;
+	result["chat_id"] = chatId;
+	result["file_path"] = info.absoluteFilePath();
+	result["file_name"] = info.fileName();
+	result["size"] = qint64(info.size());
+	result["supports_streaming"] = supportsStreaming;
+	if (!caption.isEmpty()) {
+		result["caption"] = caption;
+	}
+	// Async like every send path: the upload is queued, so no message id yet.
+	result["status"] = "Video queued for upload";
+
+	qInfo() << "MCP: Queued video" << info.fileName()
 		<< "(" << info.size() << "bytes ) to chat" << chatId;
 	return result;
 }

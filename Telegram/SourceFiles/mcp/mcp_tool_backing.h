@@ -347,6 +347,7 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"send_star_reaction",            Backing::LocalOnly },
 	{"send_stars",                    Backing::Unimplemented },
 	{"send_subscriber_message",       Backing::Mtproto },
+	{"send_video",                    Backing::Mtproto },
 	{"send_video_reply",              Backing::Mtproto },
 	{"send_voice_reply",              Backing::Mtproto },
 	{"set_admin_rights",              Backing::Mtproto },
