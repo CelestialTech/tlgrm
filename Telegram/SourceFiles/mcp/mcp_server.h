@@ -39,6 +39,7 @@ class Session;
 class HistoryItem;
 class History;
 class PeerData;
+enum class SendMediaType; // storage/localimageloader.h — used by sendPreparedFile
 
 namespace MCP {
 
@@ -166,9 +167,40 @@ private:
 	QJsonObject toolReadMessages(const QJsonObject &args);
 	QJsonObject toolGetChatHistory(const QJsonObject &args);
 	QJsonObject toolDownloadMedia(const QJsonObject &args);
+	QJsonObject toolGetFullUser(const QJsonObject &args);
+	QJsonObject toolResolvePhone(const QJsonObject &args);
+	QJsonObject toolGetMessageViews(const QJsonObject &args);
+	QJsonObject toolGetPeerStories(const QJsonObject &args);
+	QJsonObject toolGetAllStories(const QJsonObject &args);
 	QJsonObject toolSendMessage(const QJsonObject &args);
 	QJsonObject toolSendDocument(const QJsonObject &args);
 	QJsonObject toolSendVideo(const QJsonObject &args);
+	QJsonObject toolSendLocation(const QJsonObject &args);
+	QJsonObject toolSendVenue(const QJsonObject &args);
+	QJsonObject toolSendContact(const QJsonObject &args);
+	QJsonObject toolSendDice(const QJsonObject &args);
+	QJsonObject toolSendPhoto(const QJsonObject &args);
+	QJsonObject toolSendGif(const QJsonObject &args);
+	QJsonObject toolSendAudio(const QJsonObject &args);
+	QJsonObject toolSendPoll(const QJsonObject &args);
+	QJsonObject toolVotePoll(const QJsonObject &args);
+	QJsonObject toolGetPollResults(const QJsonObject &args);
+	QJsonObject toolMuteChat(const QJsonObject &args);
+	QJsonObject toolGetChatNotifySettings(const QJsonObject &args);
+	QJsonObject toolSaveDraft(const QJsonObject &args);
+	QJsonObject toolClearAllDrafts(const QJsonObject &args);
+	QJsonObject toolGetContacts(const QJsonObject &args);
+	QJsonObject toolAddContact(const QJsonObject &args);
+	QJsonObject toolDeleteContact(const QJsonObject &args);
+	QJsonObject toolImportContacts(const QJsonObject &args);
+	QJsonObject toolGetDiscussionMessage(const QJsonObject &args);
+	QJsonObject toolGetMessageReadParticipants(const QJsonObject &args);
+	QJsonObject toolBanChatMember(const QJsonObject &args);
+	QJsonObject toolUnbanChatMember(const QJsonObject &args);
+	QJsonObject toolSendBotStart(const QJsonObject &args);
+	QJsonObject toolGetBotCallbackAnswer(const QJsonObject &args);
+	QJsonObject toolGetInlineBotResults(const QJsonObject &args);
+	QJsonObject toolSendInlineBotResult(const QJsonObject &args);
 	QJsonObject toolSendRichMessage(const QJsonObject &args);
 	QJsonObject toolSearchMessages(const QJsonObject &args);
 	QJsonObject toolGetUserInfo(const QJsonObject &args);
@@ -742,6 +774,31 @@ private:
 	// the caller anyway.
 	[[nodiscard]] PeerData *resolvePeer(qint64 chatId) const;
 	[[nodiscard]] PeerData *resolvePeer(PeerId id) const;
+
+	// Shared core for the input-media send tools (location/venue/contact/dice):
+	// issues one messages.sendMedia with an optional reply, applies the returned
+	// Updates, and returns the tool JSON. Each caller reads its own args and
+	// passes the shared send-options here as typed values. `kind` labels result.
+	QJsonObject sendInputMedia(
+		qint64 chatId,
+		const MTPInputMedia &media,
+		qint64 replyToId,
+		bool silent,
+		const QString &kind);
+
+	// Shared core for the file-upload send tools (photo/gif/audio): prepares the
+	// local file, applies the caption + reply options, and hands it to
+	// ApiWrap::sendFiles with the given SendMediaType (Photo = natural media,
+	// File = forced document). Callers read their own args and pass typed values.
+	QJsonObject sendPreparedFile(
+		qint64 chatId,
+		const QString &path,
+		const TextWithTags &caption,
+		qint64 replyToId,
+		bool silent,
+		TimeId scheduleDate,
+		SendMediaType type,
+		const QString &kind);
 
 	// Same contract for histories. Session::history() is findOrCreate() and
 	// routes through the same aborting peer lookup, and likewise returns

@@ -9,6 +9,9 @@
 #include "iv/iv_rich_page.h"
 #include "iv/iv_rich_message_serializer.h"
 #include "history/history.h" // NewMessageType::Existing (full enum, not just the fwd decl)
+#include "base/random.h" // base::RandomValue for the sendMedia random_id
+#include "api/api_polls.h" // Api::Polls::sendVotes for vote_poll
+#include "data/data_poll.h" // PollData/PollAnswer for poll create/vote/results
 
 namespace MCP {
 
@@ -919,6 +922,162 @@ QJsonObject Server::toolDownloadMedia(const QJsonObject &args) {
 	return toolError("Message media is neither a document nor a photo");
 }
 
+// ===== Gap-closing read tools (layer 229) ==================================
+// Plain MTP reads the surface was missing (see docs/API_GAP_ANALYSIS.md). Each
+// mirrors the awaitMtp honest-await idiom: block on the reply, return the real
+// result, never "submitted".
+
+// users.getFullUser — the FULL profile (bio/about, common-chats count) that
+// get_user_info (cache-only) never fetches.
+QJsonObject Server::toolGetFullUser(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto userId = args["user_id"].toVariant().toLongLong();
+	auto peer = resolvePeer(userId);
+	const auto user = peer ? peer->asUser() : nullptr;
+	if (!user) return toolError(QString("User %1 not loaded; open it once or use list_chats").arg(userId));
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPusers_GetFullUser(
+			user->inputUser()
+		)).done([=](const MTPusers_UserFull &result) {
+			result.match([&](const MTPDusers_userFull &d) {
+				_session->data().processUsers(d.vusers());
+				_session->data().processChats(d.vchats());
+				QJsonObject o;
+				o["success"] = true;
+				o["user_id"] = userId;
+				d.vfull_user().match([&](const MTPDuserFull &f) {
+					o["about"] = QString::fromUtf8(f.vabout().value_or_empty());
+					o["common_chats_count"] = f.vcommon_chats_count().v;
+					o["blocked"] = f.is_blocked();
+					o["phone_calls_available"] = f.is_phone_calls_available();
+					o["voice_messages_forbidden"] = f.is_voice_messages_forbidden();
+				});
+				done(o);
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// contacts.resolvePhone — a phone number -> the resolved user/peer id.
+QJsonObject Server::toolResolvePhone(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto phone = args["phone"].toString();
+	if (phone.isEmpty()) return toolError("phone is required");
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPcontacts_ResolvePhone(
+			MTP_string(phone)
+		)).done([=](const MTPcontacts_ResolvedPeer &result) {
+			result.match([&](const MTPDcontacts_resolvedPeer &d) {
+				_session->data().processUsers(d.vusers());
+				_session->data().processChats(d.vchats());
+				QJsonObject o;
+				o["success"] = true;
+				o["phone"] = phone;
+				o["peer_id"] = qint64(peerFromMTP(d.vpeer()).value);
+				done(o);
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// messages.getMessagesViews — per-message view + forward counts.
+QJsonObject Server::toolGetMessageViews(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	auto peer = resolvePeer(chatId);
+	if (!peer) return toolError(QString("Chat %1 not loaded").arg(chatId));
+	QVector<MTPint> ids;
+	for (const auto &v : args["message_ids"].toArray()) {
+		ids.push_back(MTP_int(int(v.toVariant().toLongLong())));
+	}
+	if (ids.isEmpty()) return toolError("message_ids (array) is required");
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetMessagesViews(
+			peer->input(),
+			MTP_vector<MTPint>(ids),
+			MTP_bool(false) // increment: read-only, do not bump the counter
+		)).done([=](const MTPmessages_MessageViews &result) {
+			result.match([&](const MTPDmessages_messageViews &d) {
+				_session->data().processUsers(d.vusers());
+				_session->data().processChats(d.vchats());
+				QJsonArray arr;
+				const auto &views = d.vviews().v;
+				for (auto i = 0; i != views.size() && i != ids.size(); ++i) {
+					views[i].match([&](const MTPDmessageViews &v) {
+						QJsonObject o;
+						o["message_id"] = qint64(ids[i].v);
+						o["views"] = v.vviews().value_or_empty();
+						o["forwards"] = v.vforwards().value_or_empty();
+						arr.append(o);
+					});
+				}
+				done(QJsonObject{{"success", true}, {"chat_id", chatId}, {"views", arr}});
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// stories.getPeerStories — a peer's currently-active stories (ids + dates).
+QJsonObject Server::toolGetPeerStories(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	auto peer = resolvePeer(chatId);
+	if (!peer) return toolError(QString("Peer %1 not loaded").arg(chatId));
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPstories_GetPeerStories(
+			peer->input()
+		)).done([=](const MTPstories_PeerStories &result) {
+			result.match([&](const MTPDstories_peerStories &d) {
+				_session->data().processUsers(d.vusers());
+				_session->data().processChats(d.vchats());
+				QJsonArray arr;
+				d.vstories().match([&](const MTPDpeerStories &ps) {
+					for (const auto &s : ps.vstories().v) {
+						s.match([&](const MTPDstoryItem &it) {
+							QJsonObject o;
+							o["id"] = it.vid().v;
+							o["date"] = qint64(it.vdate().v);
+							o["caption"] = QString::fromUtf8(it.vcaption().value_or_empty());
+							arr.append(o);
+						}, [&](const MTPDstoryItemSkipped &it) {
+							arr.append(QJsonObject{{"id", it.vid().v}, {"skipped", true}});
+						}, [](const MTPDstoryItemDeleted &) {});
+					}
+				});
+				done(QJsonObject{{"success", true}, {"chat_id", chatId}, {"count", int(arr.size())}, {"stories", arr}});
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// stories.getAllStories — the followed-peers stories feed (peers + story counts).
+QJsonObject Server::toolGetAllStories(const QJsonObject &args) {
+	Q_UNUSED(args);
+	if (!_session) return toolError("No active session");
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPstories_GetAllStories(
+			MTP_flags(0), MTP_string()
+		)).done([=](const MTPstories_AllStories &result) {
+			result.match([&](const MTPDstories_allStories &d) {
+				_session->data().processUsers(d.vusers());
+				_session->data().processChats(d.vchats());
+				QJsonArray arr;
+				for (const auto &ps : d.vpeer_stories().v) {
+					ps.match([&](const MTPDpeerStories &p) {
+						arr.append(QJsonObject{
+							{"peer_id", qint64(peerFromMTP(p.vpeer()).value)},
+							{"story_count", int(p.vstories().v.size())},
+						});
+					});
+				}
+				done(QJsonObject{{"success", true}, {"count", d.vcount().v}, {"peers", arr}});
+			}, [&](const MTPDstories_allStoriesNotModified &) {
+				done(QJsonObject{{"success", true}, {"not_modified", true}});
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
 QJsonObject Server::toolReadMessages(const QJsonObject &args) {
 	qint64 chatId = args["chat_id"].toVariant().toLongLong();
 	if (chatId == 0) {
@@ -1282,6 +1441,1005 @@ QJsonObject Server::toolSendVideo(const QJsonObject &args) {
 	qInfo() << "MCP: Queued video" << info.fileName()
 		<< "(" << info.size() << "bytes ) to chat" << chatId;
 	return result;
+}
+
+// ===== INPUT-MEDIA SENDS (location / venue / contact / dice) =====
+// A deep helper that hides the messages.sendMedia round-trip: build the flags,
+// an optional reply and a random id, issue ONE raw SendMedia and apply the
+// returned Updates so the message appears locally. The four tools below are
+// thin wrappers that read their own args and construct the MTPInputMedia.
+// (These media types carry no user-visible caption, so none is sent.)
+QJsonObject Server::sendInputMedia(
+		qint64 chatId,
+		const MTPInputMedia &media,
+		qint64 replyToId,
+		bool silent,
+		const QString &kind) {
+	if (!_session) return toolError("No active session");
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError(QString("Chat %1 not found").arg(chatId));
+
+	auto replyTo = replyToId
+		? MTP_inputReplyToMessage(
+			MTP_flags(0),
+			MTP_int(int(replyToId)),
+			MTPint(), // top_msg_id
+			MTPInputPeer(), // reply_to_peer_id
+			MTPstring(), // quote_text
+			MTPVector<MTPMessageEntity>(), // quote_entities
+			MTPint(), // quote_offset
+			MTPInputPeer(), // monoforum_peer_id
+			MTPint(), // todo_item_id
+			MTPbytes()) // poll_option
+		: MTPInputReplyTo();
+
+	using Flag = MTPmessages_sendMedia::Flag;
+	const auto flags = Flag(0)
+		| (silent ? Flag::f_silent : Flag(0))
+		| (replyToId ? Flag::f_reply_to : Flag(0));
+	const auto randomId = base::RandomValue<uint64>();
+
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_SendMedia(
+			MTP_flags(flags),
+			peer->input(),
+			replyTo,
+			media,
+			MTP_string(QString()), // message: no caption for these media types
+			MTP_long(randomId),
+			MTPReplyMarkup(),
+			MTPVector<MTPMessageEntity>(), // entities
+			MTPint(), // schedule_date
+			MTPint(), // schedule_repeat_period
+			MTPInputPeer(), // send_as
+			MTPInputQuickReplyShortcut(),
+			MTPlong(), // effect
+			MTPlong(), // allow_paid_stars
+			MTPSuggestedPost()
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			done(QJsonObject{
+				{"success", true},
+				{"chat_id", chatId},
+				{"kind", kind},
+				{"status", QString("%1 sent").arg(kind)},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// messages.sendMedia(inputMediaGeoPoint) — a static location pin.
+QJsonObject Server::toolSendLocation(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	if (!args.contains("latitude") || !args.contains("longitude")) {
+		return toolError("latitude and longitude are required");
+	}
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	auto geo = MTP_inputGeoPoint(
+		MTP_flags(0),
+		MTP_double(args["latitude"].toDouble()),
+		MTP_double(args["longitude"].toDouble()),
+		MTPint());
+	return sendInputMedia(
+		chatId, MTP_inputMediaGeoPoint(geo), replyToId, silent, "location");
+}
+
+// messages.sendMedia(inputMediaVenue) — a named place (title + address + geo).
+QJsonObject Server::toolSendVenue(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	if (!args.contains("latitude") || !args.contains("longitude")) {
+		return toolError("latitude and longitude are required");
+	}
+	const auto title = args.value("title").toString();
+	const auto address = args.value("address").toString();
+	if (title.isEmpty() || address.isEmpty()) {
+		return toolError("title and address are required");
+	}
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	auto geo = MTP_inputGeoPoint(
+		MTP_flags(0),
+		MTP_double(args["latitude"].toDouble()),
+		MTP_double(args["longitude"].toDouble()),
+		MTPint());
+	auto venue = MTP_inputMediaVenue(
+		geo,
+		MTP_string(title),
+		MTP_string(address),
+		MTP_string(args.value("provider").toString()),
+		MTP_string(args.value("venue_id").toString()),
+		MTP_string(args.value("venue_type").toString()));
+	return sendInputMedia(chatId, venue, replyToId, silent, "venue");
+}
+
+// messages.sendMedia(inputMediaContact) — a shared phone contact card.
+QJsonObject Server::toolSendContact(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto phone = args.value("phone_number").toString();
+	const auto first = args.value("first_name").toString();
+	if (phone.isEmpty() || first.isEmpty()) {
+		return toolError("phone_number and first_name are required");
+	}
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	auto contact = MTP_inputMediaContact(
+		MTP_string(phone),
+		MTP_string(first),
+		MTP_string(args.value("last_name").toString()),
+		MTP_string(args.value("vcard").toString()));
+	return sendInputMedia(chatId, contact, replyToId, silent, "contact");
+}
+
+// messages.sendMedia(inputMediaDice) — an animated dice/dart/etc. emoji.
+QJsonObject Server::toolSendDice(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto emoticon = args.value("emoticon").toString().isEmpty()
+		? QString::fromUtf8("\xF0\x9F\x8E\xB2") // 🎲 default
+		: args.value("emoticon").toString();
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	return sendInputMedia(
+		chatId, MTP_inputMediaDice(MTP_string(emoticon)), replyToId, silent, "dice");
+}
+
+// ===== FILE-UPLOAD SENDS (photo / gif / audio) =====
+// Shared core: prepare the local file, apply caption + reply, hand to
+// ApiWrap::sendFiles with the caller's SendMediaType. Photo == natural media
+// (an image becomes a compressed photo, an animation a looping gif); File ==
+// forced document (an audio file becomes a playable music message).
+// ponytail: send_document/send_video predate this helper and still inline the
+// same prepare-and-send steps — migrate them here if this pattern grows again.
+QJsonObject Server::sendPreparedFile(
+		qint64 chatId,
+		const QString &path,
+		const TextWithTags &caption,
+		qint64 replyToId,
+		bool silent,
+		TimeId scheduleDate,
+		SendMediaType type,
+		const QString &kind) {
+	if (!_session) return toolError("Session not available");
+	const auto info = QFileInfo(path);
+	if (!info.exists() || !info.isFile()) {
+		return toolError("file_path is not an existing file: " + path);
+	}
+	const auto history = _session->data().history(PeerId(chatId));
+	if (!history || !resolvePeer(chatId)) return toolError("Chat not found");
+
+	const auto premium = _session->user()->isPremium();
+	auto list = Storage::PrepareMediaList(
+		QStringList(info.absoluteFilePath()),
+		st::sendMediaPreviewSize,
+		premium);
+	if (list.error != Ui::PreparedList::Error::None) {
+		const auto reason = (list.error == Ui::PreparedList::Error::TooLargeFile)
+			? QString("file exceeds this account's upload limit")
+			: QString("could not prepare file (error %1)").arg(int(list.error));
+		return toolError(reason + ": " + list.errorData);
+	}
+	if (list.files.empty()) {
+		return toolError("File prepared to an empty list: " + path);
+	}
+	if (!caption.text.isEmpty()) {
+		list.files.back().caption = caption;
+	}
+
+	_session->api().sendFiles(
+		std::move(list),
+		type,
+		nullptr, // not an album
+		BuildSendAction(history, PeerId(chatId), replyToId, silent, scheduleDate));
+
+	QJsonObject result;
+	result["success"] = true;
+	result["chat_id"] = chatId;
+	result["file_path"] = info.absoluteFilePath();
+	result["file_name"] = info.fileName();
+	result["size"] = qint64(info.size());
+	result["kind"] = kind;
+	// Async like every send path: the upload is queued, so no message id yet.
+	result["status"] = kind + " queued for upload";
+	qInfo() << "MCP: Queued" << kind << info.fileName()
+		<< "(" << info.size() << "bytes ) to chat" << chatId;
+	return result;
+}
+
+// Read the shared file-send args (caption formatting + reply/silent/schedule)
+// and resolve the caption once, so each thin file-send wrapper stays tiny.
+namespace {
+[[nodiscard]] TextWithTags ResolveCaptionTags(const QJsonObject &args) {
+	const auto caption = args.value("caption").toString();
+	if (caption.isEmpty()) {
+		return TextWithTags();
+	}
+	const auto resolved = ResolveFormatting(
+		caption,
+		args.value("parse_mode").toString(),
+		args.value("entities").toArray());
+	return TextWithTags{
+		resolved.text,
+		TextUtilities::ConvertEntitiesToTextTags(resolved.entities) };
+}
+} // namespace
+
+// messages via sendFiles(::Photo) — a local image as a compressed photo.
+QJsonObject Server::toolSendPhoto(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto path = args["file_path"].toString();
+	if (chatId == 0) return toolError("chat_id is required and must be non-zero");
+	if (path.isEmpty()) return toolError("file_path is required");
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	const auto scheduleDate = TimeId(
+		args.value("schedule_date").toVariant().toLongLong());
+	return sendPreparedFile(
+		chatId, path, ResolveCaptionTags(args), replyToId, silent,
+		scheduleDate, SendMediaType::Photo, "photo");
+}
+
+// messages via sendFiles(::Photo) — a local .gif / short .mp4 as a looping
+// animation (the client renders the natural-media path as a gif).
+QJsonObject Server::toolSendGif(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto path = args["file_path"].toString();
+	if (chatId == 0) return toolError("chat_id is required and must be non-zero");
+	if (path.isEmpty()) return toolError("file_path is required");
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	const auto scheduleDate = TimeId(
+		args.value("schedule_date").toVariant().toLongLong());
+	return sendPreparedFile(
+		chatId, path, ResolveCaptionTags(args), replyToId, silent,
+		scheduleDate, SendMediaType::Photo, "gif");
+}
+
+// messages via sendFiles(::File) — a local audio file as a playable music
+// message (the client derives duration/performer/title and attaches the audio
+// attribute so it plays inline rather than downloading as a bare file).
+QJsonObject Server::toolSendAudio(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto path = args["file_path"].toString();
+	if (chatId == 0) return toolError("chat_id is required and must be non-zero");
+	if (path.isEmpty()) return toolError("file_path is required");
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	const auto scheduleDate = TimeId(
+		args.value("schedule_date").toVariant().toLongLong());
+	return sendPreparedFile(
+		chatId, path, ResolveCaptionTags(args), replyToId, silent,
+		scheduleDate, SendMediaType::File, "audio");
+}
+
+// ===== POLLS =====
+// messages.sendMedia(inputMediaPoll) — create a regular poll or a quiz. Answers
+// are inputPollAnswer (the server assigns option bytes); a quiz carries the
+// correct option index in correct_answers. Reuses sendInputMedia for the send.
+QJsonObject Server::toolSendPoll(const QJsonObject &args) {
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto question = args["question"].toString();
+	const auto optionsArr = args["options"].toArray();
+	if (question.isEmpty()) return toolError("question is required");
+	if (optionsArr.size() < 2) return toolError("at least 2 options are required");
+	const auto multipleChoice = args.value("multiple_choice").toBool(false);
+	const auto quiz = args.value("quiz").toBool(false);
+	const auto publicVoters = args.value("public_voters").toBool(false);
+	const auto correctOption = int(args.value("correct_option").toVariant().toLongLong());
+	const auto closePeriod = int(args.value("close_period").toVariant().toLongLong());
+	const auto solution = args.value("solution").toString();
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	if (quiz && !args.contains("correct_option")) {
+		return toolError("quiz polls require correct_option (0-based index)");
+	}
+	if (quiz && (correctOption < 0 || correctOption >= optionsArr.size())) {
+		return toolError("correct_option is out of range for the given options");
+	}
+
+	auto answers = QVector<MTPPollAnswer>();
+	answers.reserve(optionsArr.size());
+	for (const auto &opt : optionsArr) {
+		answers.push_back(MTP_inputPollAnswer(
+			MTP_flags(0),
+			MTP_textWithEntities(
+				MTP_string(opt.toString()),
+				MTP_vector<MTPMessageEntity>()),
+			MTPInputMedia())); // no per-answer media
+	}
+
+	using PFlag = MTPDpoll::Flag;
+	const auto pflags = PFlag(0)
+		| (multipleChoice ? PFlag::f_multiple_choice : PFlag(0))
+		| (quiz ? PFlag::f_quiz : PFlag(0))
+		| (publicVoters ? PFlag::f_public_voters : PFlag(0))
+		| (closePeriod > 0 ? PFlag::f_close_period : PFlag(0));
+	auto poll = MTP_poll(
+		MTP_long(0), // id: server assigns for a new poll
+		MTP_flags(pflags),
+		MTP_textWithEntities(
+			MTP_string(question),
+			MTP_vector<MTPMessageEntity>()),
+		MTP_vector<MTPPollAnswer>(answers),
+		MTP_int(closePeriod),
+		MTP_int(0), // close_date
+		MTP_vector<MTPstring>(), // countries_iso2
+		MTP_long(0)); // hash
+
+	using IFlag = MTPDinputMediaPoll::Flag;
+	auto iflags = MTPDinputMediaPoll::Flags();
+	auto correct = QVector<MTPint>();
+	if (quiz) {
+		iflags |= IFlag::f_correct_answers;
+		correct.push_back(MTP_int(correctOption));
+	}
+	if (!solution.isEmpty()) {
+		iflags |= IFlag::f_solution;
+	}
+	auto media = MTP_inputMediaPoll(
+		MTP_flags(iflags),
+		poll,
+		MTP_vector<MTPint>(correct),
+		MTPInputMedia(), // attached_media
+		MTP_string(solution),
+		MTP_vector<MTPMessageEntity>(), // solution_entities
+		MTPInputMedia()); // solution_media
+	return sendInputMedia(chatId, media, replyToId, silent, "poll");
+}
+
+// messages.sendVote — vote on an existing poll. The caller passes 0-based answer
+// indices; we read the message's poll to map them to the server's real option
+// bytes and reuse the client's own Polls::sendVotes so the UI updates too.
+QJsonObject Server::toolVotePoll(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto msgId = args["message_id"].toVariant().toLongLong();
+	const auto indices = args["option_indices"].toArray();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	const auto fullId = FullMsgId(peer->id, MsgId(int(msgId)));
+	const auto item = _session->data().message(fullId);
+	if (!item) return toolError("Message not loaded; open the chat/history first");
+	const auto media = item->media();
+	const auto poll = media ? media->poll() : nullptr;
+	if (!poll) return toolError("Message has no poll");
+	if (indices.isEmpty()) return toolError("option_indices (array) is required");
+
+	auto options = std::vector<QByteArray>();
+	for (const auto &v : indices) {
+		const auto idx = int(v.toVariant().toLongLong());
+		if (idx < 0 || idx >= int(poll->answers.size())) {
+			return toolError(QString("option index %1 out of range (poll has %2 answers)")
+				.arg(idx).arg(poll->answers.size()));
+		}
+		options.push_back(poll->answers[idx].option);
+	}
+	_session->api().polls().sendVotes(fullId, options);
+	return QJsonObject{
+		{"success", true},
+		{"chat_id", chatId},
+		{"message_id", msgId},
+		{"voted_options", int(options.size())},
+		{"status", "Vote sent"},
+	};
+}
+
+// messages.getPollResults — refresh a poll's tallies from the server, apply the
+// updates, then return the current per-answer vote counts from local data.
+QJsonObject Server::toolGetPollResults(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto msgId = args["message_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	const auto fullId = FullMsgId(peer->id, MsgId(int(msgId)));
+	const auto item = _session->data().message(fullId);
+	if (!item) return toolError("Message not loaded; open the chat/history first");
+	const auto media0 = item->media();
+	const auto poll0 = media0 ? media0->poll() : nullptr;
+	if (!poll0) return toolError("Message has no poll");
+	const auto pollHash = qint64(poll0->hash);
+
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetPollResults(
+			peer->input(),
+			MTP_int(int(msgId)),
+			MTP_long(pollHash)
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			const auto item2 = _session->data().message(fullId);
+			const auto media2 = item2 ? item2->media() : nullptr;
+			const auto poll2 = media2 ? media2->poll() : nullptr;
+			QJsonObject o{
+				{"success", true},
+				{"chat_id", chatId},
+				{"message_id", msgId},
+			};
+			if (poll2) {
+				o["total_voters"] = poll2->totalVoters;
+				o["closed"] = poll2->closed();
+				o["quiz"] = poll2->quiz();
+				QJsonArray arr;
+				for (auto i = 0; i != int(poll2->answers.size()); ++i) {
+					const auto &a = poll2->answers[i];
+					arr.append(QJsonObject{
+						{"index", i},
+						{"text", a.text.text},
+						{"votes", a.votes},
+						{"chosen", a.chosen},
+						{"correct", a.correct},
+					});
+				}
+				o["answers"] = arr;
+			}
+			done(o);
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// ===== NOTIFICATIONS + DRAFTS =====
+// account.updateNotifySettings — mute or unmute a chat. mute=true sets a
+// far-future mute_until (effectively forever); mute=false clears it; an explicit
+// mute_until (unix seconds) overrides both.
+QJsonObject Server::toolMuteChat(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	const auto mute = args.value("mute").toBool(true);
+	const auto muteUntil = args.contains("mute_until")
+		? int(args.value("mute_until").toVariant().toLongLong())
+		: (mute ? 2147483647 : 0); // 2147483647 = year 2038, effectively forever
+	using Flag = MTPDinputPeerNotifySettings::Flag;
+	auto settings = MTP_inputPeerNotifySettings(
+		MTP_flags(Flag::f_mute_until),
+		MTPBool(), // show_previews
+		MTPBool(), // silent
+		MTP_int(muteUntil),
+		MTPNotificationSound(),
+		MTPBool(), // stories_muted
+		MTPBool(), // stories_hide_sender
+		MTPNotificationSound());
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_UpdateNotifySettings(
+			MTP_inputNotifyPeer(peer->input()),
+			settings
+		)).done([=](const MTPBool &result) {
+			done(QJsonObject{
+				{"success", true},
+				{"chat_id", chatId},
+				{"muted", muteUntil > int(QDateTime::currentSecsSinceEpoch())},
+				{"mute_until", muteUntil},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// account.getNotifySettings — read a chat's mute state / preview / silent flags.
+QJsonObject Server::toolGetChatNotifySettings(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_GetNotifySettings(
+			MTP_inputNotifyPeer(peer->input())
+		)).done([=](const MTPPeerNotifySettings &result) {
+			result.match([&](const MTPDpeerNotifySettings &d) {
+				const auto muteUntil = d.vmute_until()
+					? int(d.vmute_until()->v)
+					: 0;
+				QJsonObject o{
+					{"success", true},
+					{"chat_id", chatId},
+					{"mute_until", muteUntil},
+					{"muted", muteUntil > int(QDateTime::currentSecsSinceEpoch())},
+				};
+				if (d.vsilent()) {
+					o["silent"] = mtpIsTrue(*d.vsilent());
+				}
+				if (d.vshow_previews()) {
+					o["show_previews"] = mtpIsTrue(*d.vshow_previews());
+				}
+				done(o);
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// messages.saveDraft — stage an unsent text draft in a chat (optionally a reply).
+QJsonObject Server::toolSaveDraft(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto text = args.value("text").toString();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto noWebpage = args.value("no_webpage").toBool(false);
+	using Flag = MTPmessages_saveDraft::Flag;
+	const auto flags = Flag(0)
+		| (noWebpage ? Flag::f_no_webpage : Flag(0))
+		| (replyToId ? Flag::f_reply_to : Flag(0));
+	auto replyTo = replyToId
+		? MTP_inputReplyToMessage(
+			MTP_flags(0), MTP_int(int(replyToId)), MTPint(), MTPInputPeer(),
+			MTPstring(), MTPVector<MTPMessageEntity>(), MTPint(),
+			MTPInputPeer(), MTPint(), MTPbytes())
+		: MTPInputReplyTo();
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_SaveDraft(
+			MTP_flags(flags),
+			replyTo,
+			peer->input(),
+			MTP_string(text),
+			MTP_vector<MTPMessageEntity>(), // entities
+			MTPInputMedia(), // media
+			MTPlong(), // effect
+			MTPSuggestedPost(), // suggested_post
+			MTPInputRichMessage() // rich_message
+		)).done([=](const MTPBool &result) {
+			done(QJsonObject{
+				{"success", true},
+				{"chat_id", chatId},
+				{"status", "Draft saved"},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// messages.clearAllDrafts — remove every cloud draft across all chats.
+QJsonObject Server::toolClearAllDrafts(const QJsonObject &args) {
+	Q_UNUSED(args);
+	if (!_session) return toolError("No active session");
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_ClearAllDrafts(
+		)).done([=](const MTPBool &result) {
+			done(QJsonObject{
+				{"success", true},
+				{"status", "All cloud drafts cleared"},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// ===== CONTACTS =====
+// contacts.getContacts — list the account's saved contacts (id + mutual + name).
+QJsonObject Server::toolGetContacts(const QJsonObject &args) {
+	Q_UNUSED(args);
+	if (!_session) return toolError("No active session");
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPcontacts_GetContacts(
+			MTP_long(0) // hash: 0 = always return the full list
+		)).done([=](const MTPcontacts_Contacts &result) {
+			result.match([&](const MTPDcontacts_contacts &d) {
+				_session->data().processUsers(d.vusers());
+				QJsonArray arr;
+				for (const auto &c : d.vcontacts().v) {
+					c.match([&](const MTPDcontact &ct) {
+						QJsonObject o{
+							{"user_id", qint64(ct.vuser_id().v)},
+							{"mutual", mtpIsTrue(ct.vmutual())},
+						};
+						if (const auto peer = _session->data().peerLoaded(
+								peerFromUser(ct.vuser_id()))) {
+							o["name"] = peer->name();
+						}
+						arr.append(o);
+					});
+				}
+				done(QJsonObject{
+					{"success", true},
+					{"saved_count", d.vsaved_count().v},
+					{"count", int(arr.size())},
+					{"contacts", arr},
+				});
+			}, [&](const MTPDcontacts_contactsNotModified &) {
+				done(QJsonObject{{"success", true}, {"not_modified", true}});
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// contacts.addContact — add an already-known user to the saved contacts.
+QJsonObject Server::toolAddContact(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto userId = args["user_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(userId);
+	const auto user = peer ? peer->asUser() : nullptr;
+	if (!user) return toolError("User not loaded; open it once or resolve it first");
+	const auto first = args.value("first_name").toString();
+	const auto last = args.value("last_name").toString();
+	const auto phone = args.value("phone").toString();
+	const auto sharePhone = args.value("share_phone").toBool(false);
+	if (first.isEmpty()) return toolError("first_name is required");
+	using Flag = MTPcontacts_addContact::Flag;
+	const auto flags = sharePhone
+		? Flag::f_add_phone_privacy_exception
+		: Flag(0);
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPcontacts_AddContact(
+			MTP_flags(flags),
+			user->inputUser(),
+			MTP_string(first),
+			MTP_string(last),
+			MTP_string(phone),
+			MTPTextWithEntities() // note (flag not set)
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			done(QJsonObject{
+				{"success", true},
+				{"user_id", userId},
+				{"status", "Contact added"},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// contacts.deleteContacts — remove a user from the saved contacts.
+QJsonObject Server::toolDeleteContact(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto userId = args["user_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(userId);
+	const auto user = peer ? peer->asUser() : nullptr;
+	if (!user) return toolError("User not loaded; open it once or resolve it first");
+	auto ids = QVector<MTPInputUser>{ user->inputUser() };
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPcontacts_DeleteContacts(
+			MTP_vector<MTPInputUser>(ids)
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			done(QJsonObject{
+				{"success", true},
+				{"user_id", userId},
+				{"status", "Contact deleted"},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// contacts.importContacts — add a contact by phone number (resolves to a user
+// if the number is on Telegram and reachable under the target's privacy).
+QJsonObject Server::toolImportContacts(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto phone = args["phone"].toString();
+	const auto first = args.value("first_name").toString();
+	const auto last = args.value("last_name").toString();
+	if (phone.isEmpty() || first.isEmpty()) {
+		return toolError("phone and first_name are required");
+	}
+	auto contacts = QVector<MTPInputContact>{
+		MTP_inputPhoneContact(
+			MTP_flags(0),
+			MTP_long(0), // client_id
+			MTP_string(phone),
+			MTP_string(first),
+			MTP_string(last),
+			MTPTextWithEntities()) // note (flag not set)
+	};
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPcontacts_ImportContacts(
+			MTP_vector<MTPInputContact>(contacts)
+		)).done([=](const MTPcontacts_ImportedContacts &result) {
+			result.match([&](const MTPDcontacts_importedContacts &d) {
+				_session->data().processUsers(d.vusers());
+				QJsonArray imported;
+				for (const auto &im : d.vimported().v) {
+					im.match([&](const MTPDimportedContact &ic) {
+						imported.append(qint64(ic.vuser_id().v));
+					});
+				}
+				done(QJsonObject{
+					{"success", true},
+					{"phone", phone},
+					{"imported_count", int(imported.size())},
+					{"imported_user_ids", imported},
+				});
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// ===== MESSAGE INTEL (comment threads + read receipts) =====
+// messages.getDiscussionMessage — resolve a channel post to its linked comment
+// thread: the discussion group's peer id and the thread's top message id, so a
+// caller can read/reply to the comments there.
+QJsonObject Server::toolGetDiscussionMessage(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto msgId = args["message_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetDiscussionMessage(
+			peer->input(),
+			MTP_int(int(msgId))
+		)).done([=](const MTPmessages_DiscussionMessage &result) {
+			result.match([&](const MTPDmessages_discussionMessage &d) {
+				_session->data().processChats(d.vchats());
+				_session->data().processUsers(d.vusers());
+				QJsonObject o{
+					{"success", true},
+					{"chat_id", chatId},
+					{"message_id", msgId},
+					{"unread_count", d.vunread_count().v},
+				};
+				if (d.vmax_id()) o["max_id"] = d.vmax_id()->v;
+				if (d.vread_inbox_max_id()) {
+					o["read_inbox_max_id"] = d.vread_inbox_max_id()->v;
+				}
+				QJsonArray thread;
+				for (const auto &m : d.vmessages().v) {
+					m.match([&](const MTPDmessage &mm) {
+						thread.append(QJsonObject{
+							{"discussion_peer_id",
+								qint64(peerFromMTP(mm.vpeer_id()).value)},
+							{"top_message_id", mm.vid().v},
+						});
+					}, [](const auto &) {});
+				}
+				o["thread"] = thread;
+				done(o);
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// messages.getMessageReadParticipants — who has read a message (small groups /
+// channels where read receipts are available), with the read timestamp.
+QJsonObject Server::toolGetMessageReadParticipants(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto msgId = args["message_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetMessageReadParticipants(
+			peer->input(),
+			MTP_int(int(msgId))
+		)).done([=](const MTPVector<MTPReadParticipantDate> &result) {
+			QJsonArray arr;
+			for (const auto &p : result.v) {
+				p.match([&](const MTPDreadParticipantDate &rp) {
+					arr.append(QJsonObject{
+						{"user_id", qint64(rp.vuser_id().v)},
+						{"date", qint64(rp.vdate().v)},
+					});
+				});
+			}
+			done(QJsonObject{
+				{"success", true},
+				{"chat_id", chatId},
+				{"message_id", msgId},
+				{"count", int(arr.size())},
+				{"participants", arr},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// ===== MODERATION =====
+// channels.editBanned — kick/ban a member (view_messages restricted, permanent)
+// or lift the ban (empty rights). chat_id must be a channel/supergroup.
+QJsonObject Server::toolBanChatMember(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto userId = args["user_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	const auto channel = peer ? peer->asChannel() : nullptr;
+	if (!channel) return toolError("chat_id must be a channel or supergroup");
+	const auto target = resolvePeer(userId);
+	if (!target) return toolError("user_id not loaded; open it once or resolve it first");
+	using BFlag = MTPDchatBannedRights::Flag;
+	auto rights = MTP_chatBannedRights(
+		MTP_flags(BFlag::f_view_messages), // fully removed
+		MTP_int(0)); // until_date: 0 = permanent
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPchannels_EditBanned(
+			channel->inputChannel(),
+			target->input(),
+			rights
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			done(QJsonObject{
+				{"success", true},
+				{"chat_id", chatId},
+				{"user_id", userId},
+				{"status", "Member banned"},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// channels.editBanned with empty rights — lift a member's ban/restrictions.
+QJsonObject Server::toolUnbanChatMember(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto userId = args["user_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	const auto channel = peer ? peer->asChannel() : nullptr;
+	if (!channel) return toolError("chat_id must be a channel or supergroup");
+	const auto target = resolvePeer(userId);
+	if (!target) return toolError("user_id not loaded; open it once or resolve it first");
+	auto rights = MTP_chatBannedRights(
+		MTP_flags(MTPDchatBannedRights::Flags(0)), // no restrictions = unbanned
+		MTP_int(0));
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPchannels_EditBanned(
+			channel->inputChannel(),
+			target->input(),
+			rights
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			done(QJsonObject{
+				{"success", true},
+				{"chat_id", chatId},
+				{"user_id", userId},
+				{"status", "Member unbanned"},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// ===== DRIVE OTHER BOTS =====
+// messages.startBot — /start a bot (optionally in a group) with a start param.
+// (Named send_bot_start to avoid the existing local bot-manager's start_bot.)
+QJsonObject Server::toolSendBotStart(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto botId = args["bot_id"].toVariant().toLongLong();
+	const auto chatId = args.value("chat_id").toVariant().toLongLong();
+	const auto startParam = args.value("start_param").toString();
+	const auto botPeer = resolvePeer(botId);
+	const auto bot = botPeer ? botPeer->asUser() : nullptr;
+	if (!bot) return toolError("bot_id not loaded; open it once or resolve it first");
+	const auto peer = chatId ? resolvePeer(chatId) : botPeer;
+	if (!peer) return toolError("chat_id not found");
+	const auto randomId = base::RandomValue<uint64>();
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_StartBot(
+			bot->inputUser(),
+			peer->input(),
+			MTP_long(randomId),
+			MTP_string(startParam)
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			done(QJsonObject{
+				{"success", true},
+				{"bot_id", botId},
+				{"status", "Bot started"},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// messages.getBotCallbackAnswer — press an inline-keyboard button. `data` is the
+// button's callback payload (base64 of the keyboardButtonCallback bytes). Returns
+// the bot's answer text / alert / url.
+QJsonObject Server::toolGetBotCallbackAnswer(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto msgId = args["message_id"].toVariant().toLongLong();
+	const auto data = QByteArray::fromBase64(
+		args.value("data").toString().toUtf8());
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	using Flag = MTPmessages_getBotCallbackAnswer::Flag;
+	const auto flags = data.isEmpty() ? Flag(0) : Flag::f_data;
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetBotCallbackAnswer(
+			MTP_flags(flags),
+			peer->input(),
+			MTP_int(int(msgId)),
+			MTP_bytes(data),
+			MTPInputCheckPasswordSRP()
+		)).done([=](const MTPmessages_BotCallbackAnswer &result) {
+			result.match([&](const MTPDmessages_botCallbackAnswer &d) {
+				QJsonObject o{
+					{"success", true},
+					{"chat_id", chatId},
+					{"message_id", msgId},
+					{"alert", d.is_alert()},
+				};
+				if (d.vmessage()) o["message"] = qs(*d.vmessage());
+				if (d.vurl()) o["url"] = qs(*d.vurl());
+				done(o);
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// messages.getInlineBotResults — query an inline bot (e.g. @gif cat). Returns a
+// query_id and each result's id + type (feed one to send_inline_bot_result).
+QJsonObject Server::toolGetInlineBotResults(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto botId = args["bot_id"].toVariant().toLongLong();
+	const auto chatId = args.value("chat_id").toVariant().toLongLong();
+	const auto query = args.value("query").toString();
+	const auto offset = args.value("offset").toString();
+	const auto botPeer = resolvePeer(botId);
+	const auto bot = botPeer ? botPeer->asUser() : nullptr;
+	if (!bot) return toolError("bot_id not loaded; open it once or resolve it first");
+	const auto peer = chatId ? resolvePeer(chatId) : botPeer;
+	if (!peer) return toolError("chat_id not found");
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetInlineBotResults(
+			MTP_flags(0),
+			bot->inputUser(),
+			peer->input(),
+			MTPInputGeoPoint(), // no location
+			MTP_string(query),
+			MTP_string(offset)
+		)).done([=](const MTPmessages_BotResults &result) {
+			result.match([&](const MTPDmessages_botResults &d) {
+				_session->data().processUsers(d.vusers());
+				QJsonArray arr;
+				const auto add = [&](const MTPstring &id, const MTPstring &type,
+						tl::conditional<MTPstring> title) {
+					QJsonObject o{{"id", qs(id)}, {"type", qs(type)}};
+					if (title) o["title"] = qs(*title);
+					arr.append(o);
+				};
+				for (const auto &r : d.vresults().v) {
+					r.match([&](const MTPDbotInlineResult &br) {
+						add(br.vid(), br.vtype(), br.vtitle());
+					}, [&](const MTPDbotInlineMediaResult &br) {
+						add(br.vid(), br.vtype(), br.vtitle());
+					});
+				}
+				QJsonObject o{
+					{"success", true},
+					{"query_id", qint64(d.vquery_id().v)},
+					{"count", int(arr.size())},
+					{"results", arr},
+				};
+				if (d.vnext_offset()) o["next_offset"] = qs(*d.vnext_offset());
+				done(o);
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// messages.sendInlineBotResult — post a chosen inline result (from
+// get_inline_bot_results) into a chat.
+QJsonObject Server::toolSendInlineBotResult(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto queryId = args["query_id"].toVariant().toLongLong();
+	const auto resultId = args["result_id"].toString();
+	const auto replyToId = args.value("reply_to_message_id").toVariant().toLongLong();
+	const auto silent = args.value("silent").toBool(false);
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	using Flag = MTPmessages_sendInlineBotResult::Flag;
+	const auto flags = Flag(0)
+		| (silent ? Flag::f_silent : Flag(0))
+		| (replyToId ? Flag::f_reply_to : Flag(0));
+	auto replyTo = replyToId
+		? MTP_inputReplyToMessage(
+			MTP_flags(0), MTP_int(int(replyToId)), MTPint(), MTPInputPeer(),
+			MTPstring(), MTPVector<MTPMessageEntity>(), MTPint(),
+			MTPInputPeer(), MTPint(), MTPbytes())
+		: MTPInputReplyTo();
+	const auto randomId = base::RandomValue<uint64>();
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_SendInlineBotResult(
+			MTP_flags(flags),
+			peer->input(),
+			replyTo,
+			MTP_long(randomId),
+			MTP_long(queryId),
+			MTP_string(resultId),
+			MTPint(), // schedule_date
+			MTPInputPeer(), // send_as
+			MTPInputQuickReplyShortcut(),
+			MTPlong() // allow_paid_stars
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			done(QJsonObject{
+				{"success", true},
+				{"chat_id", chatId},
+				{"status", "Inline result sent"},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
 }
 
 // Send a structured rich-article message (Instant-View-style blocks) to a chat

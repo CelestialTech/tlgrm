@@ -114,6 +114,88 @@ void Server::registerTools() {
 			}
 		},
 		Tool{
+			"get_full_user",
+			"Fetch the FULL profile of a user via users.getFullUser: bio/about "
+				"text, common-chats count, and the blocked / phone-calls-available "
+				"flags. Unlike get_user_info (which reads only cached UserData), this "
+				"is a live server round-trip that returns the bio and mutual-chats "
+				"count not held in the local cache.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"user_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "User ID (from list_chats/resolve_username)"}
+					}}
+				}},
+				{"required", QJsonArray{"user_id"}},
+			}
+		},
+		Tool{
+			"resolve_phone",
+			"Resolve a phone number to a Telegram user via contacts.resolvePhone. "
+				"Returns the user's peer id, username and name if the number is on "
+				"Telegram and reachable. The number need not be in your contacts, "
+				"but privacy settings may hide it (PHONE_NOT_OCCUPIED on no match).",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"phone", QJsonObject{
+						{"type", "string"},
+						{"description", "Phone number, digits only (e.g. 15551234567)"}
+					}}
+				}},
+				{"required", QJsonArray{"phone"}},
+			}
+		},
+		Tool{
+			"get_message_views",
+			"Read the view and forward counts of channel/broadcast messages via "
+				"messages.getMessagesViews (increment=false, so it does NOT count as "
+				"a view). Returns per-message views and forwards for the given ids.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat/channel ID (from list_chats)"}
+					}},
+					{"message_ids", QJsonObject{
+						{"type", "array"},
+						{"items", QJsonObject{{"type", "integer"}}},
+						{"description", "Message IDs whose view counts to read"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_ids"}},
+			}
+		},
+		Tool{
+			"get_peer_stories",
+			"List the currently-active stories of a peer via stories.getPeerStories: "
+				"story id, posted date, caption and pinned/expire flags for each live "
+				"story in that peer's story feed.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Peer ID whose stories to read (from list_chats)"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id"}},
+			}
+		},
+		Tool{
+			"get_all_stories",
+			"Read the stories feed via stories.getAllStories: the list of peers who "
+				"have active stories and, for each, the count of currently-active "
+				"stories. The top-level view of everyone's stories you can see.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{}},
+			}
+		},
+		Tool{
 			"send_message",
 			"Send a message with full formatting: markdown (parse_mode) or precise "
 				"entities (bold/italic/underline/strike/spoiler/code/pre/blockquote/"
@@ -254,6 +336,742 @@ void Server::registerTools() {
 					}}
 				}},
 				{"required", QJsonArray{"chat_id", "file_path"}},
+			}
+		},
+		Tool{
+			"send_location",
+			"Send a static geographic location (a map pin) to a chat via "
+				"messages.sendMedia(inputMediaGeoPoint). Not a live location — a "
+				"single point at the given latitude/longitude.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (from list_chats)"}
+					}},
+					{"latitude", QJsonObject{
+						{"type", "number"},
+						{"description", "Latitude in decimal degrees"}
+					}},
+					{"longitude", QJsonObject{
+						{"type", "number"},
+						{"description", "Longitude in decimal degrees"}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "latitude", "longitude"}},
+			}
+		},
+		Tool{
+			"send_venue",
+			"Send a named venue (a titled place with an address) to a chat via "
+				"messages.sendMedia(inputMediaVenue). Shows a map card with the "
+				"title and address rather than a bare pin.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (from list_chats)"}
+					}},
+					{"latitude", QJsonObject{
+						{"type", "number"},
+						{"description", "Latitude in decimal degrees"}
+					}},
+					{"longitude", QJsonObject{
+						{"type", "number"},
+						{"description", "Longitude in decimal degrees"}
+					}},
+					{"title", QJsonObject{
+						{"type", "string"},
+						{"description", "Venue name (e.g. 'Central Park')"}
+					}},
+					{"address", QJsonObject{
+						{"type", "string"},
+						{"description", "Street address of the venue"}
+					}},
+					{"provider", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional maps provider ('foursquare'/'gplaces')"}
+					}},
+					{"venue_id", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional provider-specific venue id"}
+					}},
+					{"venue_type", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional provider-specific venue category"}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "latitude", "longitude", "title", "address"}},
+			}
+		},
+		Tool{
+			"send_contact",
+			"Send a phone contact card to a chat via "
+				"messages.sendMedia(inputMediaContact). The recipient sees a "
+				"shareable contact with the name and number.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (from list_chats)"}
+					}},
+					{"phone_number", QJsonObject{
+						{"type", "string"},
+						{"description", "Contact phone number"}
+					}},
+					{"first_name", QJsonObject{
+						{"type", "string"},
+						{"description", "Contact first name"}
+					}},
+					{"last_name", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional contact last name"}
+					}},
+					{"vcard", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional full vCard string"}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "phone_number", "first_name"}},
+			}
+		},
+		Tool{
+			"send_dice",
+			"Send an animated dice / dart / basketball / etc. to a chat via "
+				"messages.sendMedia(inputMediaDice). The server picks a random "
+				"value; the emoji controls which animation plays.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (from list_chats)"}
+					}},
+					{"emoticon", QJsonObject{
+						{"type", "string"},
+						{"description", "Dice emoji: dice(default), dart, basketball, football, bowling, slot"}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id"}},
+			}
+		},
+		Tool{
+			"send_photo",
+			"Send a local image file to a chat as a compressed, viewable PHOTO "
+				"(inline preview) — not a document attachment. Same upload path as "
+				"send_document but the client renders it as a photo. Async: success "
+				"means queued, not delivered.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (Saved Messages = your own user id)"}
+					}},
+					{"file_path", QJsonObject{
+						{"type", "string"},
+						{"description", "Absolute path to an existing local image (jpg/png)"}
+					}},
+					{"caption", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional caption (plain, or the source parsed by parse_mode)"}
+					}},
+					{"parse_mode", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional 'markdown' for the caption; ignored when 'entities' is given."}
+					}},
+					{"entities", QJsonObject{
+						{"type", "array"},
+						{"description", "Optional precise caption formatting (wins over parse_mode)."}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}},
+					{"schedule_date", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: unix timestamp to send the photo later"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "file_path"}},
+			}
+		},
+		Tool{
+			"send_gif",
+			"Send a local .gif or short .mp4 to a chat as a looping ANIMATION "
+				"(silent, autoplay). Uses the natural-media path; the client renders "
+				"it as a gif rather than a plain video. Async: success means queued.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (Saved Messages = your own user id)"}
+					}},
+					{"file_path", QJsonObject{
+						{"type", "string"},
+						{"description", "Absolute path to an existing local .gif or short .mp4"}
+					}},
+					{"caption", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional caption (plain, or the source parsed by parse_mode)"}
+					}},
+					{"parse_mode", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional 'markdown' for the caption; ignored when 'entities' is given."}
+					}},
+					{"entities", QJsonObject{
+						{"type", "array"},
+						{"description", "Optional precise caption formatting (wins over parse_mode)."}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}},
+					{"schedule_date", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: unix timestamp to send the gif later"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "file_path"}},
+			}
+		},
+		Tool{
+			"send_audio",
+			"Send a local audio file to a chat as a playable MUSIC message — the "
+				"client derives duration/performer/title and plays it inline, not a "
+				"bare downloadable file. Async: success means queued.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (Saved Messages = your own user id)"}
+					}},
+					{"file_path", QJsonObject{
+						{"type", "string"},
+						{"description", "Absolute path to an existing local audio file (mp3/m4a/flac)"}
+					}},
+					{"caption", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional caption (plain, or the source parsed by parse_mode)"}
+					}},
+					{"parse_mode", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional 'markdown' for the caption; ignored when 'entities' is given."}
+					}},
+					{"entities", QJsonObject{
+						{"type", "array"},
+						{"description", "Optional precise caption formatting (wins over parse_mode)."}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}},
+					{"schedule_date", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: unix timestamp to send the audio later"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "file_path"}},
+			}
+		},
+		Tool{
+			"send_poll",
+			"Create a poll or quiz in a chat via messages.sendMedia(inputMediaPoll). "
+				"Give a question and 2+ options; set multiple_choice for multi-select, "
+				"or quiz + correct_option (0-based) for a quiz with a single right "
+				"answer. Async: success means queued.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (from list_chats)"}
+					}},
+					{"question", QJsonObject{
+						{"type", "string"},
+						{"description", "The poll question"}
+					}},
+					{"options", QJsonObject{
+						{"type", "array"},
+						{"items", QJsonObject{{"type", "string"}}},
+						{"description", "Answer options (2-10 strings)"}
+					}},
+					{"multiple_choice", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: allow selecting more than one answer"}
+					}},
+					{"quiz", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: quiz mode (needs correct_option)"}
+					}},
+					{"correct_option", QJsonObject{
+						{"type", "integer"},
+						{"description", "Quiz only: 0-based index of the correct answer"}
+					}},
+					{"public_voters", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: make individual votes visible"}
+					}},
+					{"close_period", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: seconds until the poll auto-closes (5-600)"}
+					}},
+					{"solution", QJsonObject{
+						{"type", "string"},
+						{"description", "Quiz only: explanation shown after answering"}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "question", "options"}},
+			}
+		},
+		Tool{
+			"vote_poll",
+			"Vote on an existing poll via messages.sendVote. Pass 0-based answer "
+				"indices (one for a single-choice poll, several for multiple-choice); "
+				"the poll message must be loaded (open the chat or read its history "
+				"first). Sending an empty selection retracts a prior vote.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID holding the poll (from list_chats)"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Message ID of the poll"}
+					}},
+					{"option_indices", QJsonObject{
+						{"type", "array"},
+						{"items", QJsonObject{{"type", "integer"}}},
+						{"description", "0-based answer indices to vote for"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id", "option_indices"}},
+			}
+		},
+		Tool{
+			"get_poll_results",
+			"Refresh and read a poll's current tallies via messages.getPollResults: "
+				"total voters and, per answer, its text, vote count, and whether you "
+				"chose it / it is the correct one. The poll message must be loaded.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID holding the poll (from list_chats)"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Message ID of the poll"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id"}},
+			}
+		},
+		Tool{
+			"mute_chat",
+			"Mute or unmute a chat via account.updateNotifySettings. mute=true "
+				"(default) silences it indefinitely; mute=false unmutes; pass "
+				"mute_until (unix seconds) to mute until a specific time.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID to mute/unmute (from list_chats)"}
+					}},
+					{"mute", QJsonObject{
+						{"type", "boolean"},
+						{"description", "true to mute (default), false to unmute"}
+					}},
+					{"mute_until", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional unix timestamp to mute until (overrides mute)"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id"}},
+			}
+		},
+		Tool{
+			"get_chat_notify_settings",
+			"Read a chat's notification settings via account.getNotifySettings: "
+				"its mute_until, whether it is currently muted, and the silent / "
+				"show_previews flags when set.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (from list_chats)"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id"}},
+			}
+		},
+		Tool{
+			"save_draft",
+			"Save an unsent text draft in a chat via messages.saveDraft (syncs to "
+				"the cloud so it appears in the compose box). Pass an empty text to "
+				"clear that chat's draft. Optionally stage it as a reply.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID to draft in (from list_chats)"}
+					}},
+					{"text", QJsonObject{
+						{"type", "string"},
+						{"description", "Draft text (empty string clears the draft)"}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: draft as a reply to this message id"}
+					}},
+					{"no_webpage", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: disable the link preview for the draft"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "text"}},
+			}
+		},
+		Tool{
+			"clear_all_drafts",
+			"Delete every cloud draft across all chats via "
+				"messages.clearAllDrafts. Irreversible.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{}},
+			}
+		},
+		Tool{
+			"get_contacts",
+			"List the account's saved contacts via contacts.getContacts: each "
+				"contact's user_id, whether it is mutual, and the display name.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{}},
+			}
+		},
+		Tool{
+			"add_contact",
+			"Add an already-known user to the saved contacts via "
+				"contacts.addContact. The user must be loaded (open it once or "
+				"resolve_username/resolve_phone first). Set a first/last name.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"user_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "User ID to add (from list_chats/resolve_*)"}
+					}},
+					{"first_name", QJsonObject{
+						{"type", "string"},
+						{"description", "Contact first name (required)"}
+					}},
+					{"last_name", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional contact last name"}
+					}},
+					{"phone", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional phone to associate with the contact"}
+					}},
+					{"share_phone", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: allow the user to see your phone number"}
+					}}
+				}},
+				{"required", QJsonArray{"user_id", "first_name"}},
+			}
+		},
+		Tool{
+			"delete_contact",
+			"Remove a user from the saved contacts via contacts.deleteContacts. "
+				"The user must be loaded (open it once or resolve it first).",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"user_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "User ID to remove from contacts"}
+					}}
+				}},
+				{"required", QJsonArray{"user_id"}},
+			}
+		},
+		Tool{
+			"import_contacts",
+			"Add a contact by phone number via contacts.importContacts. Resolves "
+				"to a Telegram user if the number is registered and reachable under "
+				"the target's privacy settings; returns the imported user id(s).",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"phone", QJsonObject{
+						{"type", "string"},
+						{"description", "Phone number, digits only (e.g. 15551234567)"}
+					}},
+					{"first_name", QJsonObject{
+						{"type", "string"},
+						{"description", "Contact first name (required)"}
+					}},
+					{"last_name", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional contact last name"}
+					}}
+				}},
+				{"required", QJsonArray{"phone", "first_name"}},
+			}
+		},
+		Tool{
+			"get_discussion_message",
+			"Resolve a channel post to its linked comment thread via "
+				"messages.getDiscussionMessage: returns the discussion group's peer "
+				"id and the thread's top message id, so you can then read or reply "
+				"to the comments there.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Channel ID holding the post (from list_chats)"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "The channel post's message id"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id"}},
+			}
+		},
+		Tool{
+			"get_message_read_participants",
+			"List who has read a message via messages.getMessageReadParticipants "
+				"(available in small groups / channels with read receipts): each "
+				"reader's user_id and the time they read it.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID (from list_chats)"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Message ID to check read receipts for"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id"}},
+			}
+		},
+		Tool{
+			"ban_chat_member",
+			"Kick/ban a member from a channel or supergroup via "
+				"channels.editBanned (view_messages fully restricted, permanent). "
+				"chat_id must be a channel/supergroup; the user must be loaded.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Channel/supergroup ID (from list_chats)"}
+					}},
+					{"user_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "User ID to ban (open it once or resolve it first)"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "user_id"}},
+			}
+		},
+		Tool{
+			"unban_chat_member",
+			"Lift a member's ban/restrictions in a channel or supergroup via "
+				"channels.editBanned with empty rights. chat_id must be a "
+				"channel/supergroup; the user must be loaded.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Channel/supergroup ID (from list_chats)"}
+					}},
+					{"user_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "User ID to unban (open it once or resolve it first)"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "user_id"}},
+			}
+		},
+		Tool{
+			"send_bot_start",
+			"Send /start to a bot via messages.startBot, optionally in a group and "
+				"with a start parameter (deep-link payload). The bot must be loaded "
+				"(open it once or resolve it first).",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"bot_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "The bot's user id (from list_chats/resolve_username)"}
+					}},
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional group to start the bot in (default: the bot DM)"}
+					}},
+					{"start_param", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional deep-link start parameter"}
+					}}
+				}},
+				{"required", QJsonArray{"bot_id"}},
+			}
+		},
+		Tool{
+			"get_bot_callback_answer",
+			"Press an inline-keyboard button via messages.getBotCallbackAnswer. "
+				"Pass the button's callback payload as base64 `data` (the "
+				"keyboardButtonCallback bytes). Returns the bot's answer text / "
+				"alert flag / url.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID holding the message (from list_chats)"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Message ID carrying the inline keyboard"}
+					}},
+					{"data", QJsonObject{
+						{"type", "string"},
+						{"description", "Base64 of the button's callback data bytes"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id", "data"}},
+			}
+		},
+		Tool{
+			"get_inline_bot_results",
+			"Query an inline bot (e.g. @gif cat) via messages.getInlineBotResults. "
+				"Returns a query_id and each result's id + type; feed one to "
+				"send_inline_bot_result to post it. The bot must be loaded.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"bot_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "The inline bot's user id (open it once or resolve it)"}
+					}},
+					{"query", QJsonObject{
+						{"type", "string"},
+						{"description", "The inline query text (may be empty)"}
+					}},
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional context chat for the query (default: the bot DM)"}
+					}},
+					{"offset", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional paging offset (from a prior next_offset)"}
+					}}
+				}},
+				{"required", QJsonArray{"bot_id", "query"}},
+			}
+		},
+		Tool{
+			"send_inline_bot_result",
+			"Post a chosen inline-bot result into a chat via "
+				"messages.sendInlineBotResult. Use the query_id and result_id from "
+				"get_inline_bot_results.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID to post into (from list_chats)"}
+					}},
+					{"query_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "query_id from get_inline_bot_results"}
+					}},
+					{"result_id", QJsonObject{
+						{"type", "string"},
+						{"description", "The chosen result's id from get_inline_bot_results"}
+					}},
+					{"reply_to_message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Optional: reply to this message id"}
+					}},
+					{"silent", QJsonObject{
+						{"type", "boolean"},
+						{"description", "Optional: send without a notification"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "query_id", "result_id"}},
 			}
 		},
 		Tool{
