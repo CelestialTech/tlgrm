@@ -20,7 +20,7 @@ Two failures this kills: (1) mashing Service + Job + Item counts into one "STATE
 - **Purpose:** the one socket that exposes every tool to agents/clients.
 - **Use cases:** UC1 is it up & who's connected? · UC2 browse what it can do · UC3 try a tool.
 - **Entities:** Service (endpoint on/off) · Store (the 362-tool catalog → domain tree) · Job (live request stream) · connected clients.
-- **UI:** endpoint health + clients/throughput (top) · the tool **tree** (14 domains → 58 subdomains → 362 tools, searchable, count badges) · invoke a selected tool.
+- **UI:** endpoint health + clients/throughput (top) · the tool **tree** (14 domains → 58 subdomains → 396 tools, searchable, count badges) · invoke a selected tool.
 
 ### Export — a chat → disk (headless gradual engine)
 - **Purpose:** save one specific chat's full history to disk, without the client's export window.

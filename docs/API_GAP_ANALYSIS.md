@@ -3,7 +3,8 @@
 **Method (2026-09-04):** a leashed swarm of 7 domain workers enumerated the TL
 layer-229 method namespaces (messages 259, account 128, payments 65, channels 58,
 phone 43, bots 38, stories 33, contacts 28, …) and cross-referenced the **365 live
-MCP tools**, then an adversarial pass live-verified every claim against the bridge
+MCP tools** (now **396** after the pass recorded above), then an adversarial pass
+live-verified every claim against the bridge
 + source. 87 raw findings → the deduped, re-ranked map below.
 
 **Adversarial verification:** every claimed-missing family confirms **0 matching
@@ -16,6 +17,33 @@ Correctly-covered areas (NOT gaps): `set_admin_rights`=editAdmin,
 `transfer_group_ownership`=editCreator, setPrivacy, updateProfile, sessions,
 reactions, forward/pin/schedule/translate/folders, and the whole star-gift /
 subscription / auction / gift-marketplace tool set.
+
+## Implementation status (2026-09-05) — 31 tools shipped, 365 → 396
+
+The Tier-1 surface below (plus Tier-2 moderation) has now been built and
+verified. Live smoke test against the running client: all 31 advertise, reads
+return real data (9 stories, 745 contacts), sends post to Saved Messages, poll
+create + draft round-trip succeed, and every validation guard fires.
+
+| Family | Tools added |
+|---|---|
+| **High-value reads** | `get_full_user`, `resolve_phone`, `get_message_views`, `get_peer_stories`, `get_all_stories` |
+| **Input-media sends** | `send_location`, `send_venue`, `send_contact`, `send_dice` (shared `sendInputMedia` core) |
+| **File-media sends** | `send_photo`, `send_gif`, `send_audio` (shared `sendPreparedFile` core) |
+| **Polls** | `send_poll`, `vote_poll`, `get_poll_results` |
+| **Notifications + drafts** | `mute_chat`, `get_chat_notify_settings`, `save_draft`, `clear_all_drafts` |
+| **Contacts** | `get_contacts`, `add_contact`, `delete_contact`, `import_contacts` |
+| **Message intel** | `get_discussion_message` (comment-thread enabler), `get_message_read_participants` |
+| **Moderation** | `ban_chat_member`, `unban_chat_member` (channels.editBanned) |
+| **Drive other bots** | `send_bot_start` (messages.startBot; named to avoid the local `start_bot`), `get_bot_callback_answer`, `get_inline_bot_results`, `send_inline_bot_result` |
+
+**Consciously deferred** (documented, not forgotten): 1:1 calls + group/video
+chats (webrtc subsystem, low automation ROI); fiat payment forms (card entry
+via MCP is a safety concern); `send_sticker` (needs documentAttributeSticker
+forcing / an InputDocument the bridge can't resolve from a path — a distinct
+upload subsystem); `get_replies` full comment parse (get_discussion_message +
+existing history tools cover the enabler); `get_message_reactions_list`,
+invite-link management, forum-topic writes, boosts (Tier-2 remainder).
 
 ## Tier 1 — high value + EASY (plain MTP reads/sends; build these next)
 
