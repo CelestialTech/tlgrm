@@ -207,6 +207,10 @@ private:
 	QJsonObject toolGetPollVotes(const QJsonObject &args);
 	QJsonObject toolMarkDialogUnread(const QJsonObject &args);
 	QJsonObject toolToggleDialogPin(const QJsonObject &args);
+	// Batch 3 gap-closing (layer 229): message-intel reads.
+	QJsonObject toolGetMessageReactionsList(const QJsonObject &args);
+	QJsonObject toolGetUnreadMentions(const QJsonObject &args);
+	QJsonObject toolGetUnreadReactions(const QJsonObject &args);
 	QJsonObject toolSendRichMessage(const QJsonObject &args);
 	QJsonObject toolSearchMessages(const QJsonObject &args);
 	QJsonObject toolGetUserInfo(const QJsonObject &args);

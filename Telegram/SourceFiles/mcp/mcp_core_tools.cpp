@@ -2067,6 +2067,165 @@ QJsonObject Server::toolToggleDialogPin(const QJsonObject &args) {
 	});
 }
 
+// ===== Batch 3 gap-closing (layer 229): message-intel reads =====
+
+// messages.getMessageReactionsList — who reacted to a message, and with what.
+// No reaction filter -> every reactor; pages via offset/next_offset.
+QJsonObject Server::toolGetMessageReactionsList(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto msgId = int(args["message_id"].toVariant().toLongLong());
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	const auto limit = args.contains("limit")
+		? int(args.value("limit").toVariant().toLongLong())
+		: 50;
+	const auto offset = args.value("offset").toString();
+	using Flag = MTPmessages_getMessageReactionsList::Flag;
+	const auto flags = Flag(0) | (offset.isEmpty() ? Flag(0) : Flag::f_offset);
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetMessageReactionsList(
+			MTP_flags(flags),
+			peer->input(),
+			MTP_int(msgId),
+			MTPReaction(), // reaction: omitted -> all reactions
+			offset.isEmpty() ? MTPstring() : MTP_string(offset),
+			MTP_int(limit)
+		)).done([=](const MTPmessages_MessageReactionsList &result) {
+			result.match([&](const MTPDmessages_messageReactionsList &d) {
+				_session->data().processUsers(d.vusers());
+				_session->data().processChats(d.vchats());
+				QJsonArray arr;
+				for (const auto &r : d.vreactions().v) {
+					r.match([&](const MTPDmessagePeerReaction &pr) {
+						QJsonObject o{
+							{"peer_id", qint64(peerFromMTP(pr.vpeer_id()).value)},
+							{"date", qint64(pr.vdate().v)},
+						};
+						pr.vreaction().match([&](const MTPDreactionEmoji &e) {
+							o["reaction"] = QString::fromUtf8(e.vemoticon().v);
+						}, [&](const MTPDreactionCustomEmoji &e) {
+							o["custom_emoji_id"] = qint64(e.vdocument_id().v);
+						}, [&](const MTPDreactionPaid &) {
+							o["paid"] = true;
+						}, [&](const MTPDreactionEmpty &) {});
+						arr.append(o);
+					});
+				}
+				QJsonObject o{
+					{"success", true},
+					{"chat_id", chatId},
+					{"message_id", qint64(msgId)},
+					{"count", d.vcount().v},
+					{"reactions", arr},
+				};
+				const auto next = d.vnext_offset().value_or_empty();
+				if (!next.isEmpty()) o["next_offset"] = QString::fromUtf8(next);
+				done(o);
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// Shared: a messages.Messages payload (from get_unread_*) -> id+date list + count.
+static QJsonObject UnreadMessagesJson(
+		Main::Session *session,
+		const MTPmessages_Messages &result,
+		qint64 chatId) {
+	QJsonArray arr;
+	auto count = 0;
+	const auto collect = [&](
+			const QVector<MTPMessage> &msgs,
+			const MTPVector<MTPUser> &users,
+			const MTPVector<MTPChat> &chats) {
+		session->data().processUsers(users);
+		session->data().processChats(chats);
+		for (const auto &m : msgs) {
+			m.match([&](const MTPDmessage &d) {
+				arr.append(QJsonObject{
+					{"id", qint64(d.vid().v)}, {"date", qint64(d.vdate().v)}});
+			}, [&](const MTPDmessageService &d) {
+				arr.append(QJsonObject{
+					{"id", qint64(d.vid().v)}, {"date", qint64(d.vdate().v)},
+					{"service", true}});
+			}, [&](const MTPDmessageEmpty &) {});
+		}
+	};
+	result.match([&](const MTPDmessages_messages &d) {
+		collect(d.vmessages().v, d.vusers(), d.vchats());
+		count = int(arr.size());
+	}, [&](const MTPDmessages_messagesSlice &d) {
+		collect(d.vmessages().v, d.vusers(), d.vchats());
+		count = d.vcount().v;
+	}, [&](const MTPDmessages_channelMessages &d) {
+		collect(d.vmessages().v, d.vusers(), d.vchats());
+		count = d.vcount().v;
+	}, [&](const MTPDmessages_messagesNotModified &d) {
+		count = d.vcount().v;
+	});
+	return QJsonObject{
+		{"success", true},
+		{"chat_id", chatId},
+		{"count", count},
+		{"messages", arr},
+	};
+}
+
+// messages.getUnreadMentions — unread @mentions in a chat (message ids + dates).
+QJsonObject Server::toolGetUnreadMentions(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	const auto limit = args.contains("limit")
+		? int(args.value("limit").toVariant().toLongLong())
+		: 50;
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetUnreadMentions(
+			MTP_flags(0),    // no top_msg_id
+			peer->input(),
+			MTPint(),        // top_msg_id (omitted)
+			MTP_int(0),      // offset_id
+			MTP_int(0),      // add_offset
+			MTP_int(limit),
+			MTP_int(0),      // max_id
+			MTP_int(0)       // min_id
+		)).done([=](const MTPmessages_Messages &result) {
+			auto o = UnreadMessagesJson(_session, result, chatId);
+			o["kind"] = "mentions";
+			done(o);
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// messages.getUnreadReactions — unread reactions in a chat (message ids + dates).
+QJsonObject Server::toolGetUnreadReactions(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	const auto limit = args.contains("limit")
+		? int(args.value("limit").toVariant().toLongLong())
+		: 50;
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetUnreadReactions(
+			MTP_flags(0),      // no top_msg_id
+			peer->input(),
+			MTPint(),          // top_msg_id (omitted)
+			MTPInputPeer(),    // saved_peer_id (omitted)
+			MTP_int(0),        // offset_id
+			MTP_int(0),        // add_offset
+			MTP_int(limit),
+			MTP_int(0),        // max_id
+			MTP_int(0)         // min_id
+		)).done([=](const MTPmessages_Messages &result) {
+			auto o = UnreadMessagesJson(_session, result, chatId);
+			o["kind"] = "reactions";
+			done(o);
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
 // ===== NOTIFICATIONS + DRAFTS =====
 // account.updateNotifySettings — mute or unmute a chat. mute=true sets a
 // far-future mute_until (effectively forever); mute=false clears it; an explicit

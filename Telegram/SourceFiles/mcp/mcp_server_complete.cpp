@@ -1508,6 +1508,9 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["get_poll_votes"] = [this](const QJsonObject &args) { return toolGetPollVotes(args); };
 	_toolHandlers["mark_dialog_unread"] = [this](const QJsonObject &args) { return toolMarkDialogUnread(args); };
 	_toolHandlers["toggle_dialog_pin"] = [this](const QJsonObject &args) { return toolToggleDialogPin(args); };
+	_toolHandlers["get_message_reactions_list"] = [this](const QJsonObject &args) { return toolGetMessageReactionsList(args); };
+	_toolHandlers["get_unread_mentions"] = [this](const QJsonObject &args) { return toolGetUnreadMentions(args); };
+	_toolHandlers["get_unread_reactions"] = [this](const QJsonObject &args) { return toolGetUnreadReactions(args); };
 	_toolHandlers["send_rich_message"] = [this](const QJsonObject &args) { return toolSendRichMessage(args); };
 	_toolHandlers["search_messages"] = [this](const QJsonObject &args) { return toolSearchMessages(args); };
 	_toolHandlers["get_user_info"] = [this](const QJsonObject &args) { return toolGetUserInfo(args); };

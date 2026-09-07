@@ -1183,6 +1183,71 @@ void Server::registerTools() {
 			}
 		},
 		Tool{
+			"get_message_reactions_list",
+			"List who reacted to a message and with which reaction via "
+				"messages.getMessageReactionsList (all reactions; page with offset).",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID holding the message (from list_chats)"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Message ID to read reactors for"}
+					}},
+					{"limit", QJsonObject{
+						{"type", "integer"},
+						{"description", "Max reactors to return (default 50)"}
+					}},
+					{"offset", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional paging offset (from a prior next_offset)"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id"}},
+			}
+		},
+		Tool{
+			"get_unread_mentions",
+			"List unread @mentions in a chat (message ids + dates) via "
+				"messages.getUnreadMentions.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID to scan (from list_chats)"}
+					}},
+					{"limit", QJsonObject{
+						{"type", "integer"},
+						{"description", "Max messages to return (default 50)"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id"}},
+			}
+		},
+		Tool{
+			"get_unread_reactions",
+			"List messages with unread reactions in a chat (ids + dates) via "
+				"messages.getUnreadReactions.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID to scan (from list_chats)"}
+					}},
+					{"limit", QJsonObject{
+						{"type", "integer"},
+						{"description", "Max messages to return (default 50)"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id"}},
+			}
+		},
+		Tool{
 			"send_rich_message",
 			"Send a structured rich-article message (Instant-View-style "
 				"blocks) to a chat, built and serialized through the client's "
