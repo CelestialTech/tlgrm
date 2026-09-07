@@ -45,22 +45,28 @@ upload subsystem); `get_replies` full comment parse (get_discussion_message +
 existing history tools cover the enabler); `get_message_reactions_list`,
 invite-link management, forum-topic writes, boosts (Tier-2 remainder).
 
-## Implementation status update (2026-09-07) — 5 more shipped, 396 → 401
+## Implementation status update (2026-09-07) — 8 more shipped, 396 → 404
 
-A second plain-MTP batch closed the dialog/voter/photo remainder. Adversarial
-review clean; live-verified against the running client (get_user_photos returned
-2 real photos; a send→vote→get_poll_votes cycle read back count=1 with a real
-next_offset; dialog writes applied and reverted; export gate idle).
+Two more plain-MTP batches. Adversarial review clean on both; live-verified
+against the running client.
 
-| Family | Tools added |
-|---|---|
-| **Dialogs** | `get_pinned_dialogs` (peers + fork `dialogCommunity` ids), `mark_dialog_unread`, `toggle_dialog_pin` |
-| **Reads** | `get_user_photos` (photos.getUserPhotos), `get_poll_votes` (messages.getPollVotes — voter list + paging) |
+| Batch | Family | Tools added |
+|---|---|---|
+| **2** | Dialogs | `get_pinned_dialogs` (peers + fork `dialogCommunity` ids), `mark_dialog_unread`, `toggle_dialog_pin` |
+| **2** | Reads | `get_user_photos` (photos.getUserPhotos), `get_poll_votes` (messages.getPollVotes) |
+| **3** | Message intel | `get_message_reactions_list` (reactors + emoji), `get_unread_mentions`, `get_unread_reactions` |
 
-**Still deferred** (unchanged, plus): checklist/todo writes (`append_todo_list`,
-`toggle_todo_completed` — the one true layer-229 novelty), `get_message_reactions_list`,
-`get_unread_mentions`/`get_unread_reactions`, and all Tier-2 moderation/security
-(invite links, join-request approval, boosts, 2FA reads, gift-code redeem).
+Batch-2 evidence: get_user_photos → 2 real photos; send→vote→get_poll_votes →
+count=1 + real next_offset; dialog writes applied and reverted. Batch-3 evidence:
+get_message_reactions_list read back count=2 with real reactors + emojis on a
+group message; unread reads returned success; server-perm errors correctly
+surfaced (MSG_ID_INVALID self-chat, BROADCAST_FORBIDDEN non-admin channel).
+
+**Still deferred:** checklist/todo writes (`append_todo_list`,
+`toggle_todo_completed` — the one true layer-229 novelty; creating a checklist
+needs a `send_checklist`/inputMediaTodo path and likely Premium), and all Tier-2
+moderation/security (invite links, join-request approval, config toggles, server
+admin-log, boosts, 2FA reads, gift-code redeem, dialog get-others).
 
 ## Tier 1 — high value + EASY (plain MTP reads/sends; build these next)
 
