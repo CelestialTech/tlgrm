@@ -45,6 +45,23 @@ upload subsystem); `get_replies` full comment parse (get_discussion_message +
 existing history tools cover the enabler); `get_message_reactions_list`,
 invite-link management, forum-topic writes, boosts (Tier-2 remainder).
 
+## Implementation status update (2026-09-07) — 5 more shipped, 396 → 401
+
+A second plain-MTP batch closed the dialog/voter/photo remainder. Adversarial
+review clean; live-verified against the running client (get_user_photos returned
+2 real photos; a send→vote→get_poll_votes cycle read back count=1 with a real
+next_offset; dialog writes applied and reverted; export gate idle).
+
+| Family | Tools added |
+|---|---|
+| **Dialogs** | `get_pinned_dialogs` (peers + fork `dialogCommunity` ids), `mark_dialog_unread`, `toggle_dialog_pin` |
+| **Reads** | `get_user_photos` (photos.getUserPhotos), `get_poll_votes` (messages.getPollVotes — voter list + paging) |
+
+**Still deferred** (unchanged, plus): checklist/todo writes (`append_todo_list`,
+`toggle_todo_completed` — the one true layer-229 novelty), `get_message_reactions_list`,
+`get_unread_mentions`/`get_unread_reactions`, and all Tier-2 moderation/security
+(invite links, join-request approval, boosts, 2FA reads, gift-code redeem).
+
 ## Tier 1 — high value + EASY (plain MTP reads/sends; build these next)
 
 These mirror patterns the bridge already has (e.g. `send_video` = PrepareMediaList +
