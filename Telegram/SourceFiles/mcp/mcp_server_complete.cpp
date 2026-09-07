@@ -1503,6 +1503,11 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["get_bot_callback_answer"] = [this](const QJsonObject &args) { return toolGetBotCallbackAnswer(args); };
 	_toolHandlers["get_inline_bot_results"] = [this](const QJsonObject &args) { return toolGetInlineBotResults(args); };
 	_toolHandlers["send_inline_bot_result"] = [this](const QJsonObject &args) { return toolSendInlineBotResult(args); };
+	_toolHandlers["get_pinned_dialogs"] = [this](const QJsonObject &args) { return toolGetPinnedDialogs(args); };
+	_toolHandlers["get_user_photos"] = [this](const QJsonObject &args) { return toolGetUserPhotos(args); };
+	_toolHandlers["get_poll_votes"] = [this](const QJsonObject &args) { return toolGetPollVotes(args); };
+	_toolHandlers["mark_dialog_unread"] = [this](const QJsonObject &args) { return toolMarkDialogUnread(args); };
+	_toolHandlers["toggle_dialog_pin"] = [this](const QJsonObject &args) { return toolToggleDialogPin(args); };
 	_toolHandlers["send_rich_message"] = [this](const QJsonObject &args) { return toolSendRichMessage(args); };
 	_toolHandlers["search_messages"] = [this](const QJsonObject &args) { return toolSearchMessages(args); };
 	_toolHandlers["get_user_info"] = [this](const QJsonObject &args) { return toolGetUserInfo(args); };

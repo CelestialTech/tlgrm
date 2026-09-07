@@ -1876,6 +1876,197 @@ QJsonObject Server::toolGetPollResults(const QJsonObject &args) {
 	});
 }
 
+// ===== Batch 2 gap-closing (layer 229): dialog + voter + photo surface =====
+
+// messages.getPinnedDialogs — the peer ids currently pinned in a folder.
+QJsonObject Server::toolGetPinnedDialogs(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto folderId = int(args.value("folder_id").toVariant().toLongLong());
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetPinnedDialogs(
+			MTP_int(folderId)
+		)).done([=](const MTPmessages_PeerDialogs &result) {
+			result.match([&](const MTPDmessages_peerDialogs &d) {
+				_session->data().processUsers(d.vusers());
+				_session->data().processChats(d.vchats());
+				QJsonArray peers, communities;
+				for (const auto &dlg : d.vdialogs().v) {
+					dlg.match([&](const MTPDdialog &dd) {
+						peers.append(qint64(peerFromMTP(dd.vpeer()).value));
+					}, [&](const MTPDdialogCommunity &dc) {
+						communities.append(qint64(dc.vcommunity_id().v));
+					}, [&](const MTPDdialogFolder &) {});
+				}
+				done(QJsonObject{
+					{"success", true},
+					{"folder_id", folderId},
+					{"count", int(peers.size())},
+					{"pinned_peers", peers},
+					{"pinned_communities", communities},
+				});
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// photos.getUserPhotos — a user's profile-photo history (ids + dates).
+QJsonObject Server::toolGetUserPhotos(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto userId = args["user_id"].toVariant().toLongLong();
+	auto peer = resolvePeer(userId);
+	const auto user = peer ? peer->asUser() : nullptr;
+	if (!user) return toolError(QString("User %1 not loaded; open it once or use list_chats").arg(userId));
+	const auto offset = int(args.value("offset").toVariant().toLongLong());
+	const auto maxId = args.value("max_id").toVariant().toLongLong();
+	const auto limit = args.contains("limit")
+		? int(args.value("limit").toVariant().toLongLong())
+		: 20;
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPphotos_GetUserPhotos(
+			user->inputUser(),
+			MTP_int(offset),
+			MTP_long(maxId),
+			MTP_int(limit)
+		)).done([=](const MTPphotos_Photos &result) {
+			QJsonArray arr;
+			auto total = 0;
+			const auto collect = [&](const QVector<MTPPhoto> &photos) {
+				for (const auto &p : photos) {
+					p.match([&](const MTPDphoto &ph) {
+						arr.append(QJsonObject{
+							{"id", qint64(ph.vid().v)},
+							{"date", qint64(ph.vdate().v)},
+						});
+					}, [&](const MTPDphotoEmpty &ph) {
+						arr.append(QJsonObject{{"id", qint64(ph.vid().v)}, {"empty", true}});
+					});
+				}
+			};
+			result.match([&](const MTPDphotos_photos &d) {
+				_session->data().processUsers(d.vusers());
+				collect(d.vphotos().v);
+				total = int(arr.size());
+			}, [&](const MTPDphotos_photosSlice &d) {
+				_session->data().processUsers(d.vusers());
+				collect(d.vphotos().v);
+				total = d.vcount().v;
+			});
+			done(QJsonObject{
+				{"success", true},
+				{"user_id", userId},
+				{"total", total},
+				{"count", int(arr.size())},
+				{"photos", arr},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// messages.getPollVotes — who voted on a poll (voter peer ids + dates). Reads
+// all voters (no per-option filter); pages via offset/next_offset.
+QJsonObject Server::toolGetPollVotes(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto msgId = int(args["message_id"].toVariant().toLongLong());
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	const auto limit = args.contains("limit")
+		? int(args.value("limit").toVariant().toLongLong())
+		: 50;
+	const auto offset = args.value("offset").toString();
+	using Flag = MTPmessages_getPollVotes::Flag;
+	const auto flags = Flag(0) | (offset.isEmpty() ? Flag(0) : Flag::f_offset);
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetPollVotes(
+			MTP_flags(flags),
+			peer->input(),
+			MTP_int(msgId),
+			MTPbytes(), // option: omitted -> every voter
+			offset.isEmpty() ? MTPstring() : MTP_string(offset),
+			MTP_int(limit)
+		)).done([=](const MTPmessages_VotesList &result) {
+			result.match([&](const MTPDmessages_votesList &d) {
+				_session->data().processUsers(d.vusers());
+				_session->data().processChats(d.vchats());
+				QJsonArray arr;
+				const auto add = [&](PeerId pid, int date) {
+					arr.append(QJsonObject{
+						{"peer_id", qint64(pid.value)},
+						{"date", qint64(date)},
+					});
+				};
+				for (const auto &vote : d.vvotes().v) {
+					vote.match([&](const MTPDmessagePeerVote &v) {
+						add(peerFromMTP(v.vpeer()), v.vdate().v);
+					}, [&](const MTPDmessagePeerVoteInputOption &v) {
+						add(peerFromMTP(v.vpeer()), v.vdate().v);
+					}, [&](const MTPDmessagePeerVoteMultiple &v) {
+						add(peerFromMTP(v.vpeer()), v.vdate().v);
+					});
+				}
+				QJsonObject o{
+					{"success", true},
+					{"chat_id", chatId},
+					{"message_id", qint64(msgId)},
+					{"count", d.vcount().v},
+					{"votes", arr},
+				};
+				const auto next = d.vnext_offset().value_or_empty();
+				if (!next.isEmpty()) o["next_offset"] = QString::fromUtf8(next);
+				done(o);
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// messages.markDialogUnread — flag a chat as unread (or clear it). unread
+// defaults to true.
+QJsonObject Server::toolMarkDialogUnread(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	const auto unread = args.value("unread").toBool(true);
+	using Flag = MTPmessages_markDialogUnread::Flag;
+	const auto flags = Flag(0) | (unread ? Flag::f_unread : Flag(0));
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_MarkDialogUnread(
+			MTP_flags(flags),
+			MTPInputPeer(), // parent_peer: omitted
+			MTP_inputDialogPeer(peer->input())
+		)).done([=](const MTPBool &result) {
+			done(QJsonObject{
+				{"success", true},
+				{"chat_id", chatId},
+				{"unread", unread},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
+// messages.toggleDialogPin — pin (default) or unpin a chat in the dialog list.
+QJsonObject Server::toolToggleDialogPin(const QJsonObject &args) {
+	if (!_session) return toolError("No active session");
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) return toolError("Chat not found");
+	const auto pinned = args.value("pinned").toBool(true);
+	using Flag = MTPmessages_toggleDialogPin::Flag;
+	const auto flags = Flag(0) | (pinned ? Flag::f_pinned : Flag(0));
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_ToggleDialogPin(
+			MTP_flags(flags),
+			MTP_inputDialogPeer(peer->input())
+		)).done([=](const MTPBool &result) {
+			done(QJsonObject{
+				{"success", true},
+				{"chat_id", chatId},
+				{"pinned", pinned},
+			});
+		}).fail([=](const MTP::Error &error) { fail(error.type()); }).send();
+	});
+}
+
 // ===== NOTIFICATIONS + DRAFTS =====
 // account.updateNotifySettings — mute or unmute a chat. mute=true sets a
 // far-future mute_until (effectively forever); mute=false clears it; an explicit

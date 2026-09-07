@@ -201,6 +201,12 @@ private:
 	QJsonObject toolGetBotCallbackAnswer(const QJsonObject &args);
 	QJsonObject toolGetInlineBotResults(const QJsonObject &args);
 	QJsonObject toolSendInlineBotResult(const QJsonObject &args);
+	// Batch 2 gap-closing (layer 229): dialog + poll-voter + user-photo surface.
+	QJsonObject toolGetPinnedDialogs(const QJsonObject &args);
+	QJsonObject toolGetUserPhotos(const QJsonObject &args);
+	QJsonObject toolGetPollVotes(const QJsonObject &args);
+	QJsonObject toolMarkDialogUnread(const QJsonObject &args);
+	QJsonObject toolToggleDialogPin(const QJsonObject &args);
 	QJsonObject toolSendRichMessage(const QJsonObject &args);
 	QJsonObject toolSearchMessages(const QJsonObject &args);
 	QJsonObject toolGetUserInfo(const QJsonObject &args);

@@ -1075,6 +1075,114 @@ void Server::registerTools() {
 			}
 		},
 		Tool{
+			"get_pinned_dialogs",
+			"List the peer ids currently pinned in the dialog list via "
+				"messages.getPinnedDialogs (folder 0 = main list, 1 = archive).",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"folder_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Folder to read (0 = main, 1 = archive; default 0)"}
+					}}
+				}},
+				{"required", QJsonArray{}},
+			}
+		},
+		Tool{
+			"get_user_photos",
+			"Read a user's profile-photo history (photo ids + dates) via "
+				"photos.getUserPhotos. Paginate with offset / max_id.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"user_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "User ID whose photos to read (from list_chats)"}
+					}},
+					{"offset", QJsonObject{
+						{"type", "integer"},
+						{"description", "Number of photos to skip (default 0)"}
+					}},
+					{"max_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Only photos with id below this (0 = newest; default 0)"}
+					}},
+					{"limit", QJsonObject{
+						{"type", "integer"},
+						{"description", "Max photos to return (default 20)"}
+					}}
+				}},
+				{"required", QJsonArray{"user_id"}},
+			}
+		},
+		Tool{
+			"get_poll_votes",
+			"List who voted on a poll (voter peer ids + dates) via "
+				"messages.getPollVotes. The poll message must be loaded. Page with "
+				"offset using a prior call's next_offset.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID holding the poll (from list_chats)"}
+					}},
+					{"message_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Message ID of the poll"}
+					}},
+					{"limit", QJsonObject{
+						{"type", "integer"},
+						{"description", "Max voters to return (default 50)"}
+					}},
+					{"offset", QJsonObject{
+						{"type", "string"},
+						{"description", "Optional paging offset (from a prior next_offset)"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id", "message_id"}},
+			}
+		},
+		Tool{
+			"mark_dialog_unread",
+			"Mark a chat as unread, or clear that flag, via "
+				"messages.markDialogUnread. unread defaults to true.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID to mark (from list_chats)"}
+					}},
+					{"unread", QJsonObject{
+						{"type", "boolean"},
+						{"description", "true to mark unread (default), false to clear"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id"}},
+			}
+		},
+		Tool{
+			"toggle_dialog_pin",
+			"Pin or unpin a chat in the dialog list via "
+				"messages.toggleDialogPin. pinned defaults to true.",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{
+						{"type", "integer"},
+						{"description", "Chat ID to pin/unpin (from list_chats)"}
+					}},
+					{"pinned", QJsonObject{
+						{"type", "boolean"},
+						{"description", "true to pin (default), false to unpin"}
+					}}
+				}},
+				{"required", QJsonArray{"chat_id"}},
+			}
+		},
+		Tool{
 			"send_rich_message",
 			"Send a structured rich-article message (Instant-View-style "
 				"blocks) to a chat, built and serialized through the client's "
