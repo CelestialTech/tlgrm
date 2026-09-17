@@ -1,3 +1,7 @@
+7.2.9a (17.09.26)
+
+- Rebase onto Telegram Desktop 7.2.9 (tlottie rendering fixes).
+
 7.2.9 (16.09.26)
 
 - Fix some tlottie incorrect renderings.

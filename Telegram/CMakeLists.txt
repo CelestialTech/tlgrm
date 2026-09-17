@@ -7,6 +7,13 @@
 add_executable(Telegram WIN32 MACOSX_BUNDLE)
 init_non_host_target(Telegram)
 
+# Fork build fix (Apple clang 21 / macOS SDK 27): the new libc++ declares
+# std::allocator, pair, hash, vector, etc. differently than range-v3's own
+# hand-rolled forward declarations in meta.hpp, so they collide with
+# "redefinition ... as different kind of symbol". Use range-v3's documented
+# escape hatch to skip those forward-decls and rely on the real std headers.
+add_compile_definitions(META_NO_STD_FORWARD_DECLARATIONS)
+
 add_subdirectory(lib_rpl)
 add_subdirectory(lib_crl)
 add_subdirectory(lib_base)
