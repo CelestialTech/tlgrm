@@ -5,7 +5,14 @@ upstream Telegram Desktop's guide and describes a cross-platform project; this
 file describes **ours**, and where the two disagree, this one wins.
 
 Tlgrm is a **macOS-only** fork of Telegram Desktop with an embedded MCP server.
-Current version **7.0.9a** (`AppVersion 700000901`), built on upstream `v7.0.9`.
+Current version **7.2.9a** (`AppVersion 700200901`), built on upstream `v7.2.9`.
+
+> Toolchain note (Xcode 21 / macOS SDK 27): the release build needs deployment
+> target **12.0** (SDK 27 rejects 10.13) and two source-level compat fixes —
+> range-v3's `std` forward-decls (`META_NO_STD_FORWARD_DECLARATIONS`) and the
+> Updater's deprecated `NSWorkspace` launch APIs (`-Wno-deprecated-declarations`).
+> All are wired into `tools/release.py` / `Telegram/CMakeLists.txt`. Always run
+> `git submodule update --init --recursive` after merging an upstream tag.
 
 ## Versioning — several fork releases per upstream base
 
@@ -213,7 +220,7 @@ same discovery**, so an agent written to the recipe above keeps working. The
 | `tools/publish_update.py` | **The release publishing pipeline.** |
 | `tools/mcp_*.py` | MCP test suites (sweep, smoke, fixtures). |
 | `create_dmg.sh` | Canonical DMG build. |
-| `update-server/` | Rust HTTP origin, deployed to ironforge.local. |
+| `update-server/` | Rust HTTP origin on ironforge (`root@192.168.1.130`; the old `ironforge.local` mDNS name no longer resolves). Serves `/current` on `127.0.0.1:8083` behind a cloudflared tunnel. |
 | `cloudflare-worker/` | **Superseded** — no longer serves updates. |
 | `DesktopPrivate/` | RSA update-signing keys. Never commit, print, or upload. |
 | `docs/UPDATE_SYSTEM.md` | How updates work, both paths. |

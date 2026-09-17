@@ -1,8 +1,21 @@
 # Tlgrm release pipeline — reconstructed from code (agent w1)
 
-Repo root: `/Users/pasha/xCode/tlgrm`. Submodule: `tdesktop/`. Current source version: **7.0.9a / AppVersion 700000901**.
+Repo root: `/Users/pasha/xCode/tlgrm`. Submodule: `tdesktop/`. Current source version: **7.2.9a / AppVersion 700200901**.
 
 Everything below is derived from the scripts themselves. Where a document says otherwise, the document is wrong and the discrepancy is called out.
+
+> **Update (7.2.9a):** there is now a single ordered orchestrator —
+> **`tools/release.py <version>`** — that runs all ten steps in order (version →
+> universal build → verify → strip → sign → dmg+notarize → gatekeeper → packages →
+> publish → **`gh release create`**), each idempotent/resumable. It wraps the
+> scripts below, so the GitHub release is no longer a manual step. Operational
+> notes: run it in the **foreground** (Developer-ID signing's keychain access
+> fails in a detached background process); reset the version files to clean
+> `v<base>` before each run (`set_version` is non-idempotent on a lettered base);
+> the HTTP origin is **`root@192.168.1.130`** (the `ironforge.local` mDNS name no
+> longer resolves). Building on Xcode 21 / macOS SDK 27 needs deployment target
+> **12.0** and the range-v3 / Updater compat fixes — all wired into release.py and
+> `tdesktop/Telegram/CMakeLists.txt`.
 
 ---
 

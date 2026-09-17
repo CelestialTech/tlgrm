@@ -39,7 +39,7 @@ The response is keyed by platform, then by channel:
 Rosetta, `mac` on Intel. If `released` exceeds the running `AppVersion`, the
 client downloads `{prefix}` + `link`.
 
-Served by **`update-server/`** running on `ironforge.local` — a static musl
+Served by **`update-server/`** running on ironforge (`root@192.168.1.130`; the old `ironforge.local` mDNS name no longer resolves) — a static musl
 binary that generates this response from the packages in `/srv/tlgrm-updates`,
 published through its own Cloudflare tunnel.
 
