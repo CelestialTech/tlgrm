@@ -2644,6 +2644,13 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
         RUNTIME_OUTPUT_DIRECTORY ${output_folder}
     )
 
+    # Fork build fix (macOS SDK 27): updater_osx.m uses NSWorkspace launch APIs
+    # deprecated since macOS 11. At the SDK-27-required deployment target (12.0)
+    # they warn, and this target builds with -Werror, so they become errors.
+    # They still work (deprecated, not removed); silence the deprecation the same
+    # way the main targets do.
+    target_compile_options(Updater PRIVATE -Wno-deprecated-declarations)
+
     if (WIN32)
         get_filename_component(lib_base_loc lib_base REALPATH)
         nice_target_sources(Updater ${lib_base_loc}
