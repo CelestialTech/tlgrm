@@ -274,8 +274,12 @@ def step_publish(version_int: int, dry: bool) -> None:
     if dry:
         print("   would copy to the HTTP origin and post to @updates71grm")
         return
+    # ironforge migrated off the `ironforge.local` mDNS name (publish_update.py's
+    # default) and it no longer resolves; the origin is at 192.168.1.130. Point
+    # the HTTP half there so it does not hang on an unresolvable host.
     run(["uv", "run", "--python", "3.14", "tools/publish_update.py",
-         "--version", str(version_int), "--no-strip"], cwd=REPO, quiet=True)
+         "--version", str(version_int), "--no-strip",
+         "--http-host", "root@192.168.1.130"], cwd=REPO, quiet=True)
     print("   published to both update paths")
 
 
