@@ -123,8 +123,13 @@ def step_build(version: str, dry: bool) -> None:
     if dry:
         print("   would configure and build universal (~15 min)")
         return
+    # macOS SDK 27 (Xcode 21) rejects the cmake-helpers default deployment
+    # target of 10.13 ("supported range is 12.0 to 27.0"); the dev ninja build
+    # only warns, but xcodebuild errors. Override the cache default to the new
+    # minimum (12.0) — widest compatibility still accepted by the SDK.
     run(["./configure.sh", "-D", f"TDESKTOP_API_ID={API_ID}",
-         "-D", f"TDESKTOP_API_HASH={API_HASH}"], cwd=TDESKTOP / "Telegram")
+         "-D", f"TDESKTOP_API_HASH={API_HASH}",
+         "-D", "CMAKE_OSX_DEPLOYMENT_TARGET=12.0"], cwd=TDESKTOP / "Telegram")
     run(["xcodebuild", "-project", "Telegram.xcodeproj", "-scheme", "Telegram",
          "-configuration", "Release",
          "-destination", "generic/platform=macOS",
@@ -175,7 +180,7 @@ def step_sign(dry: bool) -> None:
         print("   would Developer ID sign with preserved entitlements")
         return
     current = subprocess.run(
-        ["codesign", "-dv", str(APP)], capture_output=True, text=True)
+        ["codesign", "-dvv", str(APP)], capture_output=True, text=True)
     if "Developer ID Application" in (current.stdout + current.stderr):
         print("   already Developer ID signed, skipping")
         return
@@ -193,8 +198,9 @@ def step_sign(dry: bool) -> None:
              "--entitlements", str(path)], quiet=True)
     finally:
         path.unlink(missing_ok=True)
-    after = run(["codesign", "-dv", str(APP)], quiet=True)
-    if "Developer ID Application" not in after:
+    after = subprocess.run(
+        ["codesign", "-dvv", str(APP)], capture_output=True, text=True)
+    if "Developer ID Application" not in (after.stdout + after.stderr):
         raise Failed("signing did not produce a Developer ID signature")
     print("   signed: Developer ID")
 
